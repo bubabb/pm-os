@@ -10,17 +10,19 @@
  *   - Any type used by more than one domain must be defined here
  */
 
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import { relations } from 'drizzle-orm'
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const id = () =>
-  text('id')
+// Returns { id: columnBuilder } so ...id() correctly spreads a named column
+const id = () => ({
+  id: text('id')
     .primaryKey()
-    .$defaultFn(() => globalThis.crypto.randomUUID())
+    .$defaultFn(() => globalThis.crypto.randomUUID()),
+})
 
 const timestamps = {
   createdAt: text('created_at')
@@ -54,14 +56,15 @@ export const projects = sqliteTable('projects', {
 })
 
 // ---------------------------------------------------------------------------
-// 2. Security — Secrets & Agent Permissions
+// 2. Security — Secrets
 // ---------------------------------------------------------------------------
 
 export const secrets = sqliteTable('secrets', {
   ...id(),
   projectId:      text('project_id').notNull().references(() => projects.id),
   name:           text('name').notNull(),             // e.g. "ANTHROPIC_API_KEY"
-  encryptedValue: text('encrypted_value').notNull(),  // AES-256-GCM encrypted at rest
+  encryptedValue: text('encrypted_value').notNull(),  // AES-256-GCM ciphertext, base64-encoded
+  iv:             text('iv').notNull(),               // AES-256-GCM initialization vector, base64-encoded (unique per encryption)
   ...timestamps,
 })
 
@@ -81,36 +84,45 @@ export const agentWorkspaces = sqliteTable('agent_workspaces', {
   dailyCostLimitCents: integer('daily_cost_limit_cents'),
   tokensUsedToday:     integer('tokens_used_today').notNull().default(0),
   costUsedTodayCents:  integer('cost_used_today_cents').notNull().default(0),
+  tokensResetDate:     text('tokens_reset_date'),      // ISO date string — used to detect day boundary and reset counters
   lastActiveAt:        text('last_active_at'),
   ...timestamps,
 })
 
 export const tasks = sqliteTable('tasks', {
   ...id(),
-  projectId:          text('project_id').notNull().references(() => projects.id),
-  title:              text('title').notNull(),
-  description:        text('description'),
-  type:               text('type', { enum: ['human', 'agent'] }).notNull(),
-  status:             text('status', {
+  projectId:        text('project_id').notNull().references(() => projects.id),
+  title:            text('title').notNull(),
+  description:      text('description'),
+  type:             text('type', { enum: ['human', 'agent'] }).notNull(),
+  status:           text('status', {
     enum: ['pending', 'in_progress', 'waiting_approval', 'completed', 'failed', 'cancelled'],
   }).notNull().default('pending'),
-  priority:           text('priority', { enum: ['low', 'medium', 'high', 'critical'] }).notNull().default('medium'),
-  assigneeId:         text('assignee_id').references(() => users.id),         // human tasks
-  agentWorkspaceId:   text('agent_workspace_id').references(() => agentWorkspaces.id), // agent tasks
-  estimatedMinutes:   integer('estimated_minutes'),
-  startedAt:          text('started_at'),
-  completedAt:        text('completed_at'),
+  priority:         text('priority', { enum: ['low', 'medium', 'high', 'critical'] }).notNull().default('medium'),
+  assigneeId:       text('assignee_id').references(() => users.id),
+  agentWorkspaceId: text('agent_workspace_id').references(() => agentWorkspaces.id),
+  estimatedMinutes: integer('estimated_minutes'),
+  startedAt:        text('started_at'),
+  completedAt:      text('completed_at'),
   ...timestamps,
-})
+}, (table) => ({
+  projectStatusIdx: index('tasks_project_status_idx').on(table.projectId, table.status),
+  projectPriorityIdx: index('tasks_project_priority_idx').on(table.projectId, table.priority),
+}))
 
-// DAG edges — fromTaskId must complete before toTaskId can start
+// DAG edges — fromTaskId must complete before toTaskId can start.
+// IMPORTANT: The application layer must perform cycle detection before inserting edges.
+// SQLite cannot enforce acyclicity at the DB level. See packages/agent-orchestration/CLAUDE.md.
 export const taskEdges = sqliteTable('task_edges', {
   ...id(),
-  projectId:   text('project_id').notNull().references(() => projects.id),
-  fromTaskId:  text('from_task_id').notNull().references(() => tasks.id),
-  toTaskId:    text('to_task_id').notNull().references(() => tasks.id),
-  createdAt:   text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
-})
+  projectId:  text('project_id').notNull().references(() => projects.id),
+  fromTaskId: text('from_task_id').notNull().references(() => tasks.id),
+  toTaskId:   text('to_task_id').notNull().references(() => tasks.id),
+  createdAt:  text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (table) => ({
+  // Prevent duplicate edges — a pair can have at most one directed dependency
+  uniqueEdge: uniqueIndex('task_edges_unique_edge_idx').on(table.fromTaskId, table.toTaskId),
+}))
 
 export const approvalGates = sqliteTable('approval_gates', {
   ...id(),
@@ -134,20 +146,20 @@ export const tools = sqliteTable('tools', {
   name:            text('name').notNull(),
   description:     text('description'),
   createdById:     text('created_by_id').notNull().references(() => users.id),
-  latestVersionId: text('latest_version_id'), // FK to toolVersions — set after first publish
+  latestVersionId: text('latest_version_id').references(() => toolVersions.id), // nullable until first publish
   ...timestamps,
 })
 
 export const toolVersions = sqliteTable('tool_versions', {
   ...id(),
-  toolId:          text('tool_id').notNull().references(() => tools.id),
-  version:         text('version').notNull(),         // semver e.g. "1.2.3"
-  schema:          text('schema').notNull(),           // JSON: input/output schema
-  implementation:  text('implementation').notNull(),   // JSON: tool implementation config
-  changelog:       text('changelog'),
-  publishedById:   text('published_by_id').notNull().references(() => users.id),
-  publishedAt:     text('published_at').notNull().$defaultFn(() => new Date().toISOString()),
-  createdAt:       text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  toolId:         text('tool_id').notNull().references(() => tools.id),
+  version:        text('version').notNull(),        // semver e.g. "1.2.3"
+  schema:         text('schema').notNull(),          // JSON: input/output schema
+  implementation: text('implementation').notNull(),  // JSON: tool implementation config
+  changelog:      text('changelog'),
+  publishedById:  text('published_by_id').notNull().references(() => users.id),
+  publishedAt:    text('published_at').notNull().$defaultFn(() => new Date().toISOString()),
+  createdAt:      text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
 })
 
 export const toolDeployments = sqliteTable('tool_deployments', {
@@ -157,7 +169,7 @@ export const toolDeployments = sqliteTable('tool_deployments', {
   projectId:         text('project_id').notNull().references(() => projects.id),
   status:            text('status', { enum: ['deploying', 'active', 'rolled_back', 'failed'] }).notNull().default('deploying'),
   deployedById:      text('deployed_by_id').notNull().references(() => users.id),
-  previousVersionId: text('previous_version_id').references(() => toolVersions.id), // enables rollback
+  previousVersionId: text('previous_version_id').references(() => toolVersions.id), // populated on rollback
   ...timestamps,
 })
 
@@ -178,22 +190,30 @@ export const events = sqliteTable('events', {
   payload:      text('payload').notNull().default('{}'), // JSON event-specific data
   createdAt:    text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   // NO updatedAt — this table is append-only
-})
+}, (table) => ({
+  // Most common query patterns on the event log
+  projectCreatedIdx: index('events_project_created_idx').on(table.projectId, table.createdAt),
+  domainTypeIdx:     index('events_domain_type_idx').on(table.domain, table.type),
+  resourceIdx:       index('events_resource_idx').on(table.resourceType, table.resourceId),
+}))
 
 export const traces = sqliteTable('traces', {
   ...id(),
-  taskId:            text('task_id').references(() => tasks.id),
-  agentWorkspaceId:  text('agent_workspace_id').notNull().references(() => agentWorkspaces.id),
-  projectId:         text('project_id').notNull().references(() => projects.id),
-  status:            text('status', { enum: ['running', 'completed', 'failed'] }).notNull().default('running'),
-  inputTokens:       integer('input_tokens').notNull().default(0),
-  outputTokens:      integer('output_tokens').notNull().default(0),
-  costCents:         integer('cost_cents').notNull().default(0),
-  durationMs:        integer('duration_ms'),
-  startedAt:         text('started_at').notNull().$defaultFn(() => new Date().toISOString()),
-  completedAt:       text('completed_at'),
-  createdAt:         text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
-})
+  taskId:           text('task_id').references(() => tasks.id),
+  agentWorkspaceId: text('agent_workspace_id').notNull().references(() => agentWorkspaces.id),
+  projectId:        text('project_id').notNull().references(() => projects.id),
+  status:           text('status', { enum: ['running', 'completed', 'failed'] }).notNull().default('running'),
+  inputTokens:      integer('input_tokens').notNull().default(0),
+  outputTokens:     integer('output_tokens').notNull().default(0),
+  costCents:        integer('cost_cents').notNull().default(0),
+  durationMs:       integer('duration_ms'),
+  startedAt:        text('started_at').notNull().$defaultFn(() => new Date().toISOString()),
+  completedAt:      text('completed_at'),
+  createdAt:        text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (table) => ({
+  workspaceStartedIdx: index('traces_workspace_started_idx').on(table.agentWorkspaceId, table.startedAt),
+  projectStatusIdx:    index('traces_project_status_idx').on(table.projectId, table.status),
+}))
 
 // Individual steps within a trace — append-only
 export const traceEvents = sqliteTable('trace_events', {
@@ -203,7 +223,7 @@ export const traceEvents = sqliteTable('trace_events', {
     enum: ['llm_call', 'tool_call', 'tool_result', 'human_message', 'error', 'checkpoint'],
   }).notNull(),
   sequenceNumber: integer('sequence_number').notNull(),
-  payload:        text('payload').notNull().default('{}'), // JSON step data
+  payload:        text('payload').notNull().default('{}'),
   durationMs:     integer('duration_ms'),
   createdAt:      text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   // NO updatedAt — append-only
@@ -216,10 +236,10 @@ export const auditLog = sqliteTable('audit_log', {
   projectId:    text('project_id').references(() => projects.id),
   actorType:    text('actor_type', { enum: ['user', 'agent', 'system'] }).notNull(),
   actorId:      text('actor_id'),
-  action:       text('action').notNull(),      // e.g. "task.approved", "secret.accessed"
+  action:       text('action').notNull(),       // e.g. "task.approved", "secret.accessed"
   resourceType: text('resource_type').notNull(),
   resourceId:   text('resource_id').notNull(),
-  metadata:     text('metadata').notNull().default('{}'), // JSON additional context
+  metadata:     text('metadata').notNull().default('{}'),
   ipAddress:    text('ip_address'),
   createdAt:    text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   // NO updatedAt — immutable by design
@@ -240,10 +260,10 @@ export const boards = sqliteTable('boards', {
 export const boardColumns = sqliteTable('board_columns', {
   ...id(),
   boardId:    text('board_id').notNull().references(() => boards.id),
-  name:       text('name').notNull(),          // e.g. "To Do", "In Progress", "Done"
+  name:       text('name').notNull(),
   position:   integer('position').notNull(),
   isTerminal: integer('is_terminal', { mode: 'boolean' }).notNull().default(false),
-  wipLimit:   integer('wip_limit'),            // work-in-progress limit
+  wipLimit:   integer('wip_limit'),
   ...timestamps,
 })
 
@@ -254,9 +274,9 @@ export const sprints = sqliteTable('sprints', {
   name:      text('name').notNull(),
   goal:      text('goal'),
   status:    text('status', { enum: ['planning', 'active', 'completed', 'cancelled'] }).notNull().default('planning'),
-  startDate: text('start_date'),               // ISO date string
+  startDate: text('start_date'),
   endDate:   text('end_date'),
-  velocity:  integer('velocity'),              // story points completed
+  velocity:  integer('velocity'),
   ...timestamps,
 })
 
@@ -267,7 +287,7 @@ export const boardItems = sqliteTable('board_items', {
   taskId:      text('task_id').notNull().references(() => tasks.id),
   sprintId:    text('sprint_id').references(() => sprints.id),
   storyPoints: integer('story_points'),
-  position:    integer('position').notNull().default(0), // ordering within column
+  position:    integer('position').notNull().default(0),
   ...timestamps,
 })
 
@@ -276,19 +296,20 @@ export const milestones = sqliteTable('milestones', {
   projectId:   text('project_id').notNull().references(() => projects.id),
   title:       text('title').notNull(),
   description: text('description'),
-  dueDate:     text('due_date'),               // ISO date string
+  dueDate:     text('due_date'),
   status:      text('status', { enum: ['pending', 'at_risk', 'completed', 'missed'] }).notNull().default('pending'),
   completedAt: text('completed_at'),
   ...timestamps,
 })
 
-// Join table linking tasks to milestones
 export const milestoneTasks = sqliteTable('milestone_tasks', {
   ...id(),
   milestoneId: text('milestone_id').notNull().references(() => milestones.id),
   taskId:      text('task_id').notNull().references(() => tasks.id),
   createdAt:   text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
-})
+}, (table) => ({
+  uniqueMilestoneTask: uniqueIndex('milestone_tasks_unique_idx').on(table.milestoneId, table.taskId),
+}))
 
 // ---------------------------------------------------------------------------
 // 7. Cross-Cutting — Notifications, Cost Records
@@ -307,7 +328,10 @@ export const notifications = sqliteTable('notifications', {
   resourceId:   text('resource_id'),
   readAt:       text('read_at'),
   createdAt:    text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
-})
+}, (table) => ({
+  // Powers unread count badge — the most frequent query on this table
+  userReadIdx: index('notifications_user_read_idx').on(table.userId, table.readAt),
+}))
 
 export const costRecords = sqliteTable('cost_records', {
   ...id(),
@@ -318,7 +342,7 @@ export const costRecords = sqliteTable('cost_records', {
   modelId:          text('model_id').notNull(),
   inputTokens:      integer('input_tokens').notNull(),
   outputTokens:     integer('output_tokens').notNull(),
-  costCents:        integer('cost_cents').notNull(),     // store as cents to avoid float errors
+  costCents:        integer('cost_cents').notNull(),
   recordedAt:       text('recorded_at').notNull().$defaultFn(() => new Date().toISOString()),
   createdAt:        text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
 })
@@ -328,32 +352,32 @@ export const costRecords = sqliteTable('cost_records', {
 // ---------------------------------------------------------------------------
 
 export const usersRelations = relations(users, ({ many }) => ({
-  ownedProjects:    many(projects),
-  assignedTasks:    many(tasks),
-  approvalGates:    many(approvalGates),
-  notifications:    many(notifications),
+  ownedProjects: many(projects),
+  assignedTasks: many(tasks),
+  approvalGates: many(approvalGates),
+  notifications: many(notifications),
 }))
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
-  owner:            one(users, { fields: [projects.ownerId], references: [users.id] }),
-  tasks:            many(tasks),
-  tools:            many(tools),
-  boards:           many(boards),
-  milestones:       many(milestones),
-  secrets:          many(secrets),
-  agentWorkspaces:  many(agentWorkspaces),
+  owner:           one(users, { fields: [projects.ownerId], references: [users.id] }),
+  tasks:           many(tasks),
+  tools:           many(tools),
+  boards:          many(boards),
+  milestones:      many(milestones),
+  secrets:         many(secrets),
+  agentWorkspaces: many(agentWorkspaces),
 }))
 
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
-  project:          one(projects, { fields: [tasks.projectId], references: [projects.id] }),
-  assignee:         one(users, { fields: [tasks.assigneeId], references: [users.id] }),
-  agentWorkspace:   one(agentWorkspaces, { fields: [tasks.agentWorkspaceId], references: [agentWorkspaces.id] }),
-  fromEdges:        many(taskEdges, { relationName: 'fromTask' }),
-  toEdges:          many(taskEdges, { relationName: 'toTask' }),
-  approvalGates:    many(approvalGates),
-  boardItems:       many(boardItems),
-  traces:           many(traces),
-  milestoneTasks:   many(milestoneTasks),
+  project:        one(projects, { fields: [tasks.projectId], references: [projects.id] }),
+  assignee:       one(users, { fields: [tasks.assigneeId], references: [users.id] }),
+  agentWorkspace: one(agentWorkspaces, { fields: [tasks.agentWorkspaceId], references: [agentWorkspaces.id] }),
+  fromEdges:      many(taskEdges, { relationName: 'fromTask' }),
+  toEdges:        many(taskEdges, { relationName: 'toTask' }),
+  approvalGates:  many(approvalGates),
+  boardItems:     many(boardItems),
+  traces:         many(traces),
+  milestoneTasks: many(milestoneTasks),
 }))
 
 export const taskEdgesRelations = relations(taskEdges, ({ one }) => ({
@@ -362,10 +386,11 @@ export const taskEdgesRelations = relations(taskEdges, ({ one }) => ({
 }))
 
 export const toolsRelations = relations(tools, ({ one, many }) => ({
-  project:     one(projects, { fields: [tools.projectId], references: [projects.id] }),
-  createdBy:   one(users, { fields: [tools.createdById], references: [users.id] }),
-  versions:    many(toolVersions),
-  deployments: many(toolDeployments),
+  project:       one(projects, { fields: [tools.projectId], references: [projects.id] }),
+  createdBy:     one(users, { fields: [tools.createdById], references: [users.id] }),
+  latestVersion: one(toolVersions, { fields: [tools.latestVersionId], references: [toolVersions.id] }),
+  versions:      many(toolVersions),
+  deployments:   many(toolDeployments),
 }))
 
 export const toolVersionsRelations = relations(toolVersions, ({ one }) => ({
@@ -401,7 +426,7 @@ export const milestonesRelations = relations(milestones, ({ one, many }) => ({
 }))
 
 // ---------------------------------------------------------------------------
-// Exported types (inferred from schema — use these everywhere, not hand-written interfaces)
+// Exported types — use these everywhere, never hand-write interfaces
 // ---------------------------------------------------------------------------
 
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm'
@@ -449,4 +474,4 @@ export type NewNotification   = InferInsertModel<typeof notifications>
 export type CostRecord        = InferSelectModel<typeof costRecords>
 export type NewCostRecord     = InferInsertModel<typeof costRecords>
 
-export const SCHEMA_VERSION = '1.0.0'
+export const SCHEMA_VERSION = '1.1.0'
