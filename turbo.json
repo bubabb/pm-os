@@ -13,10 +13,10 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "test/**", "vitest.config.ts"]
+      "inputs": ["src/**", "test/**"]
     },
     "lint": {
-      "inputs": ["src/**", "eslint.config.mjs"]
+      "inputs": ["src/**", "../../eslint.config.mjs"]
     },
     "typecheck": {
       "dependsOn": ["^build"],
