@@ -1,11 +1,18 @@
 # Creare — Project Scope
 **Product Name:** Creare  
 **Domain:** creare.dev  
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-06-02  
 **Status:** Active — Master Reference Document
 
 > *Creare — Latin: "to create." The platform where AI-native software teams build, ship, and operate their work.*
+
+## Change Log
+| Version | Date | Change | Impact |
+|---|---|---|---|
+| 1.0 | 2026-06-02 | Initial scope document | All phases |
+| 1.1 | 2026-06-02 | Added local-first Electron deployment model + sync-readiness constraints | Phase 1 DB, all Phase 2 domains |
+| 1.2 | 2026-06-02 | Added 8 missing features: secrets mgmt, agent permissions, notifications, multi-project workspace, rollback, audit log, backup/recovery, global search, project templates, usage/cost tracking, rate limiting | Phase 1 + Phase 2 scope expanded |
 
 ---
 

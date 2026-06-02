@@ -47,11 +47,16 @@ Do not write a single line of code until all five are read.
 
 ---
 
-## 4. Event Log Rule
+## 4. Append-Only Tables Rule
 
-Every state change must emit an event to the append-only event log.
-- Use `INSERT` only — never `UPDATE` or `DELETE` on the events table
-- Event shape: `{ id, type, domain, payload, createdAt }`
+Three tables in Creare are append-only. **Never UPDATE or DELETE from any of them:**
+- `events` — platform-wide event log (every domain writes here)
+- `trace_events` — individual steps within a trace (observability domain)
+- `audit_log` — compliance authorization record (observability domain)
+
+For the `events` table specifically: every domain state change must emit an event here.
+- Use `INSERT` only
+- Full event shape: `{ id, type, domain, projectId, actorType, actorId, resourceType, resourceId, payload, createdAt }`
 - If your action doesn't emit an event, it's not observable — reject it
 
 ---

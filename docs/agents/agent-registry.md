@@ -14,11 +14,17 @@ One entry per task. Updated as tasks are created.
 
 | Task | Agent Scope | Status | Output |
 |---|---|---|---|
-| #1 Tech Stack | Root — decisions only | ✅ Complete | `docs/sessions/session-2026-06-02-phase0-foundation.md` |
-| #2 Scaffold | Root — all packages | ✅ Complete | Full monorepo structure |
-| #3 Data Models | `packages/database/src/schema.ts` | 🔲 Pending | Canonical schema |
-| #16 Project Scope | Docs only | ✅ Complete | `project-scope.md` |
-| #19 Naming | Docs only | ✅ Complete | Product name: Creare |
+| #1 Tech Stack | Root — decisions only | ✅ Complete | `docs/sessions/`, `docs/architecture/adr/001-004` |
+| #2 Scaffold | Root — all packages | ✅ Complete | 84 files: monorepo, CLAUDE.md files, CONTRACT.md, AGENT-PROTOCOL.md, GLOSSARY.md, ADRs, agent-state/ |
+| #3 Data Models | `packages/database/src/schema.ts` | ✅ Complete | 20 tables, 10 indexes, client.ts, data-models.md |
+| #16 Project Scope | Docs only | ✅ Complete | `project-scope.md` v1.1 |
+| #19 Naming | Docs only | ✅ Complete | Product name: Creare, `docs/architecture/adr/004` |
+
+**Phase 1 task instruction files (created end of Phase 0):**
+- `docs/agents/tasks/phase1-task4-auth-rbac-secrets.md`
+- `docs/agents/tasks/phase1-task5-database-api.md`
+- `docs/agents/tasks/phase1-task6-ui-shell.md`
+- `docs/agents/tasks/phase1-task17-notifications.md`
 
 ## Phase 1 — Core Infrastructure
 

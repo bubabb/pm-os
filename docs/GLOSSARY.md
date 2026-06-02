@@ -62,3 +62,27 @@ An AI language model from any provider (Anthropic Claude, OpenAI GPT, Google Gem
 
 **Domain**
 A bounded module in the Creare monorepo (agent-orchestration, tool-registry, observability, boards, reporting). Each domain owns its own data and logic.
+
+**ApprovalGate**
+A blocking checkpoint in a DAG task where an agent requests human authorization before continuing. The agent writes a `context` JSON field describing what it wants to do; a human reviewer approves or rejects. Execution is paused until the gate resolves. See `approval_gates` table.
+
+**TraceEvent**
+A single step within a Trace — one LLM call, tool invocation, tool result, error, or checkpoint. Stored in the `trace_events` table. Append-only: never updated or deleted. The sequence of trace events forms a replay-able execution history.
+
+**AuditLog**
+An immutable compliance record of who authorized what and when. Separate from traces. Written to the `audit_log` table. Required for SOC2/HIPAA. Records the `action` (e.g. `"task.approved"`), the `actorId`, and the affected resource. Never updated or deleted.
+
+**Sprint**
+A time-boxed iteration within a Scrum board. Contains board items with story point estimates. Has a `status` lifecycle: `planning → active → completed`. Stores a `velocity` (story points completed) for historical comparison. See `sprints` table.
+
+**Milestone**
+A project-level checkpoint with a due date and status (`pending`, `at_risk`, `completed`, `missed`). Tasks are linked to milestones via the `milestone_tasks` join table. Status changes emit events to the event log.
+
+**CostRecord**
+A per-call record of AI model API usage. Stores `provider`, `modelId`, `inputTokens`, `outputTokens`, and `costCents` (always integer cents, never floats). Linked to a `Trace` and `AgentWorkspace`. Powers the per-project and per-agent spend dashboards in the Reporting domain.
+
+**Permission Scope**
+The JSON field on `AgentWorkspace` that defines what resources an agent is allowed to access. Structure: `{ tools: string[], repos: string[], secrets: string[] }` where each array contains allowed resource IDs. Agents are deny-by-default — if a resource isn't in the scope, the permission check returns false. Validated before every agent action.
+
+**IV (Initialization Vector)**
+A random 12-byte value used in AES-256-GCM encryption of secrets. Stored as a base64 string in the `secrets.iv` column. Must be unique per encryption operation — reusing an IV with the same key breaks GCM security. Never reuse. Generated fresh for every `createSecret()` call.

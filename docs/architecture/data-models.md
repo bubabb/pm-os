@@ -1,7 +1,7 @@
 # Creare — Data Models
 ---
 status: active
-version: 1.0
+version: 1.1
 last-updated: 2026-06-02
 ---
 
@@ -12,10 +12,11 @@ Canonical reference for all data models. The source of truth is always `packages
 ## Design Rules (Non-Negotiable)
 
 1. **UUIDs everywhere** — all primary keys are `text` UUID v4 via `globalThis.crypto.randomUUID()`
-2. **Append-only tables** — `events`, `trace_events`, `audit_log` are insert-only. No UPDATE or DELETE.
+2. **Append-only tables** — `events`, `trace_events`, `audit_log` are insert-only. No UPDATE or DELETE. Ever.
 3. **Timestamps as ISO strings** — all dates stored as ISO 8601 text (SQLite has no native date type)
 4. **Costs in cents** — all monetary values stored as integer cents to avoid floating point errors
 5. **JSON as text** — complex objects (permissionScope, payload, schema) stored as JSON text columns
+6. **Encryption requires IV** — `secrets.encryptedValue` (AES-256-GCM ciphertext) is always paired with `secrets.iv` (random 12-byte IV, base64). Never store ciphertext without its IV.
 
 ---
 
@@ -25,75 +26,86 @@ Canonical reference for all data models. The source of truth is always `packages
 | Table | Purpose |
 |---|---|
 | `users` | All human users of the platform |
-| `projects` | Top-level workspace containers |
+| `projects` | Top-level workspace containers. `archivedAt` enables soft archive. |
 
 ### 2. Security
 | Table | Purpose |
 |---|---|
-| `secrets` | Encrypted API keys and environment variables, scoped per project |
+| `secrets` | Encrypted API keys and env vars, scoped per project. `encryptedValue` = AES-256-GCM ciphertext. `iv` = base64 initialization vector (unique per encryption, required for decryption). |
 
 ### 3. Agent Orchestration
 | Table | Purpose |
 |---|---|
-| `agent_workspaces` | Persistent agent environments with model config, permissions, and cost limits |
+| `agent_workspaces` | Persistent agent environments. `permissionScope` JSON: `{ tools, repos, secrets }`. `tokensResetDate` tracks daily counter reset boundary. `dailyCostLimitCents` + `costUsedTodayCents` enforce spend guardrails. |
 | `tasks` | DAG nodes — units of work assigned to humans or agents |
-| `task_edges` | DAG edges — `fromTaskId` must complete before `toTaskId` can start |
-| `approval_gates` | Blocking checkpoints requiring human sign-off before agent continues |
+| `task_edges` | DAG edges — `fromTaskId` must complete before `toTaskId` starts. Unique constraint on `(fromTaskId, toTaskId)`. **Application must detect cycles before inserting.** |
+| `approval_gates` | Blocking checkpoints requiring human sign-off |
 
 ### 4. Tool Registry
 | Table | Purpose |
 |---|---|
-| `tools` | Registered AI tools (the registry entry) |
-| `tool_versions` | Immutable published versions of each tool |
-| `tool_deployments` | Active deployments, with `previousVersionId` enabling one-click rollback |
+| `tools` | Registered AI tools. `latestVersionId` FK points at current active version (nullable until first publish). |
+| `tool_versions` | Immutable published versions. Once inserted, never modified. |
+| `tool_deployments` | Active deployments. `previousVersionId` populated on rollback — rollback = new deployment pointing at old version. |
 
 ### 5. Observability
 | Table | Purpose | Append-only? |
 |---|---|---|
 | `events` | Platform-wide event log — every domain writes here | ✅ Yes |
-| `traces` | Agent execution sessions (aggregates token usage, cost, duration) | No |
+| `traces` | Agent execution sessions (token usage, cost, duration) | No |
 | `trace_events` | Individual steps within a trace (LLM calls, tool calls, errors) | ✅ Yes |
 | `audit_log` | Compliance record — who authorized what, when, for SOC2/HIPAA | ✅ Yes |
 
 ### 6. Boards
 | Table | Purpose |
 |---|---|
-| `boards` | Kanban or Scrum boards within a project |
-| `board_columns` | Columns within a board (To Do, In Progress, Done, etc.) |
-| `sprints` | Time-boxed iterations |
-| `board_items` | Links a `task` to a `board` + `column` + optional `sprint` |
-| `milestones` | Project milestones with due dates and status |
-| `milestone_tasks` | Join table linking tasks to milestones |
+| `boards` | Kanban or Scrum boards |
+| `board_columns` | Columns within a board. `isTerminal = true` means items here are done. `wipLimit` enforces work-in-progress caps. |
+| `sprints` | Time-boxed iterations. `velocity` = story points completed (set at completion). |
+| `board_items` | Links a `task` to a `board` + `column` + optional `sprint`. `position` = integer ordering. |
+| `milestones` | Due-date checkpoints with `at_risk` detection. |
+| `milestone_tasks` | Join table. Unique constraint on `(milestoneId, taskId)`. |
 
 ### 7. Cross-Cutting
 | Table | Purpose |
 |---|---|
-| `notifications` | In-app alerts for approval gates, agent failures, cost warnings |
-| `cost_records` | Per-call AI model usage and spend, linked to traces |
+| `notifications` | In-app alerts. `readAt` is null until read. Index on `(userId, readAt)` powers unread count badge. |
+| `cost_records` | Per-API-call spend tracking. All values in cents. Linked to trace and workspace. |
+
+---
+
+## Indexes
+
+| Index | Table | Columns | Query It Serves |
+|---|---|---|---|
+| `events_project_created_idx` | events | `(projectId, createdAt)` | Timeline queries per project |
+| `events_domain_type_idx` | events | `(domain, type)` | Domain-specific event filtering |
+| `events_resource_idx` | events | `(resourceType, resourceId)` | "Show all events for task X" |
+| `tasks_project_status_idx` | tasks | `(projectId, status)` | Board column queries |
+| `tasks_project_priority_idx` | tasks | `(projectId, priority)` | Priority-sorted backlogs |
+| `traces_workspace_started_idx` | traces | `(agentWorkspaceId, startedAt)` | Agent performance history |
+| `traces_project_status_idx` | traces | `(projectId, status)` | Running traces dashboard |
+| `notifications_user_read_idx` | notifications | `(userId, readAt)` | Unread count badge |
+| `task_edges_unique_edge_idx` | task_edges | `(fromTaskId, toTaskId)` | Prevents duplicate DAG edges |
+| `milestone_tasks_unique_idx` | milestone_tasks | `(milestoneId, taskId)` | Prevents duplicate task-milestone links |
 
 ---
 
 ## Key Design Decisions
 
 ### Tasks vs Board Items
-A `task` is the unit of work (what needs to be done).
-A `board_item` is how that task appears on a board (where it sits, what sprint, what story points).
-This separation means a task can exist without a board, and future multi-board support requires no schema change.
+A `task` is the unit of work (what needs to be done). A `board_item` is how that task appears on a board (where it sits, what sprint, what story points). A task can exist without a board. Multi-board support requires no schema change.
 
 ### Events vs Audit Log
-- `events` = technical observability (what happened in the system)
-- `audit_log` = compliance authorization record (who approved what)
+- `events` = technical observability (what happened in the system, for replaying and tracing)
+- `audit_log` = compliance authorization record (who approved what, for SOC2/HIPAA)
 These serve different audiences and must not be merged.
 
 ### Tool Versions are Immutable
-Once a `tool_version` is published, it is never modified.
-Rollback works by creating a new `tool_deployment` pointing at an older `tool_version`.
+Once a `tool_version` is published, it is never modified. Rollback = new `tool_deployment` pointing at an older `tool_version`.
 
-### Costs in Cents
-`costCents` columns store values as integer cents (1 USD = 100 cents).
-This prevents floating point precision errors in cost calculations and aggregations.
+### Cycle Detection is Application-Level
+SQLite cannot enforce DAG acyclicity. The agent-orchestration domain must check for cycles before inserting any `task_edge`. See `packages/agent-orchestration/CLAUDE.md`.
 
-### Agent Permissions as JSON
-`agentWorkspaces.permissionScope` is stored as a JSON text column.
-Shape: `{ tools: string[], repos: string[], secrets: string[] }`.
-This is intentionally flexible for Phase 2 implementation.
+### Daily Cost Counter Reset
+`agentWorkspaces.tokensResetDate` stores the ISO date string of the last reset. Before incrementing daily counters, compare current date to `tokensResetDate`. If different, reset counters and update `tokensResetDate`.
