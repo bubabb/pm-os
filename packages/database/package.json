@@ -10,16 +10,17 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:generate": "node ../../node_modules/.pnpm/drizzle-kit@0.31.10/node_modules/drizzle-kit/bin.cjs generate",
+    "db:migrate": "node ../../node_modules/.pnpm/drizzle-kit@0.31.10/node_modules/drizzle-kit/bin.cjs migrate",
+    "db:push": "node ../../node_modules/.pnpm/drizzle-kit@0.31.10/node_modules/drizzle-kit/bin.cjs push"
   },
   "dependencies": {
     "@creare/shared": "workspace:*",
-    "better-sqlite3": "^9.4.0",
+    "better-sqlite3": "^12.10.0",
     "drizzle-orm": "^0.30.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.0",
+    "@types/better-sqlite3": "^7.6.13",
     "drizzle-kit": "^0.20.0",
     "typescript": "^5.4.0",
     "vitest": "^1.4.0"

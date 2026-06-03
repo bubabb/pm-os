@@ -11,6 +11,7 @@
  */
 
 import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 import { relations } from 'drizzle-orm'
 
 // ---------------------------------------------------------------------------
@@ -146,7 +147,7 @@ export const tools = sqliteTable('tools', {
   name:            text('name').notNull(),
   description:     text('description'),
   createdById:     text('created_by_id').notNull().references(() => users.id),
-  latestVersionId: text('latest_version_id').references(() => toolVersions.id), // nullable until first publish
+  latestVersionId: text('latest_version_id').references((): AnySQLiteColumn => toolVersions.id), // nullable until first publish
   ...timestamps,
 })
 
@@ -312,7 +313,90 @@ export const milestoneTasks = sqliteTable('milestone_tasks', {
 }))
 
 // ---------------------------------------------------------------------------
-// 7. Cross-Cutting — Notifications, Cost Records
+// 7. Integrations — External Source Connectors, Sync, Cache, Digests, Settings
+// ---------------------------------------------------------------------------
+
+// OAuth tokens for external sources — encrypted identically to `secrets` (AES-256-GCM).
+// One credential per source per project for MVP. Extensible to multiple per source in v2.
+export const integrationCredentials = sqliteTable('integration_credentials', {
+  ...id(),
+  projectId:      text('project_id').notNull().references(() => projects.id),
+  source:         text('source', { enum: ['jira', 'github', 'confluence', 'notion', 'onedrive'] }).notNull(),
+  label:          text('label').notNull(),                // e.g. "Acme Jira" — user-facing display name
+  encryptedToken: text('encrypted_token').notNull(),      // AES-256-GCM ciphertext, base64-encoded
+  iv:             text('iv').notNull(),                   // AES-256-GCM IV, base64 (unique per encryption)
+  metadata:       text('metadata').notNull().default('{}'), // JSON: { baseUrl, accountId, scopes, refreshToken? }
+  expiresAt:      text('expires_at'),                    // null = non-expiring (PAT); set for OAuth short-lived tokens
+  ...timestamps,
+}, (table) => ({
+  projectSourceIdx: index('integration_credentials_project_source_idx').on(table.projectId, table.source),
+}))
+
+// Tracks sync state per credential — last cursor, timestamp, and health status.
+export const integrationSyncState = sqliteTable('integration_sync_state', {
+  ...id(),
+  projectId:        text('project_id').notNull().references(() => projects.id),
+  credentialId:     text('credential_id').notNull().references(() => integrationCredentials.id),
+  source:           text('source', { enum: ['jira', 'github', 'confluence', 'notion', 'onedrive'] }).notNull(),
+  status:           text('status', { enum: ['idle', 'syncing', 'error'] }).notNull().default('idle'),
+  lastSyncedAt:     text('last_synced_at'),
+  syncCursor:       text('sync_cursor'),         // source-specific pagination token or etag — null = full resync needed
+  lastErrorMessage: text('last_error_message'),
+  ...timestamps,
+})
+
+// Normalized external events fetched from all sources.
+// Treat as append-only: create new rows on refresh rather than updating existing ones.
+// TTL purging uses soft-delete via purgedAt — never hard DELETE.
+export const externalEventCache = sqliteTable('external_event_cache', {
+  ...id(),
+  projectId:    text('project_id').notNull().references(() => projects.id),
+  credentialId: text('credential_id').notNull().references(() => integrationCredentials.id),
+  source:       text('source', { enum: ['jira', 'github', 'confluence', 'notion', 'onedrive'] }).notNull(),
+  entityType:   text('entity_type').notNull(),            // e.g. "ticket", "pr", "page", "note", "file"
+  entityId:     text('entity_id').notNull(),              // source-system identifier (e.g. "PROJ-89", "412")
+  entityUrl:    text('entity_url'),
+  payload:      text('payload').notNull().default('{}'),  // JSON: normalized entity data (title, status, assignee, etc.)
+  fetchedAt:    text('fetched_at').notNull().$defaultFn(() => new Date().toISOString()),
+  purgedAt:     text('purged_at'),                        // soft-delete for TTL — query WHERE purgedAt IS NULL for active
+  createdAt:    text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  // NO updatedAt — append-only; new fetch = new row
+}, (table) => ({
+  // Primary lookup for cross-source entity correlation (Jira ↔ GitHub ticket ID matching)
+  sourceEntityIdx:   index('ext_cache_source_entity_idx').on(table.source, table.entityType, table.entityId),
+  // Timeline queries per project (dashboard loads, sync windows)
+  projectFetchedIdx: index('ext_cache_project_fetched_idx').on(table.projectId, table.fetchedAt),
+}))
+
+// AI-generated PM digest snapshots, cached with an expiry window.
+// Dashboard reads from here first; regenerates if validUntil has passed.
+export const pmDigestCache = sqliteTable('pm_digest_cache', {
+  ...id(),
+  projectId:   text('project_id').notNull().references(() => projects.id),
+  digestType:  text('digest_type', {
+    enum: ['morning_brief', 'sprint_health', 'decisions_and_docs', 'risk_radar'],
+  }).notNull(),
+  content:     text('content').notNull(),      // JSON: structured digest — type-specific shape
+  generatedAt: text('generated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  validUntil:  text('valid_until').notNull(),  // regenerate after this ISO timestamp (typically now + 15m)
+  createdAt:   text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+})
+
+// Per-user, per-project settings — PM delegation rules, classifier overrides, dashboard preferences.
+// projectId is required in v1; global (cross-project) settings are a v2 concern.
+export const userSettings = sqliteTable('user_settings', {
+  ...id(),
+  userId:    text('user_id').notNull().references(() => users.id),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  key:       text('key').notNull(),    // e.g. "pm.delegation.auto_approve_doc_updates"
+  value:     text('value').notNull(), // JSON-encoded value — always parse before use
+  ...timestamps,
+}, (table) => ({
+  uniqueUserProjectKey: uniqueIndex('user_settings_unique_idx').on(table.userId, table.projectId, table.key),
+}))
+
+// ---------------------------------------------------------------------------
+// 8. Cross-Cutting — Notifications, Cost Records
 // ---------------------------------------------------------------------------
 
 export const notifications = sqliteTable('notifications', {
@@ -425,6 +509,31 @@ export const milestonesRelations = relations(milestones, ({ one, many }) => ({
   milestoneTasks: many(milestoneTasks),
 }))
 
+export const integrationCredentialsRelations = relations(integrationCredentials, ({ one, many }) => ({
+  project:   one(projects, { fields: [integrationCredentials.projectId], references: [projects.id] }),
+  syncState: many(integrationSyncState),
+  eventCache: many(externalEventCache),
+}))
+
+export const integrationSyncStateRelations = relations(integrationSyncState, ({ one }) => ({
+  project:    one(projects, { fields: [integrationSyncState.projectId], references: [projects.id] }),
+  credential: one(integrationCredentials, { fields: [integrationSyncState.credentialId], references: [integrationCredentials.id] }),
+}))
+
+export const externalEventCacheRelations = relations(externalEventCache, ({ one }) => ({
+  project:    one(projects, { fields: [externalEventCache.projectId], references: [projects.id] }),
+  credential: one(integrationCredentials, { fields: [externalEventCache.credentialId], references: [integrationCredentials.id] }),
+}))
+
+export const pmDigestCacheRelations = relations(pmDigestCache, ({ one }) => ({
+  project: one(projects, { fields: [pmDigestCache.projectId], references: [projects.id] }),
+}))
+
+export const userSettingsRelations = relations(userSettings, ({ one }) => ({
+  user:    one(users, { fields: [userSettings.userId], references: [users.id] }),
+  project: one(projects, { fields: [userSettings.projectId], references: [projects.id] }),
+}))
+
 // ---------------------------------------------------------------------------
 // Exported types — use these everywhere, never hand-write interfaces
 // ---------------------------------------------------------------------------
@@ -471,7 +580,17 @@ export type Milestone         = InferSelectModel<typeof milestones>
 export type NewMilestone      = InferInsertModel<typeof milestones>
 export type Notification      = InferSelectModel<typeof notifications>
 export type NewNotification   = InferInsertModel<typeof notifications>
-export type CostRecord        = InferSelectModel<typeof costRecords>
-export type NewCostRecord     = InferInsertModel<typeof costRecords>
+export type CostRecord                  = InferSelectModel<typeof costRecords>
+export type NewCostRecord               = InferInsertModel<typeof costRecords>
+export type IntegrationCredential       = InferSelectModel<typeof integrationCredentials>
+export type NewIntegrationCredential    = InferInsertModel<typeof integrationCredentials>
+export type IntegrationSyncState        = InferSelectModel<typeof integrationSyncState>
+export type NewIntegrationSyncState     = InferInsertModel<typeof integrationSyncState>
+export type ExternalEventCache          = InferSelectModel<typeof externalEventCache>
+export type NewExternalEventCache       = InferInsertModel<typeof externalEventCache>
+export type PmDigestCache               = InferSelectModel<typeof pmDigestCache>
+export type NewPmDigestCache            = InferInsertModel<typeof pmDigestCache>
+export type UserSetting                 = InferSelectModel<typeof userSettings>
+export type NewUserSetting              = InferInsertModel<typeof userSettings>
 
-export const SCHEMA_VERSION = '1.1.0'
+export const SCHEMA_VERSION = '1.2.0'

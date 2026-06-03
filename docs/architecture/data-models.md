@@ -1,8 +1,8 @@
 # Creare — Data Models
 ---
 status: active
-version: 1.1
-last-updated: 2026-06-02
+version: 1.2
+last-updated: 2026-06-03
 ---
 
 Canonical reference for all data models. The source of truth is always `packages/database/src/schema.ts` — this document explains the design decisions.
@@ -66,7 +66,16 @@ Canonical reference for all data models. The source of truth is always `packages
 | `milestones` | Due-date checkpoints with `at_risk` detection. |
 | `milestone_tasks` | Join table. Unique constraint on `(milestoneId, taskId)`. |
 
-### 7. Cross-Cutting
+### 7. Integrations
+| Table | Purpose |
+|---|---|
+| `integration_credentials` | OAuth tokens and PATs for external sources (Jira, GitHub, Confluence, Notion, OneDrive). Encrypted identically to `secrets` — AES-256-GCM ciphertext + IV pair. `metadata` JSON carries source-specific config (baseUrl, accountId, scopes). `expiresAt` is null for non-expiring PATs. |
+| `integration_sync_state` | Last sync cursor and health status per credential. `syncCursor` is a source-specific pagination token or etag — null means a full resync is needed. |
+| `external_event_cache` | Normalized external events from all sources. Append-only: new fetch = new row. TTL purging via `purgedAt` soft-delete — never hard DELETE. Active records: `WHERE purgedAt IS NULL`. |
+| `pm_digest_cache` | AI-generated digest snapshots per zone (morning_brief, sprint_health, decisions_and_docs, risk_radar). Dashboard reads here first; regenerates if `validUntil` has passed. |
+| `user_settings` | PM-configurable delegation rules and dashboard preferences, stored as key-value pairs per user per project. `key` uses dot-notation (e.g. `pm.delegation.auto_approve_doc_updates`). `value` is always JSON-encoded. |
+
+### 8. Cross-Cutting
 | Table | Purpose |
 |---|---|
 | `notifications` | In-app alerts. `readAt` is null until read. Index on `(userId, readAt)` powers unread count badge. |
@@ -88,6 +97,10 @@ Canonical reference for all data models. The source of truth is always `packages
 | `notifications_user_read_idx` | notifications | `(userId, readAt)` | Unread count badge |
 | `task_edges_unique_edge_idx` | task_edges | `(fromTaskId, toTaskId)` | Prevents duplicate DAG edges |
 | `milestone_tasks_unique_idx` | milestone_tasks | `(milestoneId, taskId)` | Prevents duplicate task-milestone links |
+| `integration_credentials_project_source_idx` | integration_credentials | `(projectId, source)` | "Which credentials does this project have for Jira?" |
+| `ext_cache_source_entity_idx` | external_event_cache | `(source, entityType, entityId)` | Cross-source entity correlation (Jira ↔ GitHub ticket ID matching) |
+| `ext_cache_project_fetched_idx` | external_event_cache | `(projectId, fetchedAt)` | Dashboard load — fetch latest events per project |
+| `user_settings_unique_idx` | user_settings | `(userId, projectId, key)` | Unique constraint + lookup for per-user PM settings |
 
 ---
 

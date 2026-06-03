@@ -13,6 +13,7 @@
 | 1.0 | 2026-06-02 | Initial scope document | All phases |
 | 1.1 | 2026-06-02 | Added local-first Electron deployment model + sync-readiness constraints | Phase 1 DB, all Phase 2 domains |
 | 1.2 | 2026-06-02 | Added 8 missing features: secrets mgmt, agent permissions, notifications, multi-project workspace, rollback, audit log, backup/recovery, global search, project templates, usage/cost tracking, rate limiting | Phase 1 + Phase 2 scope expanded |
+| 1.3 | 2026-06-03 | Added Domain 6: Integrations — external source connectors (Jira, GitHub, Confluence, Notion, OneDrive), OAuth credential store, background sync engine, cross-source entity correlation, two-stage PM action classifier, PM digest generation. PM Command Center dashboard added as first Phase 2 deliverable under Domain 5 + Domain 6. | New domain, 5 new schema tables, Phase 2 build order updated |
 
 ---
 
@@ -152,6 +153,19 @@ Turns engineering activity into executive-readable intelligence automatically.
 - AI-powered retrospectives: auto-summarize what went well and poorly per sprint
 - Predictive sprint completion using historical velocity and AI
 - **Usage & cost tracking** — per-project, per-agent breakdown of model API calls and spend. Teams can budget, audit, and cap AI costs from within the platform.
+- **PM Command Center** — the first Phase 2 deliverable. A triage dashboard that aggregates internal Creare data (sprints, milestones, traces) with external source data from Domain 6 (Integrations) to give the PM a single surface for daily action. Four zones: Morning Brief (DO NOW panel), Sprint Health, Decisions & Docs, and Risk Radar. Every risk item has a one-click response: [Handle it] (routes to DO NOW) or [Delegate▶] (creates an agent task via Domain 1). Built on top of Domain 6's sync layer — Domain 5 reads, Domain 6 fetches.
+
+### Domain 6: Integrations
+The external connectivity layer. Fetches, normalizes, and caches data from external DevOps and productivity tools. Enables Creare to be the PM's single surface without requiring teams to migrate away from their existing stack.
+
+- **External source connectors** — Jira (MCP), GitHub (MCP), Confluence (Atlassian REST v2), Notion (REST), OneDrive (Microsoft Graph / MSAL). Each connector is a self-contained module with its own auth, pagination, and normalization logic.
+- **OAuth 2.0 credential management** — stores and refreshes OAuth tokens per source per project. Uses the Phase 1 secrets layer (AES-256-GCM encryption) — tokens are never stored in plaintext.
+- **Background sync engine** — 15-minute polling per source with cursor-based pagination. Manual "refresh now" always available. Sync state (last cursor, last synced timestamp, error status) tracked per credential.
+- **External event normalization** — all external events (Jira tickets, GitHub PRs, Confluence pages, Notion notes, OneDrive meeting files) are converted to a unified internal schema before caching. Domain 5 and Domain 1 consume normalized data only — never raw API responses.
+- **Cross-source entity correlation** — links entities across sources by matching identifiers. MVP: Jira ticket IDs in GitHub PR titles and branch names (e.g. `PROJ-89` in `feature/PROJ-89-auth-flow`). Extensible to full graph correlation in v2.
+- **Two-stage PM action classifier** — routes normalized events to the correct dashboard panel (DO NOW for human-required actions, DELEGATE for agent-executable actions). Stage 1: fast rule engine (no LLM cost) for obvious cases. Stage 2: LLM fallback for ambiguous items. Returns `{ bucket, urgency, riskType, suggestedAction }` per item.
+- **PM digest generation** — produces structured digests for each PM Command Center zone (morning brief, sprint health, decisions & docs, risk radar). Results cached in `pm_digest_cache` with a `validUntil` expiry — stale digests are regenerated automatically on next dashboard load.
+- **Integration health monitoring** — tracks sync status, error rates, and credential expiry per source. Surfaces integration failures as notifications before they cause stale data problems.
 
 ### Cross-Cutting Infrastructure
 These features span all domains and must be built in Phase 1 before domain work begins.
@@ -260,7 +274,7 @@ Development follows a 5-phase Domain-Driven Iterative structure optimized for Cl
 |---|---|---|
 | **0** | Foundation | Tech stack decision, monorepo scaffold, core data models, this scope document |
 | **1** | Core Infrastructure | Auth/RBAC, database, API layer, base UI shell |
-| **2** | Domain Modules | All 5 domains built as self-contained iterative sprints |
+| **2** | Domain Modules | All 6 domains built as self-contained iterative sprints. Build order: Domain 6 (Integrations) first, then Domain 5 (Reporting / PM Command Center), then Domains 1–4 in parallel. |
 | **3** | Integration | Cross-domain wiring, E2E flows, MCP/external integrations |
 | **4** | Eval & Intelligence | AI eval harness, regression testing, team memory/adaptive learning |
 

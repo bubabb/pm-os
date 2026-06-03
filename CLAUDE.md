@@ -18,7 +18,8 @@ packages/
   tool-registry/       → Domain 2: versioned AI tool artifacts
   observability/       → Domain 3: trace viewer, audit log, replay
   boards/              → Domain 4: planning, Kanban, Gantt
-  reporting/           → Domain 5: NL dashboards, exec summaries
+  reporting/           → Domain 5: NL dashboards, exec summaries, PM Command Center
+  integrations/        → Domain 6: external connectors (Jira, GitHub, Confluence, Notion, OneDrive), sync engine, classifier
   database/            → Shared: SQLite + Drizzle ORM, event log
   ai-sdk/              → Shared: model-agnostic AI wrapper
   shared/              → Shared: types, constants, utilities

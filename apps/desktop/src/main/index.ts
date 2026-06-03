@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
+import { startServer, stopServer } from './server'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -24,13 +25,15 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await startServer()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
-app.on('window-all-closed', () => {
+app.on('window-all-closed', async () => {
+  await stopServer()
   if (process.platform !== 'darwin') app.quit()
 })

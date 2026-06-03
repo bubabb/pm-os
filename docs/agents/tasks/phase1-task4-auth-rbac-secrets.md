@@ -63,6 +63,22 @@ Migrations live in `packages/database/src/migrations/`.
 - `getSecretValue(secretId: string): Promise<string>` — decrypts and returns plaintext
 - `listSecrets(projectId: string): Promise<Array<Omit<Secret, 'encryptedValue' | 'iv'>>>`
 
+### 5. Integration credential service (`apps/desktop/src/main/secrets/integration-credentials-service.ts`)
+OAuth tokens for external sources (Jira, GitHub, Confluence, Notion, OneDrive) are treated as secrets — same AES-256-GCM encryption, same IV discipline, same `safeStorage`-derived key. This service wraps the `integrationCredentials` table.
+
+- `storeIntegrationCredential(input: { projectId: string, source: IntegrationCredential['source'], label: string, token: string, metadata?: Record<string, unknown>, expiresAt?: string }): Promise<IntegrationCredential>`
+  — encrypts `token` before writing. The plaintext token is never persisted.
+- `getIntegrationToken(credentialId: string): Promise<string>`
+  — decrypts and returns the plaintext OAuth token. Never log or expose the return value.
+- `listIntegrationCredentials(projectId: string): Promise<Array<Omit<IntegrationCredential, 'encryptedToken' | 'iv'>>>`
+  — returns credential records without the ciphertext fields.
+- `deleteIntegrationCredential(credentialId: string): Promise<void>`
+  — hard delete is acceptable here (unlike secrets, credentials can be re-added via OAuth re-auth).
+- `isTokenExpired(credential: IntegrationCredential): boolean`
+  — returns true if `expiresAt` is set and is in the past. Domain 6 uses this before every sync to detect credentials that need re-auth.
+
+**Important:** Import `IntegrationCredential`, `NewIntegrationCredential` from `@creare/database`. Never define local types for schema entities.
+
 ### 5. Agent permission validator (`apps/desktop/src/main/auth/agent-permissions.ts`)
 - `validateAgentPermission(workspace: AgentWorkspace, resource: 'tool' | 'repo' | 'secret', resourceId: string): boolean`
 - Parses `workspace.permissionScope` JSON: `{ tools: string[], repos: string[], secrets: string[] }`
@@ -81,17 +97,27 @@ export type { AuthenticatedRequest } from './auth-middleware'
 Export from `apps/desktop/src/main/secrets/index.ts`:
 ```typescript
 export { createSecret, getSecretValue, listSecrets } from './secrets-service'
+export {
+  storeIntegrationCredential,
+  getIntegrationToken,
+  listIntegrationCredentials,
+  deleteIntegrationCredential,
+  isTokenExpired,
+} from './integration-credentials-service'
 ```
 
 ---
 
 ## Done When
-- [ ] Drizzle migrations generated for users and secrets tables
+- [ ] Drizzle migrations generated for users, secrets, and integration_credentials tables
 - [ ] `requireAuth` middleware rejects unauthenticated requests with 401
 - [ ] `requireRole` middleware rejects insufficient roles with 403
 - [ ] AES-256-GCM encrypt/decrypt round-trips correctly (unit tested)
 - [ ] `getSecretValue` decrypts secrets stored with their IV
 - [ ] `validateAgentPermission` returns false for out-of-scope resources
+- [ ] `storeIntegrationCredential` encrypts token before writing — plaintext never persisted
+- [ ] `getIntegrationToken` decrypts and returns plaintext token (unit tested for round-trip)
+- [ ] `isTokenExpired` returns true when expiresAt is in the past
 - [ ] TypeScript compiles with zero errors
 - [ ] All tests pass
 - [ ] Handoff file written to `agent-state/handoffs/phase1-task4-output.md`
