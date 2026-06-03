@@ -4,50 +4,72 @@ import { getDb } from '@creare/database'
 import { users } from '@creare/database'
 import { generateId } from '@creare/shared'
 import { eq } from 'drizzle-orm'
+import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
 import type { User } from '@creare/database'
 
 const JWT_ISSUER = 'creare'
 const JWT_AUDIENCE = 'creare-desktop'
 const SESSION_KEY = 'creare_session_token'
-const SECRET_STORAGE_KEY = 'creare_jwt_secret'
+const KEYS_FILE = join(homedir(), '.creare', 'keys.json')
 
-// Lazily initialised — derived once per process, stored in safeStorage
+// Lazily initialised — derived once per process from disk-persisted encrypted blob
 let _jwtSecret: Uint8Array | null = null
 
-function getJwtSecret(): Uint8Array {
-  if (_jwtSecret) return _jwtSecret
+interface KeysFile {
+  jwtSecretBlob?: string  // safeStorage-encrypted base64 of the raw hex secret
+  masterKeyBlob?: string  // safeStorage-encrypted base64 of the 32-byte master key
+}
 
-  const existing = safeStorage.decryptString(
-    Buffer.from(safeStorage.encryptString(''), 'base64')
-  )
-  // Try to load persisted secret; generate if missing
+function readKeysFile(): KeysFile {
   try {
-    const raw = safeStorage.decryptString(
-      Buffer.from(process.env['CREARE_JWT_SECRET_BLOB'] ?? '', 'base64')
-    )
-    if (raw.length === 64) {
-      _jwtSecret = new TextEncoder().encode(raw)
-      return _jwtSecret
+    if (existsSync(KEYS_FILE)) {
+      return JSON.parse(readFileSync(KEYS_FILE, 'utf8')) as KeysFile
     }
   } catch {
-    // generate fresh
+    // corrupt or missing — start fresh
+  }
+  return {}
+}
+
+function writeKeysFile(patch: Partial<KeysFile>): void {
+  const existing = readKeysFile()
+  writeFileSync(KEYS_FILE, JSON.stringify({ ...existing, ...patch }, null, 2), { mode: 0o600 })
+}
+
+export function getJwtSecret(): Uint8Array {
+  if (_jwtSecret) return _jwtSecret
+
+  const keys = readKeysFile()
+  if (keys.jwtSecretBlob && safeStorage.isEncryptionAvailable()) {
+    try {
+      const raw = safeStorage.decryptString(Buffer.from(keys.jwtSecretBlob, 'base64'))
+      if (raw.length === 64) {
+        _jwtSecret = new TextEncoder().encode(raw)
+        return _jwtSecret
+      }
+    } catch {
+      // fall through to generate
+    }
   }
 
-  // First boot: generate a random 256-bit secret and store it
+  // First boot or corrupted key file: generate a random 256-bit secret
   const bytes = new Uint8Array(32)
   globalThis.crypto.getRandomValues(bytes)
   const raw = Buffer.from(bytes).toString('hex') // 64 hex chars
   _jwtSecret = new TextEncoder().encode(raw)
-  // Persist encrypted in env for the process lifetime; a real impl would write to a file
-  process.env['CREARE_JWT_SECRET_BLOB'] = safeStorage.encryptString(raw).toString('base64')
+
+  if (safeStorage.isEncryptionAvailable()) {
+    writeKeysFile({ jwtSecretBlob: safeStorage.encryptString(raw).toString('base64') })
+  }
+
   return _jwtSecret
-  void existing // suppress unused warning
 }
 
 export async function signIn(provider: 'github' | 'entra'): Promise<User> {
-  // In Phase 1 this creates/upserts a dev user so the UI shell can function.
-  // Real OAuth flow (opening a browser window, exchanging the code) is a Phase 3 concern
-  // because it requires a registered OAuth app with a redirect URI.
+  // Phase 1: creates/upserts a dev user so the UI shell can function.
+  // Real OAuth flow (browser window + code exchange) ships in Phase 3.
   const db = getDb()
   const devEmail = provider === 'github' ? 'dev@github.local' : 'dev@entra.local'
   const devName  = provider === 'github' ? 'Dev (GitHub)' : 'Dev (Entra)'
@@ -106,7 +128,7 @@ export async function verifyToken(token: string): Promise<string | null> {
   }
 }
 
-async function createSessionToken(userId: string): Promise<string> {
+export async function createSessionToken(userId: string): Promise<string> {
   return new SignJWT({ sub: userId })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuer(JWT_ISSUER)
@@ -118,8 +140,7 @@ async function createSessionToken(userId: string): Promise<string> {
 
 function persistToken(token: string): void {
   if (safeStorage.isEncryptionAvailable()) {
-    const encrypted = safeStorage.encryptString(token).toString('base64')
-    process.env[SESSION_KEY] = encrypted
+    process.env[SESSION_KEY] = safeStorage.encryptString(token).toString('base64')
   } else {
     process.env[SESSION_KEY] = token
   }
@@ -141,3 +162,5 @@ function loadToken(): string | null {
 function clearToken(): void {
   delete process.env[SESSION_KEY]
 }
+
+export { readKeysFile, writeKeysFile }

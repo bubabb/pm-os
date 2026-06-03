@@ -7,7 +7,7 @@ import type { AuthenticatedRequest } from '../auth'
 
 interface ProjectParams { id: string }
 interface CreateProjectBody { name: string; description?: string }
-interface PatchProjectBody { name?: string; description?: string; archivedAt?: string | null }
+interface PatchProjectBody { name?: string; description?: string }
 
 export async function projectsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/projects', { preHandler: requireAuth }, async (request: FastifyRequest) => {

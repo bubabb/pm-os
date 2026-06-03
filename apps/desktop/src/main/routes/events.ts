@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
-import { requireAuth } from '../auth'
-import type { AuthenticatedRequest } from '../auth'
+import { verifyToken } from '../auth'
+import { getDb, users } from '@creare/database'
+import { eq } from 'drizzle-orm'
+import type { User } from '@creare/database'
 
 export interface SseEvent {
   type: string
@@ -36,12 +38,30 @@ export function emitToAll(event: SseEvent): void {
   }
 }
 
+// EventSource doesn't support custom headers — the SSE endpoint accepts the JWT
+// via either the Authorization header (standard) or a `token` query parameter (SSE fallback).
+async function resolveSseUser(request: FastifyRequest): Promise<User | null> {
+  // Prefer Authorization header; fall back to ?token= query param
+  const authHeader = request.headers.authorization
+  const queryToken = (request.query as Record<string, string | undefined>)['token']
+  const raw = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : (queryToken ?? null)
+
+  if (!raw) return null
+
+  const userId = await verifyToken(raw)
+  if (!userId) return null
+
+  const db = getDb()
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
+  return user ?? null
+}
+
 export async function eventsRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/events/stream',
-    { preHandler: requireAuth },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const user = (request as AuthenticatedRequest).user
+      const user = await resolveSseUser(request)
+      if (!user) return reply.code(401).send({ error: 'Unauthorized' })
 
       reply.raw.setHeader('Content-Type', 'text/event-stream')
       reply.raw.setHeader('Cache-Control', 'no-cache')
@@ -55,10 +75,9 @@ export async function eventsRoutes(app: FastifyInstance): Promise<void> {
       }
       connections.get(user.id)!.add(reply)
 
-      // Send initial connected event
       reply.raw.write(`data: ${JSON.stringify({ type: 'connected', payload: { userId: user.id } })}\n\n`)
 
-      // Heartbeat every 30 seconds to keep the connection alive through proxies
+      // Heartbeat every 30 seconds to keep alive through proxies
       const heartbeat = setInterval(() => {
         try {
           reply.raw.write(': heartbeat\n\n')
@@ -76,7 +95,6 @@ export async function eventsRoutes(app: FastifyInstance): Promise<void> {
         }
       })
 
-      // Keep the handler alive — SSE connections are long-lived
       await new Promise<void>((resolve) => {
         request.raw.on('close', resolve)
       })

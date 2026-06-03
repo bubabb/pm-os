@@ -18,7 +18,7 @@ const navItems = [
 
 export default function AppShell() {
   const { user, signOut } = useAuthStore()
-  const { currentProject, projects } = useProjectStore()
+  const { currentProject } = useProjectStore()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)

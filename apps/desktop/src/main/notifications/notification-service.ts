@@ -1,6 +1,6 @@
-import { getDb, notifications } from '@creare/database'
+import { getDb, notifications, projects } from '@creare/database'
 import { generateId } from '@creare/shared'
-import { eq, isNull, and, desc } from 'drizzle-orm'
+import { eq, isNull, and, desc, count } from 'drizzle-orm'
 import { emitEvent } from '../routes/events'
 import type { Notification, AgentWorkspace, ApprovalGate } from '@creare/database'
 
@@ -29,7 +29,6 @@ export async function createNotification(input: {
     .returning()
 
   const n = notification!
-  // Push real-time notification via SSE — fire and forget
   emitEvent(input.userId, { type: 'notification.new', payload: n })
   return n
 }
@@ -51,11 +50,11 @@ export async function markAllAsRead(userId: string, projectId?: string): Promise
 
 export async function getUnreadCount(userId: string): Promise<number> {
   const db = getDb()
-  const rows = await db
-    .select({ id: notifications.id })
+  const [row] = await db
+    .select({ total: count() })
     .from(notifications)
     .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)))
-  return rows.length
+  return row?.total ?? 0
 }
 
 export async function listNotifications(userId: string, limit = 50): Promise<Notification[]> {
@@ -75,8 +74,6 @@ export async function checkCostThreshold(workspace: AgentWorkspace): Promise<voi
   if (costUsedTodayCents < dailyCostLimitCents * 0.8) return
 
   const db = getDb()
-  // Find the project owner to notify — look up projects by workspace
-  const { projects } = await import('@creare/database')
   const [project] = await db
     .select()
     .from(projects)

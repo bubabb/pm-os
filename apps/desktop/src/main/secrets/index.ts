@@ -1,4 +1,4 @@
-export { createSecret, getSecretValue, listSecrets, deleteSecret, encryptSecretAsync, decryptSecretAsync } from './secrets-service'
+export { encryptSecretAsync, decryptSecretAsync, createSecret, getSecretValue, listSecrets, deleteSecret } from './secrets-service'
 export {
   storeIntegrationCredential,
   getIntegrationToken,
