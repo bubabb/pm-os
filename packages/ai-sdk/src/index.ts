@@ -1,12 +1,16 @@
-// AI SDK — model-agnostic wrapper
-// Full implementation in Phase 1 Task #5
-// Wraps: @anthropic-ai/sdk, openai, @google/generative-ai
-// Exposes: @modelcontextprotocol/sdk
+import { completeAnthropic } from './providers/anthropic'
+import type { CompletionRequest, CompletionResponse } from './types'
 
-export type ModelProvider = 'anthropic' | 'openai' | 'gemini'
+export type { CompletionRequest, CompletionResponse, Message, ModelProvider } from './types'
 
-export interface ModelConfig {
-  provider: ModelProvider
-  model: string
-  apiKey: string
+export async function complete(
+  request: CompletionRequest,
+  apiKey: string,
+): Promise<CompletionResponse> {
+  switch (request.provider) {
+    case 'anthropic':
+      return completeAnthropic(request, apiKey)
+    default:
+      throw new Error(`Provider '${request.provider}' not yet implemented`)
+  }
 }

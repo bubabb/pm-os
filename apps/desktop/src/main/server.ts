@@ -8,6 +8,7 @@ import { usersRoutes } from './routes/users'
 import { secretsRoutes } from './routes/secrets'
 import { eventsRoutes } from './routes/events'
 import { notificationsRoutes } from './routes/notifications'
+import { integrationsRoutes } from './routes/integrations'
 
 const PORT = parseInt(process.env['CREARE_PORT'] ?? '4321', 10)
 
@@ -52,6 +53,7 @@ export async function startServer(): Promise<void> {
   await app.register(secretsRoutes)
   await app.register(eventsRoutes)
   await app.register(notificationsRoutes)
+  await app.register(integrationsRoutes)
 
   await app.listen({ port: PORT, host: '127.0.0.1' })
   console.log(`[creare] API server running on http://127.0.0.1:${PORT}`)

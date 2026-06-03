@@ -1,5 +1,5 @@
 {
-  "name": "@creare/ai-sdk",
+  "name": "@creare/integrations",
   "version": "0.1.0",
   "private": true,
   "main": "dist/index.js",
@@ -12,11 +12,10 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.100.1",
+    "@creare/ai-sdk": "workspace:*",
+    "@creare/database": "workspace:*",
     "@creare/shared": "workspace:*",
-    "@google/generative-ai": "^0.3.0",
-    "@modelcontextprotocol/sdk": "^0.6.0",
-    "openai": "^4.28.0"
+    "drizzle-orm": "^0.30.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

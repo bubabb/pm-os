@@ -16,6 +16,7 @@
     "@creare/boards": "workspace:*",
     "@creare/database": "workspace:*",
     "@creare/observability": "workspace:*",
+    "@creare/integrations": "workspace:*",
     "@creare/reporting": "workspace:*",
     "@creare/shared": "workspace:*",
     "@creare/tool-registry": "workspace:*",
