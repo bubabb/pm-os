@@ -75,7 +75,9 @@ export class GitHubConnector extends BaseConnector {
     )
     if (issuesRes.ok) {
       const issues = await issuesRes.json() as GhIssue[]
-      issueCount = issues.filter((i) => !('pull_request' in i)).length
+      // Use raw response count for pagination — not filtered count.
+      // A full page means more items may exist, regardless of how many are PRs.
+      issueCount = issues.length
       for (const issue of issues) {
         if ('pull_request' in issue) continue
         entities.push({

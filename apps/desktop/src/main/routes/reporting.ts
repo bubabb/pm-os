@@ -76,7 +76,7 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const events = await getActiveEvents(request.params.id)
-      const items  = events.length > 0 ? await classifyItems(request.params.id, events, ctx.apiKey) : []
+      const items  = events.length > 0 ? await classifyItems(events, ctx.apiKey) : []
       return generatePmDigest(request.params.id, digestType, items, ctx.apiKey)
     },
   )

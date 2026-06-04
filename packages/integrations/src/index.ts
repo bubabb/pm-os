@@ -1,5 +1,5 @@
 import { getDb, externalEventCache, integrationSyncState } from '@creare/database'
-import { eq, and, isNull, gte } from 'drizzle-orm'
+import { eq, and, isNull, gte, inArray } from 'drizzle-orm'
 import { sync } from './sync-engine'
 import { classifyItems as classifyRows } from './classifier'
 import { correlateEntities as correlate } from './correlator'
@@ -54,22 +54,19 @@ export async function getActiveEvents(
   if (filters?.since) {
     conditions.push(gte(externalEventCache.fetchedAt, filters.since))
   }
+  if (filters?.sources?.length) {
+    conditions.push(inArray(externalEventCache.source, filters.sources))
+  }
+  if (filters?.entityTypes?.length) {
+    conditions.push(inArray(externalEventCache.entityType, filters.entityTypes))
+  }
 
-  let rows = await db
+  return db
     .select()
     .from(externalEventCache)
     .where(and(...conditions))
     .orderBy(externalEventCache.fetchedAt)
     .limit(200)
-
-  if (filters?.sources?.length) {
-    rows = rows.filter((r) => filters.sources!.includes(r.source as IntegrationSource))
-  }
-  if (filters?.entityTypes?.length) {
-    rows = rows.filter((r) => filters.entityTypes!.includes(r.entityType))
-  }
-
-  return rows
 }
 
 export async function correlateEntities(
@@ -81,7 +78,6 @@ export async function correlateEntities(
 }
 
 export async function classifyItems(
-  projectId: string,
   rows: ExternalEventCache[],
   apiKey: string,
 ): Promise<ClassifiedItem[]> {

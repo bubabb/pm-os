@@ -40,7 +40,7 @@ export async function getDashboard(
   let classified: DashboardResponse['classified'] = { doNow: [], delegate: [], risks: [] }
 
   if (hasIntegrations && apiKey) {
-    const items = await classifyItems(projectId, activeEvents, apiKey)
+    const items = await classifyItems(activeEvents, apiKey)
     classified = partitionItems(items)
   }
 

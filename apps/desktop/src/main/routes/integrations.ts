@@ -22,9 +22,6 @@ interface CreateCredentialBody {
 interface SyncBody { source?: IntegrationCredential['source'] }
 interface EventsQuery { source?: string; entityType?: string; since?: string }
 
-// assertProjectAccess imported from utils/project-access — not defined here
-}
-
 export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
   // List credentials (no tokens returned)
   app.get<{ Params: ProjectParams }>(
