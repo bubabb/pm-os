@@ -333,6 +333,7 @@ export const integrationCredentials = sqliteTable('integration_credentials', {
 }))
 
 // Tracks sync state per credential — last cursor, timestamp, and health status.
+// One row per credential — enforced by unique constraint on credentialId.
 export const integrationSyncState = sqliteTable('integration_sync_state', {
   ...id(),
   projectId:        text('project_id').notNull().references(() => projects.id),
@@ -343,7 +344,9 @@ export const integrationSyncState = sqliteTable('integration_sync_state', {
   syncCursor:       text('sync_cursor'),         // source-specific pagination token or etag — null = full resync needed
   lastErrorMessage: text('last_error_message'),
   ...timestamps,
-})
+}, (table) => ({
+  uniqueCredential: uniqueIndex('integration_sync_state_credential_unique_idx').on(table.credentialId),
+}))
 
 // Normalized external events fetched from all sources.
 // Treat as append-only: create new rows on refresh rather than updating existing ones.

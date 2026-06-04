@@ -1,5 +1,5 @@
 import { getDb, sprints, milestones, externalEventCache } from '@creare/database'
-import { and, eq, gte, isNull, or } from 'drizzle-orm'
+import { and, count, eq, gte, isNull, or } from 'drizzle-orm'
 
 export interface SprintContext {
   activeSprint: {
@@ -61,10 +61,10 @@ export async function getSprintContext(projectId: string): Promise<SprintContext
       return { title: m.title, daysUntilDue, status: m.status }
     })
 
-  // Overnight delta — items fetched in last 24h
+  // Overnight delta — actual count of items fetched in last 24h
   const since24h = new Date(now.getTime() - 86_400_000).toISOString()
   const [deltaRow] = await db
-    .select({ id: externalEventCache.id })
+    .select({ total: count() })
     .from(externalEventCache)
     .where(
       and(
@@ -73,9 +73,8 @@ export async function getSprintContext(projectId: string): Promise<SprintContext
         gte(externalEventCache.fetchedAt, since24h),
       ),
     )
-    .limit(1)
 
-  const overnightDelta = deltaRow ? 1 : 0  // rough indicator — use count in Phase 3
+  const overnightDelta = deltaRow?.total ?? 0
 
   // Last synced time — most recent fetchedAt across all active rows
   const [lastRow] = await db

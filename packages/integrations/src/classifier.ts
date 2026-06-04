@@ -2,16 +2,15 @@ import { complete } from '@creare/ai-sdk'
 import type { ExternalEventCache } from '@creare/database'
 import type { ClassifiedItem, NormalizedEntity, ActionBucket } from './types'
 
-type RuleResult = {
+type Classification = {
   bucket: ActionBucket
   urgency: 1 | 2 | 3 | 4 | 5
   riskType: string | null
   suggestedAction: string
-} | null
+}
 
 // Stage 1: deterministic rule engine — no LLM cost
-function applyRules(entity: NormalizedEntity): RuleResult {
-  const titleLower = entity.title.toLowerCase()
+function applyRules(entity: NormalizedEntity): Classification | null {
   const raw = entity.raw
 
   // Always human — high-stakes signals
@@ -24,7 +23,6 @@ function applyRules(entity: NormalizedEntity): RuleResult {
   if (Array.isArray(raw['labels']) && (raw['labels'] as string[]).includes('security')) {
     return { bucket: 'human', urgency: 5, riskType: 'security', suggestedAction: 'Security review required' }
   }
-  // PR ready for review (not draft, has reviewers requested)
   if (
     entity.entityType === 'pr' &&
     raw['isDraft'] === false &&
@@ -52,7 +50,6 @@ function applyRules(entity: NormalizedEntity): RuleResult {
     return { bucket: 'agent', urgency: 2, riskType: null, suggestedAction: 'Extract decisions and action items' }
   }
 
-  void titleLower
   return null // ambiguous — pass to Stage 2
 }
 
@@ -66,7 +63,7 @@ Respond with JSON only — no markdown, no explanation:
 
 urgency: 5=critical/today, 4=high/this session, 3=medium/today, 2=low/this week, 1=watch`
 
-async function classifyWithLLM(entity: NormalizedEntity, apiKey: string): Promise<RuleResult> {
+async function classifyWithLLM(entity: NormalizedEntity, apiKey: string): Promise<Classification> {
   try {
     const response = await complete(
       {
@@ -107,38 +104,69 @@ async function classifyWithLLM(entity: NormalizedEntity, apiKey: string): Promis
       suggestedAction: parsed.suggestedAction ?? 'Review manually',
     }
   } catch {
-    // On any failure: err on the side of human review
     return { bucket: 'human', urgency: 3, riskType: null, suggestedAction: 'Review manually' }
   }
+}
+
+// Run async tasks with at most `limit` concurrent executions
+async function withConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let idx = 0
+
+  async function worker(): Promise<void> {
+    while (idx < items.length) {
+      const current = idx++
+      results[current] = await fn(items[current]!)
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
 }
 
 export async function classifyItems(
   cacheRows: ExternalEventCache[],
   apiKey: string,
 ): Promise<ClassifiedItem[]> {
-  const results: ClassifiedItem[] = []
-
+  // Parse all payloads first — skip malformed rows
+  const parsed: Array<{ row: ExternalEventCache; entity: NormalizedEntity }> = []
   for (const row of cacheRows) {
-    let entity: NormalizedEntity
     try {
-      entity = JSON.parse(row.payload) as NormalizedEntity
+      parsed.push({ row, entity: JSON.parse(row.payload) as NormalizedEntity })
     } catch {
-      continue
+      // skip malformed
     }
+  }
 
-    const ruleResult = applyRules(entity)
-    // classification is always non-null: ruleResult is null only for ambiguous items which go to LLM
-    const c = ruleResult ?? await classifyWithLLM(entity, apiKey)
-    if (!c) continue
+  // Stage 1: rule engine (synchronous, zero LLM cost)
+  const ruleResults = parsed.map(({ entity }) => applyRules(entity))
 
-    results.push({
+  // Stage 2: LLM for ambiguous items only — run in parallel, max 5 concurrent
+  const ambiguousIndices = ruleResults
+    .map((r, i) => (r === null ? i : -1))
+    .filter((i) => i !== -1)
+
+  const llmResults = await withConcurrency(
+    ambiguousIndices,
+    5,
+    (i) => classifyWithLLM(parsed[i]!.entity, apiKey),
+  )
+
+  // Merge results
+  const llmMap = new Map(ambiguousIndices.map((idx, pos) => [idx, llmResults[pos]!]))
+
+  return parsed.map(({ entity }, i) => {
+    const c = ruleResults[i] ?? llmMap.get(i)!
+    return {
       entity,
       bucket: c.bucket,
       urgency: c.urgency,
       riskType: c.riskType,
       suggestedAction: c.suggestedAction,
-    })
-  }
-
-  return results
+    }
+  })
 }

@@ -1,6 +1,6 @@
 import { getDb, pmDigestCache } from '@creare/database'
 import { generateId } from '@creare/shared'
-import { and, desc, eq, gt } from 'drizzle-orm'
+import { and, eq, gt, isNull } from 'drizzle-orm'
 import { complete } from '@creare/ai-sdk'
 import type { PmDigestCache } from '@creare/database'
 import type { ClassifiedItem } from './types'
@@ -99,7 +99,7 @@ export async function getLatestDigest(
         gt(pmDigestCache.validUntil, now),
       ),
     )
-    .orderBy(desc(pmDigestCache.generatedAt))
+    .orderBy(pmDigestCache.generatedAt)
     .limit(1)
 
   return row ?? null

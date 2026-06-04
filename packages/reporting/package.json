@@ -12,11 +12,11 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@creare/database": "workspace:*",
-    "@creare/shared": "workspace:*",
     "@creare/ai-sdk": "workspace:*",
+    "@creare/database": "workspace:*",
     "@creare/integrations": "workspace:*",
-    "drizzle-orm": "^0.30.0"
+    "@creare/shared": "workspace:*",
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

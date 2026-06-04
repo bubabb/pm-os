@@ -1,13 +1,10 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
 import { listIntegrationCredentials, storeIntegrationCredential, deleteIntegrationCredential, getIntegrationToken } from '../secrets'
-import { getDb, projects, integrationCredentials } from '@creare/database'
-import { eq, and } from 'drizzle-orm'
-import {
-  triggerSync,
-  getSyncStatus,
-  getActiveEvents,
-} from '@creare/integrations'
+import { getDb, integrationCredentials } from '@creare/database'
+import { eq } from 'drizzle-orm'
+import { triggerSync, getSyncStatus, getActiveEvents } from '@creare/integrations'
+import { assertProjectAccess } from '../utils/project-access'
 import type { AuthenticatedRequest } from '../auth'
 import type { IntegrationCredential } from '@creare/database'
 
@@ -25,14 +22,7 @@ interface CreateCredentialBody {
 interface SyncBody { source?: IntegrationCredential['source'] }
 interface EventsQuery { source?: string; entityType?: string; since?: string }
 
-async function assertProjectAccess(projectId: string, userId: string) {
-  const db = getDb()
-  const [project] = await db
-    .select()
-    .from(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.ownerId, userId)))
-    .limit(1)
-  return project ?? null
+// assertProjectAccess imported from utils/project-access — not defined here
 }
 
 export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
@@ -112,7 +102,9 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
       )
 
       // Fire-and-forget — sync runs in background, response returns immediately
-      triggerSync(request.params.id, pairs, request.body?.source).catch(() => {})
+      triggerSync(request.params.id, pairs, request.body?.source).catch((err) => {
+        console.error('[creare] Background sync failed:', err instanceof Error ? err.message : err)
+      })
 
       return { ok: true, message: 'Sync started' }
     },

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `integration_sync_state_credential_unique_idx` ON `integration_sync_state` (`credential_id`);

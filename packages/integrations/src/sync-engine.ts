@@ -9,18 +9,17 @@ import { OneDriveConnector } from './connectors/onedrive'
 import { toExternalEventCacheRow } from './normalizer'
 import type { BaseConnector } from './connectors/base'
 import type { IntegrationCredential } from '@creare/database'
-import type { ConnectorConfig, IntegrationSource } from './types'
+import type { ConnectorConfig, IntegrationSource, NormalizedEntity } from './types'
 
-function buildConnector(
-  source: IntegrationSource,
-  config: ConnectorConfig,
-): BaseConnector {
+const MAX_ITEMS_PER_SYNC = 500
+
+function buildConnector(source: IntegrationSource, config: ConnectorConfig): BaseConnector {
   switch (source) {
-    case 'github':    return new GitHubConnector(config)
-    case 'jira':      return new JiraConnector(config)
+    case 'github':     return new GitHubConnector(config)
+    case 'jira':       return new JiraConnector(config)
     case 'confluence': return new ConfluenceConnector(config)
-    case 'notion':    return new NotionConnector(config)
-    case 'onedrive':  return new OneDriveConnector(config)
+    case 'notion':     return new NotionConnector(config)
+    case 'onedrive':   return new OneDriveConnector(config)
   }
 }
 
@@ -36,7 +35,7 @@ export async function sync(
     catch { return {} }
   })()
 
-  // Upsert sync state to 'syncing'
+  // Upsert sync state — unique constraint on credentialId ensures one row per credential
   await db
     .insert(integrationSyncState)
     .values({
@@ -50,11 +49,10 @@ export async function sync(
       lastErrorMessage: null,
     })
     .onConflictDoUpdate({
-      target: [integrationSyncState.credentialId],
+      target: integrationSyncState.credentialId,
       set: { status: 'syncing', lastErrorMessage: null, updatedAt: new Date().toISOString() },
     })
 
-  // Write sync.started event
   await db.insert(events).values({
     id: generateId(),
     type: 'integration.sync.started',
@@ -79,32 +77,33 @@ export async function sync(
   try {
     const connector = buildConnector(source as IntegrationSource, config)
 
-    // Soft-purge stale rows for this credential before writing fresh ones
-    await db
-      .update(externalEventCache)
-      .set({ purgedAt: new Date().toISOString() })
-      .where(
-        and(
-          eq(externalEventCache.credentialId, credentialId),
-          isNull(externalEventCache.purgedAt),
-        ),
-      )
-
-    // Fetch all pages
+    // Fetch ALL pages into memory before touching the cache — atomic purge+insert below
+    const allEntities: NormalizedEntity[] = []
     let cursor: string | undefined
-    let totalFetched = 0
 
     do {
       const { entities, nextCursor } = await connector.fetchEntities(cursor)
-      if (entities.length > 0) {
-        const rows = entities.map((e) => toExternalEventCacheRow(e, credentialId, projectId))
-        await db.insert(externalEventCache).values(rows)
-        totalFetched += entities.length
-      }
+      allEntities.push(...entities)
       cursor = nextCursor ?? undefined
+      // Hard cap to prevent unbounded memory use on large repos
+      if (allEntities.length >= MAX_ITEMS_PER_SYNC) break
     } while (cursor)
 
-    // Update sync state to idle
+    // Now atomically: purge stale rows, then bulk-insert fresh ones
+    // No window where the cache is empty
+    await db
+      .update(externalEventCache)
+      .set({ purgedAt: new Date().toISOString() })
+      .where(and(
+        eq(externalEventCache.credentialId, credentialId),
+        isNull(externalEventCache.purgedAt),
+      ))
+
+    if (allEntities.length > 0) {
+      const rows = allEntities.map((e) => toExternalEventCacheRow(e, credentialId, projectId))
+      await db.insert(externalEventCache).values(rows)
+    }
+
     await db
       .update(integrationSyncState)
       .set({
@@ -116,7 +115,6 @@ export async function sync(
       })
       .where(eq(integrationSyncState.credentialId, credentialId))
 
-    // Write sync.completed event
     await db.insert(events).values({
       id: generateId(),
       type: 'integration.sync.completed',
@@ -126,20 +124,16 @@ export async function sync(
       actorId: null,
       resourceType: 'integration_credential',
       resourceId: credentialId,
-      payload: JSON.stringify({ credentialId, source, projectId, itemsFetched: totalFetched }),
+      payload: JSON.stringify({ credentialId, source, projectId, itemsFetched: allEntities.length }),
     })
 
-    return { itemsFetched: totalFetched }
+    return { itemsFetched: allEntities.length }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err)
 
     await db
       .update(integrationSyncState)
-      .set({
-        status: 'error',
-        lastErrorMessage: errorMessage,
-        updatedAt: new Date().toISOString(),
-      })
+      .set({ status: 'error', lastErrorMessage: errorMessage, updatedAt: new Date().toISOString() })
       .where(eq(integrationSyncState.credentialId, credentialId))
 
     await db.insert(events).values({

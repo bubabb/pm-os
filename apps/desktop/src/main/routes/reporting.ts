@@ -1,11 +1,12 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
-import { getDb, projects, secrets, notifications } from '@creare/database'
-import { eq, and } from 'drizzle-orm'
+import { getDb, secrets, notifications } from '@creare/database'
+import { and, eq } from 'drizzle-orm'
 import { getDashboard, queryProject } from '@creare/reporting'
 import { getLatestDigest, generatePmDigest, getActiveEvents, classifyItems } from '@creare/integrations'
 import { generateId } from '@creare/shared'
 import { getSecretValue } from '../secrets'
+import { assertProjectAccess } from '../utils/project-access'
 import type { AuthenticatedRequest } from '../auth'
 import type { ClassifiedItem } from '@creare/integrations'
 import type { PmDigestCache } from '@creare/database'
@@ -18,16 +19,11 @@ interface QueryQuery { q: string }
 async function getProjectAndApiKey(
   projectId: string,
   userId: string,
-): Promise<{ project: typeof projects.$inferSelect; apiKey: string | null } | null> {
-  const db = getDb()
-  const [project] = await db
-    .select()
-    .from(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.ownerId, userId)))
-    .limit(1)
+): Promise<{ apiKey: string | null } | null> {
+  const project = await assertProjectAccess(projectId, userId)
   if (!project) return null
 
-  // Fetch ANTHROPIC_API_KEY secret for this project (if configured)
+  const db = getDb()
   const [secret] = await db
     .select()
     .from(secrets)
@@ -35,7 +31,7 @@ async function getProjectAndApiKey(
     .limit(1)
 
   const apiKey = secret ? await getSecretValue(secret.id) : null
-  return { project, apiKey }
+  return { apiKey }
 }
 
 export async function reportingRoutes(app: FastifyInstance): Promise<void> {
@@ -91,13 +87,10 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAuth },
     async (request: FastifyRequest<{ Params: ProjectParams; Body: DelegateBody }>, reply) => {
       const user = (request as AuthenticatedRequest).user
+      if (!await assertProjectAccess(request.params.id, user.id)) {
+        return reply.code(404).send({ error: 'Not found' })
+      }
       const db = getDb()
-      const [project] = await db
-        .select()
-        .from(projects)
-        .where(and(eq(projects.id, request.params.id), eq(projects.ownerId, user.id)))
-        .limit(1)
-      if (!project) return reply.code(404).send({ error: 'Not found' })
 
       const { entity, suggestedAction } = request.body
       await db.insert(notifications).values({

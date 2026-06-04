@@ -28,16 +28,20 @@ export class GitHubConnector extends BaseConnector {
     const { owner, repo } = this.repo
     if (!owner || !repo) return { entities: [], nextCursor: null }
 
+    const PER_PAGE = 50
     const page = cursor ? parseInt(cursor, 10) : 1
     const entities: NormalizedEntity[] = []
+    let prCount = 0
+    let issueCount = 0
 
     // Open pull requests
     const prsRes = await this.fetchWithRetry(
-      `${BASE}/repos/${owner}/${repo}/pulls?state=open&per_page=50&page=${page}`,
+      `${BASE}/repos/${owner}/${repo}/pulls?state=open&per_page=${PER_PAGE}&page=${page}`,
       { headers: this.headers },
     )
     if (prsRes.ok) {
       const prs = await prsRes.json() as GhPr[]
+      prCount = prs.length
       for (const pr of prs) {
         const ticketIds = [
           ...extractTicketIds(pr.title),
@@ -58,7 +62,7 @@ export class GitHubConnector extends BaseConnector {
             requestedReviewers: pr.requested_reviewers?.length ?? 0,
             branchName: pr.head?.ref,
             labels: pr.labels?.map((l: { name: string }) => l.name) ?? [],
-            ticketIds,   // Jira IDs extracted for correlation
+            ticketIds,
           },
         })
       }
@@ -66,13 +70,14 @@ export class GitHubConnector extends BaseConnector {
 
     // Open issues (excludes PRs which GitHub also returns as issues)
     const issuesRes = await this.fetchWithRetry(
-      `${BASE}/repos/${owner}/${repo}/issues?state=open&per_page=50&page=${page}`,
+      `${BASE}/repos/${owner}/${repo}/issues?state=open&per_page=${PER_PAGE}&page=${page}`,
       { headers: this.headers },
     )
     if (issuesRes.ok) {
       const issues = await issuesRes.json() as GhIssue[]
+      issueCount = issues.filter((i) => !('pull_request' in i)).length
       for (const issue of issues) {
-        if ('pull_request' in issue) continue // skip PRs returned by issues endpoint
+        if ('pull_request' in issue) continue
         entities.push({
           source: 'github',
           entityType: 'issue',
@@ -90,8 +95,10 @@ export class GitHubConnector extends BaseConnector {
       }
     }
 
-    // Single page for MVP — no next cursor
-    return { entities, nextCursor: null }
+    // Advance if either list returned a full page — there may be more
+    const nextCursor = (prCount === PER_PAGE || issueCount === PER_PAGE) ? String(page + 1) : null
+
+    return { entities, nextCursor }
   }
 }
 
