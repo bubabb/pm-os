@@ -11,10 +11,8 @@ import type { User } from '@creare/database'
 
 const JWT_ISSUER = 'creare'
 const JWT_AUDIENCE = 'creare-desktop'
-const SESSION_KEY = 'creare_session_token'
 const KEYS_FILE = join(homedir(), '.creare', 'keys.json')
 
-// Lazily initialised — derived once per process from disk-persisted encrypted blob
 let _jwtSecret: Uint8Array | null = null
 
 interface KeysFile {
@@ -22,7 +20,7 @@ interface KeysFile {
   masterKeyBlob?: string  // safeStorage-encrypted base64 of the 32-byte master key
 }
 
-function readKeysFile(): KeysFile {
+export function readKeysFile(): KeysFile {
   try {
     if (existsSync(KEYS_FILE)) {
       return JSON.parse(readFileSync(KEYS_FILE, 'utf8')) as KeysFile
@@ -33,7 +31,7 @@ function readKeysFile(): KeysFile {
   return {}
 }
 
-function writeKeysFile(patch: Partial<KeysFile>): void {
+export function writeKeysFile(patch: Partial<KeysFile>): void {
   const existing = readKeysFile()
   writeFileSync(KEYS_FILE, JSON.stringify({ ...existing, ...patch }, null, 2), { mode: 0o600 })
 }
@@ -54,10 +52,9 @@ export function getJwtSecret(): Uint8Array {
     }
   }
 
-  // First boot or corrupted key file: generate a random 256-bit secret
   const bytes = new Uint8Array(32)
   globalThis.crypto.getRandomValues(bytes)
-  const raw = Buffer.from(bytes).toString('hex') // 64 hex chars
+  const raw = Buffer.from(bytes).toString('hex')
   _jwtSecret = new TextEncoder().encode(raw)
 
   if (safeStorage.isEncryptionAvailable()) {
@@ -67,53 +64,26 @@ export function getJwtSecret(): Uint8Array {
   return _jwtSecret
 }
 
+// Phase 1: creates/upserts a dev user. Real OAuth (browser window + code exchange) ships in Phase 3.
 export async function signIn(provider: 'github' | 'entra'): Promise<User> {
-  // Phase 1: creates/upserts a dev user so the UI shell can function.
-  // Real OAuth flow (browser window + code exchange) ships in Phase 3.
   const db = getDb()
   const devEmail = provider === 'github' ? 'dev@github.local' : 'dev@entra.local'
   const devName  = provider === 'github' ? 'Dev (GitHub)' : 'Dev (Entra)'
 
   const existing = await db.select().from(users).where(eq(users.email, devEmail)).limit(1)
 
-  let user: User
-  if (existing.length > 0) {
-    user = existing[0]!
-  } else {
-    const [created] = await db
-      .insert(users)
-      .values({ id: generateId(), email: devEmail, name: devName, role: 'admin' })
-      .returning()
-    user = created!
-  }
+  if (existing.length > 0) return existing[0]!
 
-  const token = await createSessionToken(user.id)
-  persistToken(token)
-  return user
+  const [created] = await db
+    .insert(users)
+    .values({ id: generateId(), email: devEmail, name: devName, role: 'admin' })
+    .returning()
+  return created!
 }
 
 export async function signOut(): Promise<void> {
-  clearToken()
-}
-
-export async function getCurrentUser(): Promise<User | null> {
-  const token = loadToken()
-  if (!token) return null
-
-  try {
-    const { payload } = await jwtVerify(token, getJwtSecret(), {
-      issuer: JWT_ISSUER,
-      audience: JWT_AUDIENCE,
-    })
-    const userId = payload['sub']
-    if (!userId) return null
-
-    const db = getDb()
-    const result = await db.select().from(users).where(eq(users.id, userId)).limit(1)
-    return result[0] ?? null
-  } catch {
-    return null
-  }
+  // Session lives in the renderer's localStorage — clearToken() in api.ts handles it.
+  // Nothing to do in the main process.
 }
 
 export async function verifyToken(token: string): Promise<string | null> {
@@ -137,30 +107,3 @@ export async function createSessionToken(userId: string): Promise<string> {
     .setExpirationTime('30d')
     .sign(getJwtSecret())
 }
-
-function persistToken(token: string): void {
-  if (safeStorage.isEncryptionAvailable()) {
-    process.env[SESSION_KEY] = safeStorage.encryptString(token).toString('base64')
-  } else {
-    process.env[SESSION_KEY] = token
-  }
-}
-
-function loadToken(): string | null {
-  const stored = process.env[SESSION_KEY]
-  if (!stored) return null
-  try {
-    if (safeStorage.isEncryptionAvailable()) {
-      return safeStorage.decryptString(Buffer.from(stored, 'base64'))
-    }
-    return stored
-  } catch {
-    return null
-  }
-}
-
-function clearToken(): void {
-  delete process.env[SESSION_KEY]
-}
-
-export { readKeysFile, writeKeysFile }

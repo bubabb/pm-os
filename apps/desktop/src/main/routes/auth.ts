@@ -1,7 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { SignJWT } from 'jose'
 import { signIn, verifyToken, getJwtSecret } from '../auth'
-import { getDb, users } from '@creare/database'
+import { getDb, users, events } from '@creare/database'
+import { generateId } from '@creare/shared'
 import { eq } from 'drizzle-orm'
 
 const JWT_ISSUER = 'creare'
@@ -29,6 +30,20 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         .setIssuedAt()
         .setExpirationTime('30d')
         .sign(getJwtSecret())
+
+      // Write sign-in event — fire-and-forget, projectId is null (cross-project action)
+      const db = getDb()
+      db.insert(events).values({
+        id: generateId(),
+        type: 'user.signed_in',
+        domain: 'auth',
+        projectId: null,
+        actorType: 'user',
+        actorId: user.id,
+        resourceType: 'user',
+        resourceId: user.id,
+        payload: JSON.stringify({ provider }),
+      }).catch((err) => console.error('[creare] Event log write failed:', err))
 
       return { token, user }
     },

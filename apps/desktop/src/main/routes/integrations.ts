@@ -1,8 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
 import { listIntegrationCredentials, storeIntegrationCredential, deleteIntegrationCredential, getIntegrationToken } from '../secrets'
-import { getDb, integrationCredentials } from '@creare/database'
+import { getDb, integrationCredentials, events } from '@creare/database'
 import { eq } from 'drizzle-orm'
+import { generateId } from '@creare/shared'
 import { triggerSync, getSyncStatus, getActiveEvents } from '@creare/integrations'
 import { assertProjectAccess } from '../utils/project-access'
 import type { AuthenticatedRequest } from '../auth'
@@ -56,6 +57,18 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
       })
       // Return without sensitive fields
       const { encryptedToken: _, iv: __, ...safe } = credential
+      const db = getDb()
+      db.insert(events).values({
+        id: generateId(),
+        type: 'integration.credential.created',
+        domain: 'integrations',
+        projectId: request.params.id,
+        actorType: 'user',
+        actorId: user.id,
+        resourceType: 'integration_credential',
+        resourceId: safe.id,
+        payload: JSON.stringify({ source: safe.source, label: safe.label }),
+      }).catch((err) => console.error('[creare] Event log write failed:', err))
       return safe
     },
   )
@@ -70,6 +83,18 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Not found' })
       }
       await deleteIntegrationCredential(request.params.credentialId)
+      const db = getDb()
+      db.insert(events).values({
+        id: generateId(),
+        type: 'integration.credential.deleted',
+        domain: 'integrations',
+        projectId: request.params.id,
+        actorType: 'user',
+        actorId: user.id,
+        resourceType: 'integration_credential',
+        resourceId: request.params.credentialId,
+        payload: JSON.stringify({}),
+      }).catch((err) => console.error('[creare] Event log write failed:', err))
       return { ok: true }
     },
   )

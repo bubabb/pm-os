@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { getDb, projects } from '@creare/database'
+import { getDb, projects, events } from '@creare/database'
 import { generateId } from '@creare/shared'
 import { eq, and, isNull } from 'drizzle-orm'
 import { requireAuth } from '../auth'
@@ -8,6 +8,27 @@ import type { AuthenticatedRequest } from '../auth'
 interface ProjectParams { id: string }
 interface CreateProjectBody { name: string; description?: string }
 interface PatchProjectBody { name?: string; description?: string }
+
+function emitProjectEvent(
+  db: ReturnType<typeof getDb>,
+  type: string,
+  projectId: string,
+  actorId: string,
+  payload: Record<string, unknown> = {},
+) {
+  // Fire-and-forget — event log writes must not block the API response
+  db.insert(events).values({
+    id: generateId(),
+    type,
+    domain: 'projects',
+    projectId,
+    actorType: 'user',
+    actorId,
+    resourceType: 'project',
+    resourceId: projectId,
+    payload: JSON.stringify(payload),
+  }).catch((err) => console.error('[creare] Event log write failed:', err))
+}
 
 export async function projectsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/projects', { preHandler: requireAuth }, async (request: FastifyRequest) => {
@@ -30,6 +51,7 @@ export async function projectsRoutes(app: FastifyInstance): Promise<void> {
         .insert(projects)
         .values({ id: generateId(), name, description: description ?? null, ownerId: user.id })
         .returning()
+      emitProjectEvent(db, 'project.created', project!.id, user.id, { name })
       return project
     },
   )
@@ -66,6 +88,7 @@ export async function projectsRoutes(app: FastifyInstance): Promise<void> {
         .where(and(eq(projects.id, request.params.id), eq(projects.ownerId, user.id)))
         .returning()
       if (!updated) return reply.code(404).send({ error: 'Not found' })
+      emitProjectEvent(db, 'project.updated', updated.id, user.id, request.body)
       return updated
     },
   )
@@ -76,13 +99,13 @@ export async function projectsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: ProjectParams }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       const db = getDb()
-      // Soft-delete via archivedAt
       const [archived] = await db
         .update(projects)
         .set({ archivedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
         .where(and(eq(projects.id, request.params.id), eq(projects.ownerId, user.id)))
         .returning()
       if (!archived) return reply.code(404).send({ error: 'Not found' })
+      emitProjectEvent(db, 'project.archived', archived.id, user.id)
       return { ok: true }
     },
   )
