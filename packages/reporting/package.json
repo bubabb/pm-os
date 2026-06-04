@@ -14,7 +14,9 @@
   "dependencies": {
     "@creare/database": "workspace:*",
     "@creare/shared": "workspace:*",
-    "@creare/ai-sdk": "workspace:*"
+    "@creare/ai-sdk": "workspace:*",
+    "@creare/integrations": "workspace:*",
+    "drizzle-orm": "^0.30.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

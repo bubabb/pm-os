@@ -1,0 +1,133 @@
+import type { FastifyInstance, FastifyRequest } from 'fastify'
+import { requireAuth } from '../auth'
+import { getDb, projects, secrets, notifications } from '@creare/database'
+import { eq, and } from 'drizzle-orm'
+import { getDashboard, queryProject } from '@creare/reporting'
+import { getLatestDigest, generatePmDigest, getActiveEvents, classifyItems } from '@creare/integrations'
+import { generateId } from '@creare/shared'
+import { getSecretValue } from '../secrets'
+import type { AuthenticatedRequest } from '../auth'
+import type { ClassifiedItem } from '@creare/integrations'
+import type { PmDigestCache } from '@creare/database'
+
+interface ProjectParams { id: string }
+interface DigestParams { id: string; type: string }
+interface DelegateBody { entity: ClassifiedItem['entity']; suggestedAction: string }
+interface QueryQuery { q: string }
+
+async function getProjectAndApiKey(
+  projectId: string,
+  userId: string,
+): Promise<{ project: typeof projects.$inferSelect; apiKey: string | null } | null> {
+  const db = getDb()
+  const [project] = await db
+    .select()
+    .from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.ownerId, userId)))
+    .limit(1)
+  if (!project) return null
+
+  // Fetch ANTHROPIC_API_KEY secret for this project (if configured)
+  const [secret] = await db
+    .select()
+    .from(secrets)
+    .where(and(eq(secrets.projectId, projectId), eq(secrets.name, 'ANTHROPIC_API_KEY')))
+    .limit(1)
+
+  const apiKey = secret ? await getSecretValue(secret.id) : null
+  return { project, apiKey }
+}
+
+export async function reportingRoutes(app: FastifyInstance): Promise<void> {
+  // Full PM Command Center dashboard
+  app.get<{ Params: ProjectParams }>(
+    '/projects/:id/dashboard',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest<{ Params: ProjectParams }>, reply) => {
+      const user = (request as AuthenticatedRequest).user
+      const ctx = await getProjectAndApiKey(request.params.id, user.id)
+      if (!ctx) return reply.code(404).send({ error: 'Not found' })
+      return getDashboard(request.params.id, ctx.apiKey)
+    },
+  )
+
+  // Trigger background digest generation for a specific type
+  app.get<{ Params: DigestParams }>(
+    '/projects/:id/dashboard/digest/:type',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest<{ Params: DigestParams }>, reply) => {
+      const user = (request as AuthenticatedRequest).user
+      const ctx = await getProjectAndApiKey(request.params.id, user.id)
+      if (!ctx) return reply.code(404).send({ error: 'Not found' })
+
+      const validTypes: PmDigestCache['digestType'][] = [
+        'morning_brief', 'sprint_health', 'decisions_and_docs', 'risk_radar',
+      ]
+      const digestType = request.params.type as PmDigestCache['digestType']
+      if (!validTypes.includes(digestType)) {
+        return reply.code(400).send({ error: 'Invalid digest type' })
+      }
+
+      // Return cached if valid
+      const cached = await getLatestDigest(request.params.id, digestType)
+      if (cached && cached.validUntil > new Date().toISOString()) {
+        return cached
+      }
+
+      // Generate fresh — requires API key
+      if (!ctx.apiKey) {
+        return reply.code(422).send({ error: 'ANTHROPIC_API_KEY secret not configured for this project' })
+      }
+
+      const events = await getActiveEvents(request.params.id)
+      const items  = events.length > 0 ? await classifyItems(request.params.id, events, ctx.apiKey) : []
+      return generatePmDigest(request.params.id, digestType, items, ctx.apiKey)
+    },
+  )
+
+  // Record a delegation — creates a notification as audit stub (Domain 1 will replace in Phase 3)
+  app.post<{ Params: ProjectParams; Body: DelegateBody }>(
+    '/projects/:id/dashboard/delegate',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest<{ Params: ProjectParams; Body: DelegateBody }>, reply) => {
+      const user = (request as AuthenticatedRequest).user
+      const db = getDb()
+      const [project] = await db
+        .select()
+        .from(projects)
+        .where(and(eq(projects.id, request.params.id), eq(projects.ownerId, user.id)))
+        .limit(1)
+      if (!project) return reply.code(404).send({ error: 'Not found' })
+
+      const { entity, suggestedAction } = request.body
+      await db.insert(notifications).values({
+        id: generateId(),
+        userId: user.id,
+        projectId: request.params.id,
+        type: 'mention',
+        title: `Delegated: ${entity.title}`,
+        body: `Action delegated to agent: ${suggestedAction}`,
+        resourceType: entity.source,
+        resourceId: entity.entityId,
+      })
+
+      return { ok: true }
+    },
+  )
+
+  // NL query
+  app.get<{ Params: ProjectParams; Querystring: QueryQuery }>(
+    '/projects/:id/reports/query',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest<{ Params: ProjectParams; Querystring: QueryQuery }>, reply) => {
+      const user = (request as AuthenticatedRequest).user
+      const ctx = await getProjectAndApiKey(request.params.id, user.id)
+      if (!ctx) return reply.code(404).send({ error: 'Not found' })
+      if (!ctx.apiKey) return reply.code(422).send({ error: 'ANTHROPIC_API_KEY not configured' })
+      if (!request.query.q?.trim()) return reply.code(400).send({ error: 'Missing q param' })
+
+      const answer = await queryProject(request.params.id, request.query.q, ctx.apiKey)
+      return { question: request.query.q, answer }
+    },
+  )
+}

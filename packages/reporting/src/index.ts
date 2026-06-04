@@ -1,3 +1,6 @@
-// Reporting — public API
-// Full implementation in Phase 2 Task #11
-// See CLAUDE.md and CONTRACT.md for scope and interface contract
+export { getDashboard } from './pm-command-center'
+export type { DashboardResponse } from './pm-command-center'
+export type { SprintContext } from './sprint-reader'
+export type { TraceStub } from './agent-activity'
+export { recordCost, getProjectSpend } from './cost-tracking'
+export { queryProject, generateSprintSummary, generateExecutiveSummary, generateChangelog } from './nl-queries'
