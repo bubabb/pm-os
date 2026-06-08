@@ -1,5 +1,6 @@
-import { getDb, sprints, milestones, externalEventCache } from '@creare/database'
-import { and, count, eq, gte, isNull, or } from 'drizzle-orm'
+import { getDb, externalEventCache } from '@creare/database'
+import { and, count, eq, isNull, gte } from 'drizzle-orm'
+import { getActiveSprint, listMilestones } from '@creare/boards'
 
 export interface SprintContext {
   activeSprint: {
@@ -17,51 +18,39 @@ export async function getSprintContext(projectId: string): Promise<SprintContext
   const db = getDb()
   const now = new Date()
 
-  // Active sprint
-  const [activeSprint] = await db
-    .select()
-    .from(sprints)
-    .where(and(eq(sprints.projectId, projectId), eq(sprints.status, 'active')))
-    .limit(1)
+  // Active sprint — via boards domain API
+  const activeSprint = getActiveSprint(projectId)
 
   let sprintInfo: SprintContext['activeSprint'] = null
   if (activeSprint?.startDate && activeSprint?.endDate) {
     const start = new Date(activeSprint.startDate)
     const end   = new Date(activeSprint.endDate)
-    const totalMs = end.getTime() - start.getTime()
+    const totalMs   = end.getTime() - start.getTime()
     const elapsedMs = now.getTime() - start.getTime()
-    const totalDays   = Math.max(1, Math.round(totalMs / 86_400_000))
-    const dayNumber   = Math.min(totalDays, Math.max(1, Math.ceil(elapsedMs / 86_400_000)))
+    const totalDays = Math.max(1, Math.round(totalMs / 86_400_000))
+    const dayNumber = Math.min(totalDays, Math.max(1, Math.ceil(elapsedMs / 86_400_000)))
     sprintInfo = { name: activeSprint.name, dayNumber, totalDays, endsAt: activeSprint.endDate }
   }
 
-  // At-risk milestones — due within 14 days or already at_risk/missed
+  // At-risk milestones — via boards domain API
   const cutoff = new Date(now.getTime() + 14 * 86_400_000).toISOString().slice(0, 10)
-  const atRiskRows = await db
-    .select()
-    .from(milestones)
-    .where(
-      and(
-        eq(milestones.projectId, projectId),
-        or(
-          and(gte(milestones.dueDate, now.toISOString().slice(0, 10)), isNull(milestones.completedAt)),
-          eq(milestones.status, 'at_risk'),
-          eq(milestones.status, 'missed'),
-        ),
-      ),
+  const allMilestones = listMilestones(projectId, { status: 'open' })
+  const atRiskMilestones = allMilestones
+    .filter((m) =>
+      m.dueDate
+        ? m.dueDate <= cutoff || m.status === 'at_risk' || m.status === 'missed'
+        : m.status === 'at_risk' || m.status === 'missed',
     )
-    .limit(5)
-
-  const atRiskMilestones = atRiskRows
-    .filter((m) => m.dueDate && (m.dueDate <= cutoff || m.status === 'at_risk' || m.status === 'missed'))
-    .map((m) => {
-      const daysUntilDue = m.dueDate
+    .slice(0, 5)
+    .map((m) => ({
+      title: m.title,
+      daysUntilDue: m.dueDate
         ? Math.round((new Date(m.dueDate).getTime() - now.getTime()) / 86_400_000)
-        : 0
-      return { title: m.title, daysUntilDue, status: m.status }
-    })
+        : 0,
+      status: m.status,
+    }))
 
-  // Overnight delta — actual count of items fetched in last 24h
+  // Overnight delta — count of items fetched in last 24h (DB query is OK here — reading integrations cache)
   const since24h = new Date(now.getTime() - 86_400_000).toISOString()
   const [deltaRow] = await db
     .select({ total: count() })
@@ -76,7 +65,7 @@ export async function getSprintContext(projectId: string): Promise<SprintContext
 
   const overnightDelta = deltaRow?.total ?? 0
 
-  // Last synced time — most recent fetchedAt across all active rows
+  // Last synced time
   const [lastRow] = await db
     .select({ fetchedAt: externalEventCache.fetchedAt })
     .from(externalEventCache)

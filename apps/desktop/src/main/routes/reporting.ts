@@ -1,12 +1,12 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
-import { getDb, secrets, notifications } from '@creare/database'
+import { getDb, secrets } from '@creare/database'
 import { and, eq } from 'drizzle-orm'
 import { getDashboard, queryProject } from '@creare/reporting'
 import { getLatestDigest, generatePmDigest, getActiveEvents, classifyItems } from '@creare/integrations'
-import { generateId } from '@creare/shared'
 import { getSecretValue } from '../secrets'
 import { assertProjectAccess } from '../utils/project-access'
+import { createTask } from '@creare/agent-orchestration'
 import type { AuthenticatedRequest } from '../auth'
 import type { ClassifiedItem } from '@creare/integrations'
 import type { PmDigestCache } from '@creare/database'
@@ -81,7 +81,7 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  // Record a delegation — creates a notification as audit stub (Domain 1 will replace in Phase 3)
+  // Record a delegation — creates a real agent task via Domain 1
   app.post<{ Params: ProjectParams; Body: DelegateBody }>(
     '/projects/:id/dashboard/delegate',
     { preHandler: requireAuth },
@@ -90,21 +90,20 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
       if (!await assertProjectAccess(request.params.id, user.id)) {
         return reply.code(404).send({ error: 'Not found' })
       }
-      const db = getDb()
 
       const { entity, suggestedAction } = request.body
-      await db.insert(notifications).values({
-        id: generateId(),
-        userId: user.id,
-        projectId: request.params.id,
-        type: 'mention',
-        title: `Delegated: ${entity.title}`,
-        body: `Action delegated to agent: ${suggestedAction}`,
-        resourceType: entity.source,
-        resourceId: entity.entityId,
-      })
+      const task = createTask(
+        request.params.id,
+        {
+          title: `[Agent] ${entity.title}`,
+          description: `${suggestedAction}\n\nSource: ${entity.source} · ${entity.entityType}\nURL: ${entity.entityUrl ?? 'n/a'}`,
+          type: 'agent',
+          priority: 'medium',
+        },
+        user.id,
+      )
 
-      return { ok: true }
+      return { ok: true, taskId: task.id }
     },
   )
 

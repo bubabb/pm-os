@@ -5,6 +5,9 @@ import ProtectedRoute from './components/ProtectedRoute'
 import SignIn from './pages/auth/SignIn'
 import ProjectList from './pages/projects/ProjectList'
 import PMCommandCenter from './pages/reports/PMCommandCenter'
+import Settings from './pages/settings/Settings'
+import AgentsPage from './pages/agents/AgentsPage'
+import BoardsPage from './pages/boards/BoardsPage'
 import Placeholder from './pages/Placeholder'
 
 const queryClient = new QueryClient({
@@ -27,12 +30,12 @@ export default function App() {
           >
             <Route index element={<Navigate to="/reports" replace />} />
             <Route path="projects" element={<ProjectList />} />
-            <Route path="boards"         element={<Placeholder title="Boards" />} />
-            <Route path="agents"         element={<Placeholder title="Agents" />} />
+            <Route path="boards"         element={<BoardsPage />} />
+            <Route path="agents"         element={<AgentsPage />} />
             <Route path="tools"          element={<Placeholder title="Tool Registry" />} />
             <Route path="observability"  element={<Placeholder title="Observability" />} />
             <Route path="reports"        element={<PMCommandCenter />} />
-            <Route path="settings"       element={<Placeholder title="Settings" />} />
+            <Route path="settings"       element={<Settings />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
