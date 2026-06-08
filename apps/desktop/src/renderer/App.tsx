@@ -8,6 +8,7 @@ import PMCommandCenter from './pages/reports/PMCommandCenter'
 import Settings from './pages/settings/Settings'
 import AgentsPage from './pages/agents/AgentsPage'
 import BoardsPage from './pages/boards/BoardsPage'
+import ObservabilityPage from './pages/observability/ObservabilityPage'
 import Placeholder from './pages/Placeholder'
 
 const queryClient = new QueryClient({
@@ -33,7 +34,7 @@ export default function App() {
             <Route path="boards"         element={<BoardsPage />} />
             <Route path="agents"         element={<AgentsPage />} />
             <Route path="tools"          element={<Placeholder title="Tool Registry" />} />
-            <Route path="observability"  element={<Placeholder title="Observability" />} />
+            <Route path="observability"  element={<ObservabilityPage />} />
             <Route path="reports"        element={<PMCommandCenter />} />
             <Route path="settings"       element={<Settings />} />
           </Route>

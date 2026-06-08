@@ -42,3 +42,9 @@ coverage/
 
 # TypeScript
 *.tsbuildinfo
+
+# Syncthing
+.stfolder
+.stfolder.removed-*/
+.stignore
+*.syncthing-enc/
