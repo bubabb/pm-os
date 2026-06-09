@@ -6,7 +6,9 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "test": "turbo run test",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "clean": "turbo run clean && rm -rf node_modules"
@@ -17,7 +19,9 @@
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^9.0.0",
-    "prettier": "^3.2.0"
+    "prettier": "^3.2.0",
+    "vitest": "^1.4.0",
+    "@vitest/coverage-v8": "^1.4.0"
   },
   "engines": {
     "node": ">=20.0.0",

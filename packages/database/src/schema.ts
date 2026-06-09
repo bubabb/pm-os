@@ -10,7 +10,7 @@
  *   - Any type used by more than one domain must be defined here
  */
 
-import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, real, index, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 import { relations } from 'drizzle-orm'
 
@@ -168,7 +168,7 @@ export const toolDeployments = sqliteTable('tool_deployments', {
   toolId:            text('tool_id').notNull().references(() => tools.id),
   toolVersionId:     text('tool_version_id').notNull().references(() => toolVersions.id),
   projectId:         text('project_id').notNull().references(() => projects.id),
-  status:            text('status', { enum: ['deploying', 'active', 'rolled_back', 'failed'] }).notNull().default('deploying'),
+  status:            text('status', { enum: ['deploying', 'active', 'rolled_back', 'superseded', 'failed'] }).notNull().default('deploying'),
   deployedById:      text('deployed_by_id').notNull().references(() => users.id),
   previousVersionId: text('previous_version_id').references(() => toolVersions.id), // populated on rollback
   ...timestamps,
@@ -435,6 +435,41 @@ export const costRecords = sqliteTable('cost_records', {
 })
 
 // ---------------------------------------------------------------------------
+// 8. Eval & Intelligence — eval runs + team memory (Phase 4)
+// ---------------------------------------------------------------------------
+
+// A single execution of an eval suite, with aggregate scores and per-case detail.
+export const evalRuns = sqliteTable('eval_runs', {
+  ...id(),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  suite:     text('suite').notNull(),            // logical name of the eval set
+  runner:    text('runner').notNull(),           // how outputs were produced, e.g. "anthropic:claude-sonnet-4-6"
+  total:     integer('total').notNull(),
+  passed:    integer('passed').notNull(),
+  passRate:  real('pass_rate').notNull(),        // 0..1
+  avgScore:  real('avg_score').notNull(),        // 0..1
+  results:   text('results').notNull().default('[]'), // JSON: EvalCaseResult[]
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (table) => ({
+  projectSuiteIdx: index('eval_runs_project_suite_idx').on(table.projectId, table.suite),
+}))
+
+// Team memory — durable learnings captured from agent runs, reviews, and evals,
+// recalled to inform future work.
+export const learnings = sqliteTable('learnings', {
+  ...id(),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  source:    text('source', { enum: ['agent_run', 'review', 'eval', 'manual'] }).notNull(),
+  taskId:    text('task_id').references(() => tasks.id),
+  title:     text('title').notNull(),
+  content:   text('content').notNull(),
+  tags:      text('tags').notNull().default('[]'), // JSON: string[]
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (table) => ({
+  projectIdx: index('learnings_project_idx').on(table.projectId),
+}))
+
+// ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
 
@@ -595,5 +630,9 @@ export type PmDigestCache               = InferSelectModel<typeof pmDigestCache>
 export type NewPmDigestCache            = InferInsertModel<typeof pmDigestCache>
 export type UserSetting                 = InferSelectModel<typeof userSettings>
 export type NewUserSetting              = InferInsertModel<typeof userSettings>
+export type EvalRun                     = InferSelectModel<typeof evalRuns>
+export type NewEvalRun                  = InferInsertModel<typeof evalRuns>
+export type Learning                    = InferSelectModel<typeof learnings>
+export type NewLearning                 = InferInsertModel<typeof learnings>
 
-export const SCHEMA_VERSION = '1.2.0'
+export const SCHEMA_VERSION = '1.3.0'

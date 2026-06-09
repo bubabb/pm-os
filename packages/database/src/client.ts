@@ -23,4 +23,15 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
   return _db
 }
 
+// Override the singleton — used by the test harness to inject an in-memory database.
+// Production code never calls this.
+export function setDb(db: BetterSQLite3Database<typeof schema>): void {
+  _db = db
+}
+
+// Drop the cached connection so the next getDb() rebuilds it (test teardown).
+export function resetDb(): void {
+  _db = null
+}
+
 export type Db = BetterSQLite3Database<typeof schema>
