@@ -1,8 +1,8 @@
 # Tool Registry — Interface Contract
 ---
 status: active
-version: 1.0
-last-updated: 2026-06-02
+version: 1.1
+last-updated: 2026-06-08
 ---
 
 ## Schema Types Consumed
@@ -27,18 +27,43 @@ All events use `domain: 'tool-registry'`.
 | `tool.rolled_back` | Deployment rolled back | `{ toolId, fromVersionId, toVersionId, deploymentId }` |
 | `tool.deployment.failed` | Deployment failed | `{ toolId, deploymentId, error: string }` |
 
-## Public API (finalized in Phase 2 Task #8)
+## Public API (implemented Phase 3, 2026-06-08)
+Synchronous (better-sqlite3 via `getDb()`), matching the boards / agent-orchestration
+domains. `actorId` params populate the NOT-NULL `*ById` columns and event `actorId`.
+
 ```typescript
 // Tool management
-createTool(input: NewTool): Promise<Tool>
-publishVersion(toolId: string, input: Omit<NewToolVersion, 'toolId'>): Promise<ToolVersion>
-deploy(toolId: string, versionId: string): Promise<ToolDeployment>
-rollback(toolId: string): Promise<ToolDeployment>  // rolls back to previousVersionId
+listTools(projectId: string): Tool[]
+getTool(id: string): Tool | null
+createTool(projectId: string, params: { name: string; description?: string }, createdById: string): Tool
 
-// Discovery
-listTools(projectId: string): Promise<Tool[]>
-getToolVersion(versionId: string): Promise<ToolVersion>
+// Version management (immutable)
+listVersions(toolId: string): ToolVersion[]
+getToolVersion(versionId: string): ToolVersion | null
+publishVersion(
+  toolId: string,
+  params: { version: string; schema: string; implementation: string; changelog?: string },
+  publishedById: string,
+): ToolVersion           // also repoints tools.latestVersionId
+
+// Deployment management (single active per tool)
+listDeployments(toolId: string): ToolDeployment[]
+getActiveDeployment(toolId: string): ToolDeployment | null
+deploy(toolId: string, versionId: string, deployedById: string): ToolDeployment
+rollback(toolId: string, deployedById: string): ToolDeployment   // restores previousVersionId
 ```
+
+> **Changed from v1.0:** signatures are synchronous (not `Promise`), and take an explicit
+> `actorId`. `getTool`/`listVersions`/`listDeployments`/`getActiveDeployment` added.
+> `tool.deployment.failed` event is reserved (not emitted in v1 — local deploys are atomic).
+
+## Deployment status values
+`tool_deployments.status` ∈ `deploying | active | rolled_back | superseded | failed`:
+- `active` — the single current deployment for a tool.
+- `superseded` — a prior active deployment replaced by a forward `deploy()` (not a rollback).
+- `rolled_back` — a deployment that was explicitly reverted via `rollback()`.
+
+The `/projects/:id/tools/:toolId/deployments/active` route returns `{ deployment: ToolDeployment | null }`.
 
 ## Dependencies
 - `@creare/database` — read/write tools, tool_versions, tool_deployments, events

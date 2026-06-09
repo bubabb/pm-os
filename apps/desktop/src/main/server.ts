@@ -13,10 +13,16 @@ import { reportingRoutes } from './routes/reporting'
 import { orchestrationRoutes } from './routes/orchestration'
 import { boardsRoutes } from './routes/boards'
 import { observabilityRoutes } from './routes/observability'
+import { toolsRoutes } from './routes/tools'
 
 const PORT = parseInt(process.env['CREARE_PORT'] ?? '4321', 10)
 
-const app = Fastify({ logger: process.env['NODE_ENV'] === 'development' })
+const app = Fastify({
+  logger:
+    process.env['NODE_ENV'] === 'development'
+      ? { redact: ['req.headers.authorization', 'res.headers["set-cookie"]'] }
+      : false,
+})
 
 export async function startServer(): Promise<void> {
   await app.register(cors, {
@@ -62,6 +68,7 @@ export async function startServer(): Promise<void> {
   await app.register(orchestrationRoutes)
   await app.register(boardsRoutes)
   await app.register(observabilityRoutes)
+  await app.register(toolsRoutes)
 
   await app.listen({ port: PORT, host: '127.0.0.1' })
   console.log(`[creare] API server running on http://127.0.0.1:${PORT}`)

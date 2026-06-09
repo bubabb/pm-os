@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { startServer, stopServer } from './server'
+import { startSyncScheduler, stopSyncScheduler } from './scheduler/sync-scheduler'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -27,6 +28,7 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   await startServer()
+  startSyncScheduler()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -34,6 +36,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', async () => {
+  await stopSyncScheduler()
   await stopServer()
   if (process.platform !== 'darwin') app.quit()
 })

@@ -9,7 +9,7 @@ import Settings from './pages/settings/Settings'
 import AgentsPage from './pages/agents/AgentsPage'
 import BoardsPage from './pages/boards/BoardsPage'
 import ObservabilityPage from './pages/observability/ObservabilityPage'
-import Placeholder from './pages/Placeholder'
+import ToolsPage from './pages/tools/ToolsPage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -33,7 +33,7 @@ export default function App() {
             <Route path="projects" element={<ProjectList />} />
             <Route path="boards"         element={<BoardsPage />} />
             <Route path="agents"         element={<AgentsPage />} />
-            <Route path="tools"          element={<Placeholder title="Tool Registry" />} />
+            <Route path="tools"          element={<ToolsPage />} />
             <Route path="observability"  element={<ObservabilityPage />} />
             <Route path="reports"        element={<PMCommandCenter />} />
             <Route path="settings"       element={<Settings />} />

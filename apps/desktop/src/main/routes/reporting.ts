@@ -92,18 +92,21 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const { entity, suggestedAction } = request.body
-      const task = createTask(
-        request.params.id,
-        {
-          title: `[Agent] ${entity.title}`,
-          description: `${suggestedAction}\n\nSource: ${entity.source} · ${entity.entityType}\nURL: ${entity.entityUrl ?? 'n/a'}`,
-          type: 'agent',
-          priority: 'medium',
-        },
-        user.id,
-      )
-
-      return { ok: true, taskId: task.id }
+      try {
+        const task = createTask(
+          request.params.id,
+          {
+            title: `[Agent] ${entity.title}`,
+            description: `${suggestedAction}\n\nSource: ${entity.source} · ${entity.entityType}\nURL: ${entity.entityUrl ?? 'n/a'}`,
+            type: 'agent',
+            priority: 'medium',
+          },
+          user.id,
+        )
+        return { ok: true, taskId: task.id }
+      } catch {
+        return reply.code(500).send({ error: 'Failed to create agent task' })
+      }
     },
   )
 

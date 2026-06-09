@@ -5,9 +5,12 @@ import type { AuthenticatedRequest } from '../auth'
 import {
   listTraces, getTrace, createTrace, updateTrace,
   listTraceEvents, addTraceEvent,
-  listEventLog, listAuditLog,
+  listEventLog, listAuditLog, addAuditEntry,
 } from '@creare/observability'
-import type { Trace, TraceEvent } from '@creare/observability'
+import type {
+  Trace, TraceEvent, AuditEntry,
+  ListEventsOpts, ListAuditOpts, AddAuditEntryParams,
+} from '@creare/observability'
 
 interface ProjectParams  { id: string }
 interface TraceParams    { id: string; traceId: string }
@@ -32,9 +35,31 @@ interface AddTraceEventBody {
   durationMs?: number
 }
 
+interface AddAuditBody {
+  actorType: AuditEntry['actorType']
+  actorId?: string
+  action: string
+  resourceType: string
+  resourceId: string
+  metadata?: Record<string, unknown>
+  ipAddress?: string
+}
+
 interface ListTracesQuery    { status?: string }
 interface ListEventsQuery    { domain?: string; type?: string; resourceType?: string; resourceId?: string; limit?: string }
 interface ListAuditQuery     { resourceType?: string; resourceId?: string; actorId?: string; limit?: string }
+
+// Clamp a client-supplied limit to a sane, bounded integer (avoids NaN/0/full-table scans).
+function safeLimit(raw?: string): number {
+  const n = raw ? parseInt(raw, 10) : NaN
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 1000) : 100
+}
+
+// Confirm a trace belongs to the project in the URL.
+function traceInProject(traceId: string, projectId: string): boolean {
+  const t = getTrace(traceId)
+  return t !== null && t.projectId === projectId
+}
 
 export async function observabilityRoutes(app: FastifyInstance): Promise<void> {
   // ── Traces ─────────────────────────────────────────────────────────────────
@@ -56,11 +81,12 @@ export async function observabilityRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: ProjectParams; Body: CreateTraceBody }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
-      return createTrace({
+      const params = {
         projectId: request.params.id,
         agentWorkspaceId: request.body.agentWorkspaceId,
-        taskId: request.body.taskId,
-      })
+        ...(request.body.taskId ? { taskId: request.body.taskId } : {}),
+      }
+      return createTrace(params)
     },
   )
 
@@ -71,7 +97,7 @@ export async function observabilityRoutes(app: FastifyInstance): Promise<void> {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
       const trace = getTrace(request.params.traceId)
-      if (!trace) return reply.code(404).send({ error: 'Trace not found' })
+      if (!trace || trace.projectId !== request.params.id) return reply.code(404).send({ error: 'Trace not found' })
       return trace
     },
   )
@@ -82,6 +108,7 @@ export async function observabilityRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: TraceParams; Body: UpdateTraceBody }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
+      if (!traceInProject(request.params.traceId, request.params.id)) return reply.code(404).send({ error: 'Trace not found' })
       const trace = updateTrace(request.params.traceId, request.body)
       if (!trace) return reply.code(404).send({ error: 'Trace not found' })
       return trace
@@ -94,6 +121,7 @@ export async function observabilityRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: TraceParams }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
+      if (!traceInProject(request.params.traceId, request.params.id)) return reply.code(404).send({ error: 'Trace not found' })
       return listTraceEvents(request.params.traceId)
     },
   )
@@ -104,6 +132,7 @@ export async function observabilityRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: TraceParams; Body: AddTraceEventBody }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
+      if (!traceInProject(request.params.traceId, request.params.id)) return reply.code(404).send({ error: 'Trace not found' })
       return addTraceEvent(request.params.traceId, request.body)
     },
   )
@@ -117,13 +146,12 @@ export async function observabilityRoutes(app: FastifyInstance): Promise<void> {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
       const { domain, type, resourceType, resourceId, limit } = request.query
-      return listEventLog(request.params.id, {
-        domain,
-        type,
-        resourceType,
-        resourceId,
-        limit: limit ? parseInt(limit, 10) : 100,
-      })
+      const opts: ListEventsOpts = { limit: safeLimit(limit) }
+      if (domain)       opts.domain = domain
+      if (type)         opts.type = type
+      if (resourceType) opts.resourceType = resourceType
+      if (resourceId)   opts.resourceId = resourceId
+      return listEventLog(request.params.id, opts)
     },
   )
 
@@ -136,12 +164,32 @@ export async function observabilityRoutes(app: FastifyInstance): Promise<void> {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
       const { resourceType, resourceId, actorId, limit } = request.query
-      return listAuditLog(request.params.id, {
-        resourceType,
-        resourceId,
-        actorId,
-        limit: limit ? parseInt(limit, 10) : 100,
-      })
+      const opts: ListAuditOpts = { limit: safeLimit(limit) }
+      if (resourceType) opts.resourceType = resourceType
+      if (resourceId)   opts.resourceId = resourceId
+      if (actorId)      opts.actorId = actorId
+      return listAuditLog(request.params.id, opts)
+    },
+  )
+
+  app.post<{ Params: ProjectParams; Body: AddAuditBody }>(
+    '/projects/:id/audit-log',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest<{ Params: ProjectParams; Body: AddAuditBody }>, reply) => {
+      const user = (request as AuthenticatedRequest).user
+      if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
+      const b = request.body
+      const params: AddAuditEntryParams = {
+        projectId: request.params.id,
+        actorType: b.actorType,
+        action: b.action,
+        resourceType: b.resourceType,
+        resourceId: b.resourceId,
+      }
+      if (b.actorId)   params.actorId = b.actorId
+      if (b.metadata)  params.metadata = b.metadata
+      if (b.ipAddress) params.ipAddress = b.ipAddress
+      return addAuditEntry(params)
     },
   )
 }

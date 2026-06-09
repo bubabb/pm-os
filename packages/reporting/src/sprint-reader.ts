@@ -1,5 +1,5 @@
 import { getDb, externalEventCache } from '@creare/database'
-import { and, count, eq, isNull, gte } from 'drizzle-orm'
+import { and, count, eq, isNull, gte, desc } from 'drizzle-orm'
 import { getActiveSprint, listMilestones } from '@creare/boards'
 
 export interface SprintContext {
@@ -70,7 +70,7 @@ export async function getSprintContext(projectId: string): Promise<SprintContext
     .select({ fetchedAt: externalEventCache.fetchedAt })
     .from(externalEventCache)
     .where(and(eq(externalEventCache.projectId, projectId), isNull(externalEventCache.purgedAt)))
-    .orderBy(externalEventCache.fetchedAt)
+    .orderBy(desc(externalEventCache.fetchedAt))
     .limit(1)
 
   return {

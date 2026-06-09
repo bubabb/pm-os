@@ -67,3 +67,19 @@ agent-state/           → Inter-agent communication, append-only log
 6. Composable (MCP + OpenAPI)
 7. Stakeholder-readable by default
 8. Opinionated defaults, flexible overrides
+
+---
+
+## Workflows & Resume (any agent, any machine)
+This project lives in the `~/projects` mother folder and carries its own hooks in
+`.claude/`, so the workflows fire regardless of which machine opens it.
+
+- **Resume:** `PROGRESS.md` at the project root is the at-a-glance state — **read it first**.
+  The detailed append-only history is `agent-state/agent-log.md`.
+- **`deepreview`** in a prompt → three-pass review (`.claude/review-methodology.md`):
+  Ground → Verify → Break-it, ending VERIFIED / ASSUMED / COULD NOT VERIFY.
+- **`done for the day`** in a prompt → wrap-up (`.claude/save-methodology.md`):
+  updates `PROGRESS.md` + the auto-memory pointer. (This is in addition to Rule 7's
+  per-task `docs/sessions/` log.)
+- Per-project hooks need a one-time trust approval the first time the project is
+  opened on a machine (incl. the Mac).

@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "DIR=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; p=$(jq -r '.prompt // empty'); printf '%s' \"$p\" | grep -qiw 'deepreview' && jq -n --rawfile ctx \"$DIR/.claude/review-methodology.md\" '{hookSpecificOutput:{hookEventName:\"UserPromptSubmit\",additionalContext:$ctx}}' 2>/dev/null || true",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "DIR=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; p=$(jq -r '.prompt // empty'); printf '%s' \"$p\" | grep -qiF 'done for the day' && jq -n --rawfile ctx \"$DIR/.claude/save-methodology.md\" '{hookSpecificOutput:{hookEventName:\"UserPromptSubmit\",additionalContext:$ctx}}' 2>/dev/null || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

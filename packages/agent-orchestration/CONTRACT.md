@@ -29,6 +29,9 @@ All events use `domain: 'agent-orchestration'`.
 | `task.cancelled` | Task manually cancelled | `{ taskId, cancelledBy: userId }` |
 | `agent.workspace.created` | New workspace registered | `{ workspaceId, modelProvider, modelId }` |
 | `agent.workspace.activated` | Workspace begins task execution | `{ workspaceId, taskId }` |
+| `agent.workspace.status_changed` | Workspace status changed (non-terminal) | `{ status, previousStatus }` |
+| `agent.workspace.terminated` | Workspace terminated | `{ status, previousStatus }` |
+| `task.updated` | Task fields changed (non-status) | `{ taskId, changed: string[] }` |
 | `approval.gate.created` | Agent requests human approval | `{ gateId, taskId, reviewerId }` |
 | `approval.gate.resolved` | Human approves or rejects gate | `{ gateId, status, reviewerId }` |
 | `agent.cost.warning` | 80% of daily cost limit reached | `{ workspaceId, costUsedCents, limitCents }` |

@@ -98,6 +98,34 @@ export async function verifyToken(token: string): Promise<string | null> {
   }
 }
 
+// Upserts a real user authenticated via OAuth, keyed by email. Updates the
+// display name / avatar on each sign-in so they stay current with the provider.
+export async function upsertOAuthUser(profile: {
+  email: string
+  name: string
+  avatarUrl: string | null
+}): Promise<User> {
+  const db = getDb()
+  const existing = await db.select().from(users).where(eq(users.email, profile.email)).limit(1)
+
+  if (existing.length > 0) {
+    const [updated] = await db
+      .update(users)
+      .set({ name: profile.name, avatarUrl: profile.avatarUrl, updatedAt: new Date().toISOString() })
+      .where(eq(users.id, existing[0]!.id))
+      .returning()
+    return updated!
+  }
+
+  // Local-first v1: the first person to sign in owns the install, so new users are
+  // admins. Revisit when multi-user / team mode lands (would default to 'engineer').
+  const [created] = await db
+    .insert(users)
+    .values({ id: generateId(), email: profile.email, name: profile.name, avatarUrl: profile.avatarUrl, role: 'admin' })
+    .returning()
+  return created!
+}
+
 export async function createSessionToken(userId: string): Promise<string> {
   return new SignJWT({ sub: userId })
     .setProtectedHeader({ alg: 'HS256' })

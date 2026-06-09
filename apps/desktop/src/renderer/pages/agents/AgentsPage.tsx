@@ -511,7 +511,7 @@ function ApprovalGatesTab({ projectId }: { projectId: string }) {
   const [notes, setNotes] = useState<Record<string, string>>({})
 
   const { data: gates = [], isLoading } = useQuery<ApprovalGate[]>({
-    queryKey: ['approval-gates', projectId],
+    queryKey: ['approval-gates', projectId, 'pending'],
     queryFn: () => api.get(`/projects/${projectId}/approval-gates?status=pending`),
   })
 
@@ -562,7 +562,10 @@ function ApprovalGatesTab({ projectId }: { projectId: string }) {
             />
             <div className="flex gap-2">
               <button
-                onClick={() => resolve.mutate({ gateId: gate.id, resolution: 'approved', reviewerNote: notes[gate.id] })}
+                onClick={() => {
+                  const note = notes[gate.id]
+                  resolve.mutate({ gateId: gate.id, resolution: 'approved', ...(note ? { reviewerNote: note } : {}) })
+                }}
                 disabled={resolve.isPending}
                 className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
               >
@@ -570,7 +573,10 @@ function ApprovalGatesTab({ projectId }: { projectId: string }) {
                 Approve
               </button>
               <button
-                onClick={() => resolve.mutate({ gateId: gate.id, resolution: 'rejected', reviewerNote: notes[gate.id] })}
+                onClick={() => {
+                  const note = notes[gate.id]
+                  resolve.mutate({ gateId: gate.id, resolution: 'rejected', ...(note ? { reviewerNote: note } : {}) })
+                }}
                 disabled={resolve.isPending}
                 className="flex items-center gap-1.5 rounded-lg border border-destructive/60 px-3 py-1.5 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
               >

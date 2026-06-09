@@ -6,9 +6,17 @@ import {
   listWorkspaces, getWorkspace, createWorkspace, updateWorkspaceStatus, terminateWorkspace,
   listTasks, getTask, createTask, updateTask,
   addEdge, getTaskEdges, getReadyTasks,
-  listApprovalGates, resolveApprovalGate,
+  listApprovalGates, getApprovalGate, resolveApprovalGate,
 } from '@creare/agent-orchestration'
 import type { AgentWorkspace, Task } from '@creare/agent-orchestration'
+
+// Sub-resource guard — the gate must belong (via its task) to the project in the URL.
+function gateInProject(gateId: string, projectId: string): boolean {
+  const gate = getApprovalGate(gateId)
+  if (!gate) return false
+  const task = getTask(gate.taskId)
+  return task !== null && task.projectId === projectId
+}
 
 interface ProjectParams  { id: string }
 interface WorkspaceParams { id: string; workspaceId: string }
@@ -48,6 +56,17 @@ interface ResolveGateBody { resolution: 'approved' | 'rejected'; reviewerNote?: 
 interface ListTasksQuery { status?: string }
 interface ListGatesQuery { status?: string }
 
+// Confirm a workspace/task actually belongs to the project in the URL (prevents
+// cross-project access via a sub-resource id from another project).
+function workspaceInProject(workspaceId: string, projectId: string): boolean {
+  const w = getWorkspace(workspaceId)
+  return w !== null && w.projectId === projectId
+}
+function taskInProject(taskId: string, projectId: string): boolean {
+  const t = getTask(taskId)
+  return t !== null && t.projectId === projectId
+}
+
 export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
   // ── Workspaces ─────────────────────────────────────────────────────────────
 
@@ -67,7 +86,7 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: ProjectParams; Body: CreateWorkspaceBody }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
-      return createWorkspace(request.params.id, request.body)
+      return createWorkspace(request.params.id, request.body, user.id)
     },
   )
 
@@ -78,7 +97,7 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
       const ws = getWorkspace(request.params.workspaceId)
-      if (!ws) return reply.code(404).send({ error: 'Workspace not found' })
+      if (!ws || ws.projectId !== request.params.id) return reply.code(404).send({ error: 'Workspace not found' })
       return ws
     },
   )
@@ -89,7 +108,8 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: WorkspaceParams; Body: UpdateWorkspaceStatusBody }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
-      updateWorkspaceStatus(request.params.workspaceId, request.body.status)
+      if (!workspaceInProject(request.params.workspaceId, request.params.id)) return reply.code(404).send({ error: 'Workspace not found' })
+      updateWorkspaceStatus(request.params.workspaceId, request.body.status, user.id)
       return { ok: true }
     },
   )
@@ -100,7 +120,8 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: WorkspaceParams }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
-      terminateWorkspace(request.params.workspaceId)
+      if (!workspaceInProject(request.params.workspaceId, request.params.id)) return reply.code(404).send({ error: 'Workspace not found' })
+      terminateWorkspace(request.params.workspaceId, user.id)
       return { ok: true }
     },
   )
@@ -145,7 +166,7 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
       const task = getTask(request.params.taskId)
-      if (!task) return reply.code(404).send({ error: 'Task not found' })
+      if (!task || task.projectId !== request.params.id) return reply.code(404).send({ error: 'Task not found' })
       return task
     },
   )
@@ -156,6 +177,7 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: TaskParams; Body: UpdateTaskBody }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
+      if (!taskInProject(request.params.taskId, request.params.id)) return reply.code(404).send({ error: 'Task not found' })
       const updated = updateTask(request.params.taskId, request.body, user.id)
       if (!updated) return reply.code(404).send({ error: 'Task not found' })
       return updated
@@ -170,7 +192,7 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: ProjectParams; Body: AddEdgeBody }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
-      const result = addEdge(request.params.id, request.body.fromTaskId, request.body.toTaskId)
+      const result = addEdge(request.params.id, request.body.fromTaskId, request.body.toTaskId, user.id)
       if (!result.ok) return reply.code(422).send({ error: result.error })
       return result.edge
     },
@@ -182,6 +204,7 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: TaskParams }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
+      if (!taskInProject(request.params.taskId, request.params.id)) return reply.code(404).send({ error: 'Task not found' })
       return getTaskEdges(request.params.taskId)
     },
   )
@@ -205,6 +228,7 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: GateParams; Body: ResolveGateBody }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
+      if (!gateInProject(request.params.gateId, request.params.id)) return reply.code(404).send({ error: 'Gate not found' })
       const gate = resolveApprovalGate(request.params.gateId, request.body.resolution, request.body.reviewerNote)
       if (!gate) return reply.code(404).send({ error: 'Gate not found or already resolved' })
       return gate

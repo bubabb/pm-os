@@ -1,4 +1,6 @@
 export { requireAuth, requireRole } from './auth-middleware'
-export { signIn, signOut, verifyToken, getJwtSecret, createSessionToken } from './auth-service'
+export { signIn, signOut, verifyToken, getJwtSecret, createSessionToken, upsertOAuthUser } from './auth-service'
 export type { AuthenticatedRequest } from './auth-middleware'
 export { validateAgentPermission } from './agent-permissions'
+export { getOAuthConfig, performOAuthFlow } from './oauth-service'
+export type { OAuthProvider, OAuthProfile } from './oauth-service'

@@ -42,7 +42,7 @@ export function getWorkspace(id: string): AgentWorkspace | null {
   return ws ?? null
 }
 
-export function createWorkspace(projectId: string, params: CreateWorkspaceParams): AgentWorkspace {
+export function createWorkspace(projectId: string, params: CreateWorkspaceParams, actorId?: string): AgentWorkspace {
   const id = generateId()
   const now = new Date().toISOString()
   getDb().insert(agentWorkspaces).values({
@@ -63,24 +63,30 @@ export function createWorkspace(projectId: string, params: CreateWorkspaceParams
     updatedAt: now,
   }).run()
 
-  _logEvent(projectId, 'agent.workspace.created', 'agent-orchestration', 'user', id, 'agent_workspace', id, { name: params.name, modelId: params.modelId })
+  _logEvent(projectId, 'agent.workspace.created', 'agent-orchestration', actorId ? 'user' : 'system', actorId ?? null, 'agent_workspace', id, { name: params.name, modelId: params.modelId })
 
   return getWorkspace(id)!
 }
 
-export function updateWorkspaceStatus(id: string, status: AgentWorkspace['status']): void {
+export function updateWorkspaceStatus(id: string, status: AgentWorkspace['status'], actorId?: string): void {
+  const ws = getWorkspace(id)
+  if (!ws) return
   const now = new Date().toISOString()
   getDb().update(agentWorkspaces)
     .set({ status, lastActiveAt: now, updatedAt: now })
     .where(eq(agentWorkspaces.id, id))
     .run()
+
+  // Every workspace state change is an event (terminated gets its own dedicated type).
+  const type = status === 'terminated' ? 'agent.workspace.terminated' : 'agent.workspace.status_changed'
+  _logEvent(ws.projectId, type, 'agent-orchestration', actorId ? 'user' : 'system', actorId ?? null, 'agent_workspace', id, {
+    status, previousStatus: ws.status,
+  })
 }
 
-export function terminateWorkspace(id: string): void {
-  const ws = getWorkspace(id)
-  if (!ws) return
-  updateWorkspaceStatus(id, 'terminated')
-  _logEvent(ws.projectId, 'agent.workspace.terminated', 'agent-orchestration', 'user', null, 'agent_workspace', id, {})
+export function terminateWorkspace(id: string, actorId?: string): void {
+  // Delegates to updateWorkspaceStatus, which emits the agent.workspace.terminated event.
+  updateWorkspaceStatus(id, 'terminated', actorId)
 }
 
 // ── Task management ───────────────────────────────────────────────────────────
@@ -135,7 +141,7 @@ export function createTask(projectId: string, params: CreateTaskParams, actorId?
   }).run()
 
   _logEvent(projectId, 'task.created', 'agent-orchestration', actorId ? 'user' : 'system', actorId ?? null, 'task', id, {
-    title: params.title, type: params.type, priority: params.priority ?? 'medium',
+    taskId: id, projectId, type: params.type, title: params.title, priority: params.priority ?? 'medium',
   })
 
   return getTask(id)!
@@ -170,8 +176,15 @@ export function updateTask(
 
   getDb().update(tasks).set(patch).where(eq(tasks.id, id)).run()
 
+  // Emit an event for every change — status transitions get a typed event, other field
+  // edits get a generic task.updated so no mutation is silent.
   if (update.status) {
-    _logEvent(task.projectId, `task.${update.status}`, 'agent-orchestration', 'user', actorId ?? null, 'task', id, { previousStatus: task.status })
+    _logEvent(task.projectId, `task.${update.status}`, 'agent-orchestration', actorId ? 'user' : 'system', actorId ?? null, 'task', id, { taskId: id, previousStatus: task.status })
+  } else {
+    const changed = Object.keys(patch).filter((k) => k !== 'updatedAt')
+    if (changed.length > 0) {
+      _logEvent(task.projectId, 'task.updated', 'agent-orchestration', actorId ? 'user' : 'system', actorId ?? null, 'task', id, { taskId: id, changed })
+    }
   }
 
   return getTask(id)
@@ -181,28 +194,40 @@ export function updateTask(
 
 export interface AddEdgeResult {
   ok: boolean
-  error?: 'cycle_detected' | 'self_loop' | 'duplicate'
+  error?: 'cycle_detected' | 'self_loop' | 'duplicate' | 'not_found'
   edge?: TaskEdge
 }
 
-export function addEdge(projectId: string, fromTaskId: string, toTaskId: string): AddEdgeResult {
+// Sentinel used to bubble a detected cycle out of the addEdge transaction.
+class _CycleError extends Error {}
+
+export function addEdge(projectId: string, fromTaskId: string, toTaskId: string, actorId?: string): AddEdgeResult {
   if (fromTaskId === toTaskId) return { ok: false, error: 'self_loop' }
 
-  // Detect cycle: if toTaskId can already reach fromTaskId, adding this edge creates a cycle.
-  if (_canReach(toTaskId, fromTaskId)) {
-    return { ok: false, error: 'cycle_detected' }
+  // Both endpoints must belong to this project — prevents inserting cross-project edges.
+  const from = getTask(fromTaskId)
+  const to = getTask(toTaskId)
+  if (!from || from.projectId !== projectId || !to || to.projectId !== projectId) {
+    return { ok: false, error: 'not_found' }
   }
 
   const id = generateId()
   const now = new Date().toISOString()
+  const db = getDb()
   try {
-    getDb().insert(taskEdges).values({ id, projectId, fromTaskId, toTaskId, createdAt: now }).run()
-  } catch {
+    // Cycle check + insert are atomic so two concurrent addEdge calls can't both pass
+    // the reachability test and create a cycle.
+    db.transaction((tx) => {
+      if (_canReach(toTaskId, fromTaskId)) throw new _CycleError()
+      tx.insert(taskEdges).values({ id, projectId, fromTaskId, toTaskId, createdAt: now }).run()
+    })
+  } catch (err) {
+    if (err instanceof _CycleError) return { ok: false, error: 'cycle_detected' }
     return { ok: false, error: 'duplicate' }
   }
 
-  const edge = getDb().select().from(taskEdges).where(eq(taskEdges.id, id)).limit(1).all()[0]!
-  _logEvent(projectId, 'task.edge.added', 'agent-orchestration', 'user', null, 'task_edge', id, { fromTaskId, toTaskId })
+  const edge = db.select().from(taskEdges).where(eq(taskEdges.id, id)).limit(1).all()[0]!
+  _logEvent(projectId, 'task.edge.added', 'agent-orchestration', actorId ? 'user' : 'system', actorId ?? null, 'task_edge', id, { fromTaskId, toTaskId })
   return { ok: true, edge }
 }
 
@@ -242,6 +267,8 @@ export function createApprovalGate(
   context: Record<string, unknown>,
 ): ApprovalGate {
   const task = getTask(taskId)
+  if (!task) throw new Error(`Cannot create approval gate: task not found: ${taskId}`)
+
   const id = generateId()
   const now = new Date().toISOString()
   getDb().insert(approvalGates).values({
@@ -257,10 +284,8 @@ export function createApprovalGate(
     updatedAt: now,
   }).run()
 
-  if (task) {
-    updateTask(taskId, { status: 'waiting_approval' })
-    _logEvent(task.projectId, 'approval.gate.created', 'agent-orchestration', 'agent', requestedBy, 'approval_gate', id, { taskId, reviewerId })
-  }
+  updateTask(taskId, { status: 'waiting_approval' })
+  _logEvent(task.projectId, 'approval.gate.created', 'agent-orchestration', 'agent', requestedBy, 'approval_gate', id, { taskId, reviewerId })
 
   return getDb().select().from(approvalGates).where(eq(approvalGates.id, id)).limit(1).all()[0]!
 }
@@ -276,6 +301,11 @@ export function listApprovalGates(projectId: string, status?: ApprovalGate['stat
     : inArray(approvalGates.taskId, taskIds)
 
   return db.select().from(approvalGates).where(where).all()
+}
+
+export function getApprovalGate(id: string): ApprovalGate | null {
+  const [g] = getDb().select().from(approvalGates).where(eq(approvalGates.id, id)).limit(1).all()
+  return g ?? null
 }
 
 export function resolveApprovalGate(
@@ -297,7 +327,10 @@ export function resolveApprovalGate(
   if (task) {
     const newStatus: Task['status'] = resolution === 'approved' ? 'in_progress' : 'cancelled'
     updateTask(gate.taskId, { status: newStatus })
-    _logEvent(task.projectId, `approval.gate.${resolution}`, 'agent-orchestration', 'user', gate.reviewerId, 'approval_gate', gateId, { taskId: gate.taskId })
+    // CONTRACT: single approval.gate.resolved event carrying the resolution status.
+    _logEvent(task.projectId, 'approval.gate.resolved', 'agent-orchestration', 'user', gate.reviewerId, 'approval_gate', gateId, {
+      gateId, status: resolution, reviewerId: gate.reviewerId, taskId: gate.taskId,
+    })
   }
 
   return db.select().from(approvalGates).where(eq(approvalGates.id, gateId)).limit(1).all()[0] ?? null

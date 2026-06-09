@@ -1,7 +1,7 @@
 import {
   getDb, events, traces, traceEvents, auditLog, agentWorkspaces,
 } from '@creare/database'
-import { eq, and, desc, asc } from 'drizzle-orm'
+import { eq, and, desc, asc, max, getTableColumns } from 'drizzle-orm'
 import { generateId } from '@creare/shared'
 import type { InferSelectModel } from 'drizzle-orm'
 
@@ -36,24 +36,18 @@ export function listTraces(
   opts?: { status?: Trace['status'] },
 ): TraceWithWorkspace[] {
   const db = getDb()
-  const rows = opts?.status
-    ? db.select().from(traces)
-        .where(and(eq(traces.projectId, projectId), eq(traces.status, opts.status)))
-        .orderBy(desc(traces.startedAt))
-        .all()
-    : db.select().from(traces)
-        .where(eq(traces.projectId, projectId))
-        .orderBy(desc(traces.startedAt))
-        .all()
+  const where = opts?.status
+    ? and(eq(traces.projectId, projectId), eq(traces.status, opts.status))
+    : eq(traces.projectId, projectId)
 
-  return rows.map((t) => {
-    const [ws] = db.select({ name: agentWorkspaces.name })
-      .from(agentWorkspaces)
-      .where(eq(agentWorkspaces.id, t.agentWorkspaceId))
-      .limit(1)
-      .all()
-    return { ...t, workspaceName: ws?.name ?? null }
-  })
+  // Single LEFT JOIN instead of one workspace lookup per trace (this endpoint is polled).
+  return db
+    .select({ ...getTableColumns(traces), workspaceName: agentWorkspaces.name })
+    .from(traces)
+    .leftJoin(agentWorkspaces, eq(agentWorkspaces.id, traces.agentWorkspaceId))
+    .where(where)
+    .orderBy(desc(traces.startedAt))
+    .all()
 }
 
 export function getTrace(traceId: string): TraceWithWorkspace | null {
@@ -120,23 +114,30 @@ export function listTraceEvents(traceId: string): TraceEvent[] {
 }
 
 export function addTraceEvent(traceId: string, params: AddTraceEventParams): TraceEvent {
-  const existing = listTraceEvents(traceId)
-  const nextSeq = existing.length > 0
-    ? Math.max(...existing.map((e) => e.sequenceNumber)) + 1
-    : 0
-
   const id = generateId()
   const now = new Date().toISOString()
-  getDb().insert(traceEvents).values({
-    id,
-    traceId,
-    type: params.type,
-    sequenceNumber: nextSeq,
-    payload: JSON.stringify(params.payload ?? {}),
-    durationMs: params.durationMs ?? null,
-    createdAt: now,
-  }).run()
-  return getDb().select().from(traceEvents).where(eq(traceEvents.id, id)).limit(1).all()[0]!
+  const db = getDb()
+
+  // Compute next sequence number and insert atomically so concurrent events on the same
+  // trace (e.g. parallel tool calls) cannot be assigned duplicate sequence numbers.
+  db.transaction((tx) => {
+    const [maxRow] = tx
+      .select({ max: max(traceEvents.sequenceNumber) })
+      .from(traceEvents)
+      .where(eq(traceEvents.traceId, traceId))
+      .all()
+    const nextSeq = (maxRow?.max ?? -1) + 1
+    tx.insert(traceEvents).values({
+      id,
+      traceId,
+      type: params.type,
+      sequenceNumber: nextSeq,
+      payload: JSON.stringify(params.payload ?? {}),
+      durationMs: params.durationMs ?? null,
+      createdAt: now,
+    }).run()
+  })
+  return db.select().from(traceEvents).where(eq(traceEvents.id, id)).limit(1).all()[0]!
 }
 
 // ── Event log (read-only views) ───────────────────────────────────────────────

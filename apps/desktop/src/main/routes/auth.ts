@@ -1,18 +1,16 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { SignJWT } from 'jose'
-import { signIn, verifyToken, getJwtSecret } from '../auth'
+import { signIn, verifyToken, createSessionToken, getOAuthConfig, performOAuthFlow, upsertOAuthUser } from '../auth'
 import { getDb, users, events } from '@creare/database'
+import type { User } from '@creare/database'
 import { generateId } from '@creare/shared'
 import { eq } from 'drizzle-orm'
-
-const JWT_ISSUER = 'creare'
-const JWT_AUDIENCE = 'creare-desktop'
 
 interface SignInBody { provider: 'github' | 'entra' }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
-  // Phase 1 sign-in: creates or returns a dev user and issues a JWT.
-  // Real OAuth browser flow (opening system browser, code exchange) ships in Phase 3.
+  // Sign-in: real OAuth browser-window flow when the provider is configured via
+  // env vars (CREARE_<PROVIDER>_CLIENT_ID/SECRET); otherwise falls back to the
+  // Phase 1 dev-user stub so development works without registered OAuth apps.
   app.post<{ Body: SignInBody }>(
     '/auth/sign-in',
     async (request: FastifyRequest<{ Body: SignInBody }>, reply) => {
@@ -21,15 +19,24 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Invalid provider' })
       }
 
-      const user = await signIn(provider)
+      const oauthConfig = getOAuthConfig(provider)
+      let user: User
+      let method: 'oauth' | 'dev-stub'
+      if (oauthConfig) {
+        try {
+          const profile = await performOAuthFlow(provider, oauthConfig)
+          user = await upsertOAuthUser(profile)
+          method = 'oauth'
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'OAuth sign-in failed'
+          return reply.code(401).send({ error: message })
+        }
+      } else {
+        user = await signIn(provider)
+        method = 'dev-stub'
+      }
 
-      const token = await new SignJWT({ sub: user.id })
-        .setProtectedHeader({ alg: 'HS256' })
-        .setIssuer(JWT_ISSUER)
-        .setAudience(JWT_AUDIENCE)
-        .setIssuedAt()
-        .setExpirationTime('30d')
-        .sign(getJwtSecret())
+      const token = await createSessionToken(user.id)
 
       // Write sign-in event — fire-and-forget, projectId is null (cross-project action)
       const db = getDb()
@@ -42,7 +49,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         actorId: user.id,
         resourceType: 'user',
         resourceId: user.id,
-        payload: JSON.stringify({ provider }),
+        payload: JSON.stringify({ provider, method }),
       }).catch((err) => console.error('[creare] Event log write failed:', err))
 
       return { token, user }

@@ -60,7 +60,7 @@ interface Sprint {
   updatedAt: string
 }
 
-type MilestoneStatus = 'open' | 'in_progress' | 'completed' | 'at_risk'
+type MilestoneStatus = 'pending' | 'at_risk' | 'completed' | 'missed'
 
 interface Milestone {
   id: string
@@ -82,10 +82,10 @@ const SPRINT_STATUS_BADGE: Record<SprintStatus, { label: string; cls: string }> 
 }
 
 const MILESTONE_STATUS_BADGE: Record<MilestoneStatus, { label: string; cls: string }> = {
-  open:        { label: 'Open',        cls: 'bg-zinc-100 text-zinc-600' },
-  in_progress: { label: 'In Progress', cls: 'bg-blue-100 text-blue-700' },
-  at_risk:     { label: 'At Risk',     cls: 'bg-amber-100 text-amber-700' },
-  completed:   { label: 'Completed',   cls: 'bg-emerald-100 text-emerald-700' },
+  pending:   { label: 'Pending',   cls: 'bg-zinc-100 text-zinc-600' },
+  at_risk:   { label: 'At Risk',   cls: 'bg-amber-100 text-amber-700' },
+  completed: { label: 'Completed', cls: 'bg-emerald-100 text-emerald-700' },
+  missed:    { label: 'Missed',    cls: 'bg-red-100 text-red-700' },
 }
 
 type PageTab = 'boards' | 'sprints' | 'milestones'
@@ -155,12 +155,6 @@ function BoardsTab({ projectId }: { projectId: string }) {
   const { data: boardList = [], isLoading: boardsLoading } = useQuery<Board[]>({
     queryKey: ['boards', projectId],
     queryFn: () => api.get(`/projects/${projectId}/boards`),
-    select: (data) => {
-      if (!selectedBoardId && data.length > 0) {
-        // Auto-select first board on initial load via side effect workaround — use index for render
-      }
-      return data
-    },
   })
 
   const activeBoardId = selectedBoardId ?? boardList[0]?.id ?? null
@@ -657,7 +651,7 @@ function MilestonesTab({ projectId }: { projectId: string }) {
     })
   }
 
-  const STATUSES: MilestoneStatus[] = ['open', 'in_progress', 'at_risk', 'completed']
+  const STATUSES: MilestoneStatus[] = ['pending', 'at_risk', 'completed', 'missed']
 
   return (
     <div className="space-y-4">

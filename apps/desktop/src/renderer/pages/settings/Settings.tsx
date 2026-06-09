@@ -129,6 +129,7 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
     mutationFn: (secretId: string) =>
       api.delete(`/projects/${projectId}/secrets/${secretId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['secrets', projectId] }),
+    onError: (e: Error) => setFormError(e.message),
   })
 
   const anthropicKey = secrets.find((s) => s.name === 'ANTHROPIC_API_KEY')
@@ -284,12 +285,15 @@ function IntegrationsTab({ projectId }: { projectId: string }) {
     mutationFn: (credentialId: string) =>
       api.delete(`/projects/${projectId}/integrations/${credentialId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['integrations', projectId] }),
+    onError: (e: Error) => setFormError(e.message),
   })
 
   async function handleSync(credentialId: string, srcSource: IntegrationSource) {
     setSyncingId(credentialId)
     try {
       await api.post(`/projects/${projectId}/integrations/sync`, { source: srcSource })
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : 'Sync failed')
     } finally {
       setSyncingId(null)
       qc.invalidateQueries({ queryKey: ['integrations', projectId] })
@@ -441,10 +445,19 @@ interface ProjectTabProps {
 function ProjectTab({ project, onArchive }: ProjectTabProps) {
   const [confirming, setConfirming] = useState(false)
   const [archiving, setArchiving] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
 
   async function handleArchive() {
     setArchiving(true)
-    await onArchive(project.id)
+    setArchiveError(null)
+    try {
+      await onArchive(project.id)
+      setConfirming(false)
+    } catch (e) {
+      setArchiveError(e instanceof Error ? e.message : 'Archive failed')
+    } finally {
+      setArchiving(false)
+    }
   }
 
   return (
@@ -497,6 +510,7 @@ function ProjectTab({ project, onArchive }: ProjectTabProps) {
               </button>
             )}
           </div>
+          {archiveError && <p className="mt-2 text-xs text-destructive">{archiveError}</p>}
         </div>
       </section>
     </div>
