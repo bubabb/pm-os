@@ -10,6 +10,13 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
+- **Backlog wave (2026-06-10, Fable 5): DONE.** typecheck 23/23 · unit tests **73/73** · build clean · **E2E green**.
+  • **Test coverage +28** (45→73): classifier rules + classification cache, correlator, sync-engine empty-fetch/txn
+    guards, pm-command-center dashboard assembly + agent-activity (complete() mocked), observability edge cases.
+  • **Eval + Memory exposed:** new `evalRoutes` (GET/POST `/projects/:id/eval-runs`) + `memoryRoutes`
+    (GET/POST `/projects/:id/learnings`); new sidebar **Intelligence** page (Eval history + Memory recall/record).
+  • **Playwright E2E now runs + passes on Kali** (display :0): the smoke spec was stale (asserted the removed
+    login screen) — updated to assert auto-login → app shell. Full Electron stack verified end-to-end.
 - **Multi-LLM + Confluence fix + macOS launcher (2026-06-10, Fable 5): DONE.** typecheck 21/21 · tests 45/45 · build clean.
   • **Model-agnostic LLM:** `ai-sdk` now implements OpenAI (`openai`) + Gemini (`@google/generative-ai`) providers
     alongside Anthropic; `complete()` dispatches all three; anthropic provider suppresses `temperature` for models
@@ -133,12 +140,14 @@ Phase 3 + Phase 4 are committed and verified green on Kali. This session's chang
    install no-ops on macOS — launch via `pnpm dev` there.
 2. Then the FOLLOW-UPS below.
 
-## FOLLOW-UPS (after green build)
-- Test suites for observability / integrations / reporting domains.
-- Playwright E2E. ✅ FIXED + VERIFIED 2026-06-10: vitest no longer collects
-  `apps/desktop/e2e/smoke.spec.ts` (added `**/e2e/**` to vitest `exclude`); those specs are
-  Playwright-owned, run via `pnpm e2e`. Clean run: **11 files / 44 tests pass, no failed suite.**
-- Routes + UI for eval and memory packages.
+## FOLLOW-UPS
+- ✅ DONE 2026-06-10 — Test suites for observability / integrations / reporting (now 73 unit tests).
+- ✅ DONE 2026-06-10 — Playwright E2E runs + passes via `pnpm --filter @creare/desktop e2e` (needs a display;
+  works on Kali :0 and on the Mac). `**/e2e/**` excluded from vitest so the two runners don't collide.
+- ✅ DONE 2026-06-10 — Routes + UI for eval & memory (Intelligence page + /eval-runs + /learnings).
+- OPEN (deferred by decision): agent EXECUTION (Delegate still just creates a `[Agent]` task — no runtime
+  that runs the chosen LLM on a task); OAuth token *refresh*; cross-project 360 rollup. Verify OpenAI/Gemini
+  pricing constants in `packages/ai-sdk/src/providers/*` (currently approximate placeholders).
 
 ---
 *Conventions: synchronous `getDb()` domain APIs; append-only `events` log on every
