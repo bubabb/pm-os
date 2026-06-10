@@ -2,12 +2,17 @@
   "name": "@creare/desktop",
   "version": "0.1.0",
   "private": true,
-  "main": "dist/main/index.js",
+  "main": "out/main/index.js",
   "scripts": {
+    "predev": "node ../../scripts/rebuild-better-sqlite3.mjs ensure electron && node ../../scripts/install-desktop-entry.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
+    "prepreview": "node ../../scripts/rebuild-better-sqlite3.mjs ensure electron",
+    "preview": "electron-vite preview",
+    "pretest": "node ../../scripts/rebuild-better-sqlite3.mjs ensure node",
     "test": "vitest run",
+    "pree2e": "node ../../scripts/rebuild-better-sqlite3.mjs ensure electron",
     "e2e": "electron-vite build && playwright test",
     "lint": "eslint src"
   },

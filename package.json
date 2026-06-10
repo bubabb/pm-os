@@ -5,6 +5,7 @@
   "description": "Creare — The agentic DevOps platform for AI-native software teams",
   "scripts": {
     "build": "turbo run build",
+    "predev": "node scripts/rebuild-better-sqlite3.mjs ensure electron && node scripts/install-desktop-entry.mjs",
     "dev": "turbo run dev",
     "test": "vitest run",
     "test:watch": "vitest",

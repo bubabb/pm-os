@@ -27,13 +27,18 @@ export default defineConfig({
     ],
   },
   test: {
+    // Swap the better-sqlite3 native addon to the Node ABI before any test loads
+    // it (the desktop app leaves it on the Electron ABI). See the setup file.
+    globalSetup: './vitest.globalsetup.ts',
     // better-sqlite3 is a native addon; the default 'threads' pool (worker_threads)
     // can segfault loading native modules. 'forks' runs each test file in a child process.
     pool: 'forks',
     globals: true,
     environment: 'node',
     include: ['packages/**/*.{test,spec}.ts', 'apps/**/*.{test,spec}.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**'],
+    // e2e/** specs are Playwright-owned (run via `pnpm e2e`); vitest must not collect
+    // them or it errors on Playwright's test.afterEach (different test runtime).
+    exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**'],
     // Renderer (React) tests opt into jsdom per-file with: // @vitest-environment jsdom
     // (requires the `jsdom` dev dependency).
   },

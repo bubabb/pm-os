@@ -7,6 +7,9 @@ dist/
 out/
 .turbo/
 
+# Cached better-sqlite3 native binaries (per platform-arch, see scripts/rebuild-better-sqlite3.mjs)
+.sqlite-abi/
+
 # Electron
 release/
 
