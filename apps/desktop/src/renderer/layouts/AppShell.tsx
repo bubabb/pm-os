@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Kanban, Bot, Wrench, Eye, BarChart3, Plug,
+  LayoutDashboard, Kanban, Bot, Wrench, Eye, BarChart3, Plug, BrainCircuit,
   ChevronDown, LogOut, Settings, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 import { useAuthStore } from '../store/auth'
@@ -13,6 +13,7 @@ const navItems = [
   { to: '/agents',      label: 'Agents',         icon: Bot },
   { to: '/tools',       label: 'Tools',          icon: Wrench },
   { to: '/observability', label: 'Observability', icon: Eye },
+  { to: '/intelligence', label: 'Intelligence',   icon: BrainCircuit },
   { to: '/reports',     label: 'Reports',        icon: BarChart3 },
   { to: '/connections', label: 'Connections',    icon: Plug },
 ]

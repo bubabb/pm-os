@@ -16,6 +16,7 @@ const BoardsPage        = lazy(() => import('./pages/boards/BoardsPage'))
 const ObservabilityPage = lazy(() => import('./pages/observability/ObservabilityPage'))
 const ToolsPage         = lazy(() => import('./pages/tools/ToolsPage'))
 const ConnectionsPage   = lazy(() => import('./pages/connections/ConnectionsPage'))
+const IntelligencePage  = lazy(() => import('./pages/intelligence/IntelligencePage'))
 
 const queryClient = new QueryClient({
   // Desktop app: alt-tabbing back shouldn't refetch every query
@@ -51,6 +52,7 @@ export default function App() {
               <Route path="agents"         element={<AgentsPage />} />
               <Route path="tools"          element={<ToolsPage />} />
               <Route path="observability"  element={<ObservabilityPage />} />
+              <Route path="intelligence"   element={<IntelligencePage />} />
               <Route path="reports"        element={<PMCommandCenter />} />
               <Route path="connections"    element={<ConnectionsPage />} />
               <Route path="settings"       element={<Settings />} />

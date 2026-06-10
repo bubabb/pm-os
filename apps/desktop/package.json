@@ -21,6 +21,8 @@
     "@creare/ai-sdk": "workspace:*",
     "@creare/boards": "workspace:*",
     "@creare/database": "workspace:*",
+    "@creare/eval": "workspace:*",
+    "@creare/memory": "workspace:*",
     "@creare/observability": "workspace:*",
     "@creare/integrations": "workspace:*",
     "@creare/reporting": "workspace:*",

@@ -16,6 +16,8 @@ import { orchestrationRoutes } from './routes/orchestration'
 import { boardsRoutes } from './routes/boards'
 import { observabilityRoutes } from './routes/observability'
 import { toolsRoutes } from './routes/tools'
+import { evalRoutes } from './routes/eval'
+import { memoryRoutes } from './routes/memory'
 
 const PORT = parseInt(process.env['CREARE_PORT'] ?? '4321', 10)
 
@@ -73,6 +75,8 @@ export async function startServer(): Promise<void> {
   await app.register(boardsRoutes)
   await app.register(observabilityRoutes)
   await app.register(toolsRoutes)
+  await app.register(evalRoutes)
+  await app.register(memoryRoutes)
 
   await app.listen({ port: PORT, host: '127.0.0.1' })
   console.log(`[creare] API server running on http://127.0.0.1:${PORT}`)
