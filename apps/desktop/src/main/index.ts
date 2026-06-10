@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
+import { runMigrations } from '@creare/database'
 import { startServer, stopServer } from './server'
 import { startSyncScheduler, stopSyncScheduler } from './scheduler/sync-scheduler'
 
@@ -27,6 +28,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  runMigrations() // bring a fresh ~/.creare/creare.db up to date before serving
   await startServer()
   startSyncScheduler()
   createWindow()

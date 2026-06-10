@@ -11,6 +11,8 @@
     "test:coverage": "vitest run --coverage",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
+    "rebuild:sqlite:node": "node scripts/rebuild-better-sqlite3.mjs node",
+    "rebuild:sqlite:electron": "node scripts/rebuild-better-sqlite3.mjs electron",
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {

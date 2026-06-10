@@ -4,7 +4,9 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // `jose` (JWT) is ESM-only — externalizing it makes the CJS main bundle do a
+    // require() that throws ERR_REQUIRE_ESM. Exclude it so it gets bundled instead.
+    plugins: [externalizeDepsPlugin({ exclude: ['jose'] })],
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/main/index.ts') },
