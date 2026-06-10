@@ -1,0 +1,1 @@
+ALTER TABLE `integration_credentials` ADD `connection_id` text REFERENCES connections(id);

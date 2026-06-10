@@ -103,6 +103,8 @@ export const tasks = sqliteTable('tasks', {
   assigneeId:       text('assignee_id').references(() => users.id),
   agentWorkspaceId: text('agent_workspace_id').references(() => agentWorkspaces.id),
   estimatedMinutes: integer('estimated_minutes'),
+  startDate:        text('start_date'),
+  dueDate:          text('due_date'),
   startedAt:        text('started_at'),
   completedAt:      text('completed_at'),
   ...timestamps,
@@ -123,6 +125,8 @@ export const taskEdges = sqliteTable('task_edges', {
 }, (table) => ({
   // Prevent duplicate edges — a pair can have at most one directed dependency
   uniqueEdge: uniqueIndex('task_edges_unique_edge_idx').on(table.fromTaskId, table.toTaskId),
+  // Incoming-edge lookup (WHERE to_task_id = ?) — readiness checks can't use the unique(from,to) index
+  toTaskIdx: index('task_edges_to_idx').on(table.toTaskId),
 }))
 
 export const approvalGates = sqliteTable('approval_gates', {
@@ -325,8 +329,12 @@ export const integrationCredentials = sqliteTable('integration_credentials', {
   label:          text('label').notNull(),                // e.g. "Acme Jira" — user-facing display name
   encryptedToken: text('encrypted_token').notNull(),      // AES-256-GCM ciphertext, base64-encoded
   iv:             text('iv').notNull(),                   // AES-256-GCM IV, base64 (unique per encryption)
-  metadata:       text('metadata').notNull().default('{}'), // JSON: { baseUrl, accountId, scopes, refreshToken? }
+  metadata:       text('metadata').notNull().default('{}'), // JSON: per-project resource scope e.g. { owner, repo } / { projectKey } / { spaceKey }
   expiresAt:      text('expires_at'),                    // null = non-expiring (PAT); set for OAuth short-lived tokens
+  // Links this per-project source to a global connection. Nullable for legacy rows
+  // created before global connections existed. Token ciphertext is COPIED from the
+  // connection so getIntegrationToken keeps decrypting the row's own copy.
+  connectionId:   text('connection_id').references(() => connections.id),
   ...timestamps,
 }, (table) => ({
   projectSourceIdx: index('integration_credentials_project_source_idx').on(table.projectId, table.source),
@@ -350,7 +358,8 @@ export const integrationSyncState = sqliteTable('integration_sync_state', {
 
 // Normalized external events fetched from all sources.
 // Treat as append-only: create new rows on refresh rather than updating existing ones.
-// TTL purging uses soft-delete via purgedAt — never hard DELETE.
+// TTL purging uses soft-delete via purgedAt; rows purged more than 7 days ago are
+// hard-deleted by the sync engine to bound growth.
 export const externalEventCache = sqliteTable('external_event_cache', {
   ...id(),
   projectId:    text('project_id').notNull().references(() => projects.id),
@@ -360,6 +369,11 @@ export const externalEventCache = sqliteTable('external_event_cache', {
   entityId:     text('entity_id').notNull(),              // source-system identifier (e.g. "PROJ-89", "412")
   entityUrl:    text('entity_url'),
   payload:      text('payload').notNull().default('{}'),  // JSON: normalized entity data (title, status, assignee, etc.)
+  // Cached PM classifier result — JSON { bucket, urgency, riskType, suggestedAction }.
+  // null = not yet classified. Rows are immutable per fetch, so a stored classification
+  // stays valid until the row is superseded by a fresh fetch (which creates a new row).
+  classification: text('classification'),
+  classifiedAt:   text('classified_at'),
   fetchedAt:    text('fetched_at').notNull().$defaultFn(() => new Date().toISOString()),
   purgedAt:     text('purged_at'),                        // soft-delete for TTL — query WHERE purgedAt IS NULL for active
   createdAt:    text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
@@ -369,6 +383,8 @@ export const externalEventCache = sqliteTable('external_event_cache', {
   sourceEntityIdx:   index('ext_cache_source_entity_idx').on(table.source, table.entityType, table.entityId),
   // Timeline queries per project (dashboard loads, sync windows)
   projectFetchedIdx: index('ext_cache_project_fetched_idx').on(table.projectId, table.fetchedAt),
+  // Sync-engine purge UPDATE filters on credentialId + purgedAt IS NULL
+  credentialPurgedIdx: index('external_event_cache_credential_purged_idx').on(table.credentialId, table.purgedAt),
 }))
 
 // AI-generated PM digest snapshots, cached with an expiry window.
@@ -397,6 +413,33 @@ export const userSettings = sqliteTable('user_settings', {
 }, (table) => ({
   uniqueUserProjectKey: uniqueIndex('user_settings_unique_idx').on(table.userId, table.projectId, table.key),
 }))
+
+// ---------------------------------------------------------------------------
+// 7b. Global (workspace-level) — Connections & Settings
+// ---------------------------------------------------------------------------
+
+// Workspace-level tool connections — NOT project-scoped. Tokens encrypted
+// identically to `secrets` (AES-256-GCM). One row per connected account.
+export const connections = sqliteTable('connections', {
+  ...id(),
+  source:         text('source', { enum: ['github', 'jira', 'confluence', 'notion', 'onedrive'] }).notNull(),
+  label:          text('label').notNull(),                  // e.g. "Acme GitHub" — user-facing display name
+  encryptedToken: text('encrypted_token').notNull(),        // AES-256-GCM ciphertext, base64-encoded
+  iv:             text('iv').notNull(),                     // AES-256-GCM IV, base64 (unique per encryption)
+  metadata:       text('metadata').notNull().default('{}'), // JSON: account-level data e.g. { baseUrl, email }
+  expiresAt:      text('expires_at'),                       // null = non-expiring (PAT); set for OAuth short-lived tokens
+  ...timestamps,
+})
+
+// Workspace-level encrypted settings — e.g. the global ANTHROPIC_API_KEY.
+// Values encrypted identically to `secrets` (AES-256-GCM).
+export const globalSettings = sqliteTable('global_settings', {
+  ...id(),
+  key:            text('key').notNull().unique(),     // e.g. 'ANTHROPIC_API_KEY'
+  encryptedValue: text('encrypted_value').notNull(),  // AES-256-GCM ciphertext, base64-encoded
+  iv:             text('iv').notNull(),               // AES-256-GCM IV, base64 (unique per encryption)
+  ...timestamps,
+})
 
 // ---------------------------------------------------------------------------
 // 8. Cross-Cutting — Notifications, Cost Records
@@ -634,5 +677,9 @@ export type EvalRun                     = InferSelectModel<typeof evalRuns>
 export type NewEvalRun                  = InferInsertModel<typeof evalRuns>
 export type Learning                    = InferSelectModel<typeof learnings>
 export type NewLearning                 = InferInsertModel<typeof learnings>
+export type Connection                  = InferSelectModel<typeof connections>
+export type NewConnection               = InferInsertModel<typeof connections>
+export type GlobalSetting               = InferSelectModel<typeof globalSettings>
+export type NewGlobalSetting            = InferInsertModel<typeof globalSettings>
 
-export const SCHEMA_VERSION = '1.3.0'
+export const SCHEMA_VERSION = '1.7.0'
