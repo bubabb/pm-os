@@ -1,10 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
-import { getDb, secrets } from '@creare/database'
-import { and, eq } from 'drizzle-orm'
 import { getDashboard, queryProject } from '@creare/reporting'
 import { getLatestDigest, generatePmDigest, getActiveEvents, classifyItems } from '@creare/integrations'
-import { getSecretValue } from '../secrets'
+import { getGlobalSetting } from '../secrets'
 import { assertProjectAccess } from '../utils/project-access'
 import { createTask } from '@creare/agent-orchestration'
 import type { AuthenticatedRequest } from '../auth'
@@ -23,14 +21,8 @@ async function getProjectAndApiKey(
   const project = await assertProjectAccess(projectId, userId)
   if (!project) return null
 
-  const db = getDb()
-  const [secret] = await db
-    .select()
-    .from(secrets)
-    .where(and(eq(secrets.projectId, projectId), eq(secrets.name, 'ANTHROPIC_API_KEY')))
-    .limit(1)
-
-  const apiKey = secret ? await getSecretValue(secret.id) : null
+  // The Claude API key is a workspace-level setting — not per-project.
+  const apiKey = await getGlobalSetting('ANTHROPIC_API_KEY')
   return { apiKey }
 }
 
@@ -72,7 +64,7 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
 
       // Generate fresh — requires API key
       if (!ctx.apiKey) {
-        return reply.code(422).send({ error: 'ANTHROPIC_API_KEY secret not configured for this project' })
+        return reply.code(422).send({ error: 'ANTHROPIC_API_KEY not configured' })
       }
 
       const events = await getActiveEvents(request.params.id)

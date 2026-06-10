@@ -99,6 +99,8 @@ export interface CreateTaskParams {
   assigneeId?: string
   agentWorkspaceId?: string
   estimatedMinutes?: number
+  startDate?: string
+  dueDate?: string
 }
 
 export function listTasks(
@@ -134,6 +136,8 @@ export function createTask(projectId: string, params: CreateTaskParams, actorId?
     assigneeId: params.assigneeId ?? null,
     agentWorkspaceId: params.agentWorkspaceId ?? null,
     estimatedMinutes: params.estimatedMinutes ?? null,
+    startDate: params.startDate ?? null,
+    dueDate: params.dueDate ?? null,
     startedAt: null,
     completedAt: null,
     createdAt: now,
@@ -149,7 +153,7 @@ export function createTask(projectId: string, params: CreateTaskParams, actorId?
 
 export function updateTask(
   id: string,
-  update: Partial<Pick<Task, 'status' | 'assigneeId' | 'agentWorkspaceId' | 'priority' | 'description'>>,
+  update: Partial<Pick<Task, 'status' | 'assigneeId' | 'agentWorkspaceId' | 'priority' | 'description' | 'startDate' | 'dueDate'>>,
   actorId?: string,
 ): Task | null {
   const task = getTask(id)
@@ -173,6 +177,8 @@ export function updateTask(
   if (update.agentWorkspaceId !== undefined) patch['agentWorkspaceId'] = update.agentWorkspaceId
   if (update.priority !== undefined)         patch['priority'] = update.priority
   if (update.description !== undefined)      patch['description'] = update.description
+  if (update.startDate !== undefined)        patch['startDate'] = update.startDate
+  if (update.dueDate !== undefined)          patch['dueDate'] = update.dueDate
 
   getDb().update(tasks).set(patch).where(eq(tasks.id, id)).run()
 
@@ -231,6 +237,11 @@ export function addEdge(projectId: string, fromTaskId: string, toTaskId: string,
   return { ok: true, edge }
 }
 
+// All dependency edges for a project — the Gantt view needs every edge to draw arrows.
+export function listEdges(projectId: string): TaskEdge[] {
+  return getDb().select().from(taskEdges).where(eq(taskEdges.projectId, projectId)).all()
+}
+
 export function getTaskEdges(taskId: string): { dependencies: Task[]; dependents: Task[] } {
   const db = getDb()
   const incoming = db.select().from(taskEdges).where(eq(taskEdges.toTaskId, taskId)).all()
@@ -250,11 +261,28 @@ export function getTaskEdges(taskId: string): { dependencies: Task[]; dependents
 }
 
 // Returns pending tasks whose all upstream dependencies are completed.
+// Three queries total (pending tasks, all project edges, all project task
+// statuses) with readiness computed in memory — no per-task edge lookups.
 export function getReadyTasks(projectId: string): Task[] {
   const pending = listTasks(projectId, { status: 'pending' })
+  if (pending.length === 0) return []
+
+  const edges = listEdges(projectId)
+  if (edges.length === 0) return pending
+
+  const statusById = new Map(listTasks(projectId).map((t) => [t.id, t.status]))
+
+  const incomingByTask = new Map<string, string[]>()
+  for (const e of edges) {
+    const deps = incomingByTask.get(e.toTaskId)
+    if (deps) deps.push(e.fromTaskId)
+    else incomingByTask.set(e.toTaskId, [e.fromTaskId])
+  }
+
   return pending.filter((task) => {
-    const { dependencies } = getTaskEdges(task.id)
-    return dependencies.every((dep) => dep.status === 'completed')
+    const deps = incomingByTask.get(task.id)
+    if (!deps) return true
+    return deps.every((fromId) => statusById.get(fromId) === 'completed')
   })
 }
 

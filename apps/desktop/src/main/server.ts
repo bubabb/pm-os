@@ -9,6 +9,8 @@ import { secretsRoutes } from './routes/secrets'
 import { eventsRoutes } from './routes/events'
 import { notificationsRoutes } from './routes/notifications'
 import { integrationsRoutes } from './routes/integrations'
+import { connectionsRoutes } from './routes/connections'
+import { globalSettingsRoutes } from './routes/global-settings'
 import { reportingRoutes } from './routes/reporting'
 import { orchestrationRoutes } from './routes/orchestration'
 import { boardsRoutes } from './routes/boards'
@@ -64,6 +66,8 @@ export async function startServer(): Promise<void> {
   await app.register(eventsRoutes)
   await app.register(notificationsRoutes)
   await app.register(integrationsRoutes)
+  await app.register(connectionsRoutes)
+  await app.register(globalSettingsRoutes)
   await app.register(reportingRoutes)
   await app.register(orchestrationRoutes)
   await app.register(boardsRoutes)

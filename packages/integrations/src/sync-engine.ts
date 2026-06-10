@@ -1,6 +1,6 @@
 import { getDb, externalEventCache, integrationSyncState, events } from '@creare/database'
 import { generateId } from '@creare/shared'
-import { eq, and, isNull } from 'drizzle-orm'
+import { eq, and, isNull, lt } from 'drizzle-orm'
 import { GitHubConnector } from './connectors/github'
 import { JiraConnector } from './connectors/jira'
 import { ConfluenceConnector } from './connectors/confluence'
@@ -12,6 +12,7 @@ import type { IntegrationCredential } from '@creare/database'
 import type { ConnectorConfig, IntegrationSource, NormalizedEntity } from './types'
 
 const MAX_ITEMS_PER_SYNC = 500
+const PURGED_ROW_RETENTION_MS = 7 * 24 * 3600 * 1000 // hard-delete soft-purged rows after 7 days
 
 function buildConnector(source: IntegrationSource, config: ConnectorConfig): BaseConnector {
   switch (source) {
@@ -89,19 +90,29 @@ export async function sync(
       if (allEntities.length >= MAX_ITEMS_PER_SYNC) break
     } while (cursor)
 
-    // Now atomically: purge stale rows, then bulk-insert fresh ones
-    // No window where the cache is empty
-    await db
-      .update(externalEventCache)
-      .set({ purgedAt: new Date().toISOString() })
-      .where(and(
-        eq(externalEventCache.credentialId, credentialId),
-        isNull(externalEventCache.purgedAt),
-      ))
-
+    // Now atomically: purge stale rows, then bulk-insert fresh ones — a single
+    // synchronous transaction so there is no window where the cache is empty.
+    // If the fetch came back empty (transient failure, revoked scope, empty 403
+    // body, etc.), SKIP the purge entirely — keep showing the last good data
+    // rather than blanking the dashboard.
     if (allEntities.length > 0) {
       const rows = allEntities.map((e) => toExternalEventCacheRow(e, credentialId, projectId))
-      await db.insert(externalEventCache).values(rows)
+      db.transaction((tx) => {
+        tx.update(externalEventCache)
+          .set({ purgedAt: new Date().toISOString() })
+          .where(and(
+            eq(externalEventCache.credentialId, credentialId),
+            isNull(externalEventCache.purgedAt),
+          ))
+          .run()
+        tx.insert(externalEventCache).values(rows).run()
+      })
+
+      // Retention: hard-delete rows soft-purged more than 7 days ago to bound growth
+      const retentionCutoff = new Date(Date.now() - PURGED_ROW_RETENTION_MS).toISOString()
+      await db
+        .delete(externalEventCache)
+        .where(lt(externalEventCache.purgedAt, retentionCutoff))
     }
 
     await db

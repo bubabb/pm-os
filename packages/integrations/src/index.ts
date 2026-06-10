@@ -1,5 +1,5 @@
 import { getDb, externalEventCache, integrationSyncState } from '@creare/database'
-import { eq, and, isNull, gte, inArray } from 'drizzle-orm'
+import { eq, and, isNull, gte, inArray, desc } from 'drizzle-orm'
 import { sync } from './sync-engine'
 import { classifyItems as classifyRows } from './classifier'
 import { correlateEntities as correlate } from './correlator'
@@ -65,7 +65,7 @@ export async function getActiveEvents(
     .select()
     .from(externalEventCache)
     .where(and(...conditions))
-    .orderBy(externalEventCache.fetchedAt)
+    .orderBy(desc(externalEventCache.fetchedAt))
     .limit(200)
 }
 

@@ -1,33 +1,78 @@
 import { getDb, integrationCredentials } from '@creare/database'
 import { generateId } from '@creare/shared'
 import { eq, and } from 'drizzle-orm'
-import { encryptSecretAsync, decryptSecretAsync } from './secrets-service'
+import { decryptSecretAsync } from './secrets-service'
+import { getConnection } from './connections-service'
 import type { IntegrationCredential } from '@creare/database'
 
+// A per-project SOURCE: binds a project to a global connection plus a resource
+// scope (e.g. { owner, repo } for GitHub, { projectKey } for Jira). The user never
+// enters a token here — we copy the connection's ciphertext (encryptedToken + iv)
+// verbatim, so getIntegrationToken keeps decrypting the row's own copy unchanged.
 export async function storeIntegrationCredential(input: {
   projectId: string
   source: IntegrationCredential['source']
+  connectionId: string
   label: string
-  token: string
   metadata?: Record<string, unknown>
-  expiresAt?: string
 }): Promise<IntegrationCredential> {
-  const { encryptedValue, iv } = await encryptSecretAsync(input.token)
+  const connection = await getConnection(input.connectionId)
+  if (!connection) throw new Error(`Connection ${input.connectionId} not found`)
+
   const db = getDb()
   const [credential] = await db
     .insert(integrationCredentials)
     .values({
       id: generateId(),
       projectId: input.projectId,
-      source: input.source,
+      source: connection.source,
       label: input.label,
-      encryptedToken: encryptedValue,
-      iv,
-      metadata: JSON.stringify(input.metadata ?? {}),
-      expiresAt: input.expiresAt ?? null,
+      connectionId: connection.id,
+      encryptedToken: connection.encryptedToken,
+      iv: connection.iv,
+      metadata: JSON.stringify(input.metadata ?? {}), // per-project resource scope
+      expiresAt: connection.expiresAt,
     })
     .returning()
   return credential!
+}
+
+// Re-copies a connection's current ciphertext into every linked source row.
+// Call after a connection token rotation so all per-project copies stay valid.
+export async function propagateConnectionToken(connectionId: string): Promise<void> {
+  const connection = await getConnection(connectionId)
+  if (!connection) throw new Error(`Connection ${connectionId} not found`)
+
+  const db = getDb()
+  await db
+    .update(integrationCredentials)
+    .set({
+      encryptedToken: connection.encryptedToken,
+      iv: connection.iv,
+      expiresAt: connection.expiresAt,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(integrationCredentials.connectionId, connectionId))
+}
+
+// For sync: merges the connection's account-level metadata (baseUrl, email, …)
+// with the source's per-project resource scope ({ owner, repo } / { projectKey } / …)
+// so the connector sees both. Returns a SHALLOW CLONE — never mutates the row.
+// Legacy rows without a connectionId pass through unchanged.
+export async function withMergedConnectionMetadata(
+  credential: IntegrationCredential,
+): Promise<IntegrationCredential> {
+  if (!credential.connectionId) return credential
+  const connection = await getConnection(credential.connectionId)
+  if (!connection) return credential
+
+  const parse = (raw: string): Record<string, unknown> => {
+    try { return JSON.parse(raw) as Record<string, unknown> }
+    catch { return {} }
+  }
+  const accountMeta = parse(connection.metadata)
+  const scopeMeta = parse(credential.metadata)
+  return { ...credential, metadata: JSON.stringify({ ...accountMeta, ...scopeMeta }) }
 }
 
 // Returns the plaintext OAuth token. Never log or expose the return value.
@@ -54,6 +99,7 @@ export async function listIntegrationCredentials(
       label: integrationCredentials.label,
       metadata: integrationCredentials.metadata,
       expiresAt: integrationCredentials.expiresAt,
+      connectionId: integrationCredentials.connectionId,
       createdAt: integrationCredentials.createdAt,
       updatedAt: integrationCredentials.updatedAt,
     })
@@ -72,24 +118,21 @@ export function isTokenExpired(credential: Pick<IntegrationCredential, 'expiresA
   return new Date(credential.expiresAt) < new Date()
 }
 
+// Updates the per-project scope (metadata) and/or label. Token updates happen on
+// the CONNECTION (updateConnection) and propagate via propagateConnectionToken.
 export async function updateIntegrationCredential(
   credentialId: string,
   projectId: string,
-  updates: { token?: string; metadata?: Record<string, unknown>; expiresAt?: string | null },
+  updates: { label?: string; metadata?: Record<string, unknown> },
 ): Promise<IntegrationCredential> {
   const db = getDb()
   const patch: Partial<IntegrationCredential> = { updatedAt: new Date().toISOString() }
 
-  if (updates.token !== undefined) {
-    const { encryptedValue, iv } = await encryptSecretAsync(updates.token)
-    patch.encryptedToken = encryptedValue
-    patch.iv = iv
+  if (updates.label !== undefined) {
+    patch.label = updates.label
   }
   if (updates.metadata !== undefined) {
     patch.metadata = JSON.stringify(updates.metadata)
-  }
-  if (updates.expiresAt !== undefined) {
-    patch.expiresAt = updates.expiresAt
   }
 
   const [updated] = await db

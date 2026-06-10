@@ -13,7 +13,7 @@ beforeEach(() => {
 })
 afterEach(() => destroyTestDb())
 
-function cacheRow(source: string, entityType: string, entityId: string, purged = false) {
+function cacheRow(source: string, entityType: string, entityId: string, purged = false, fetchedAt?: string) {
   getDb()
     .insert(externalEventCache)
     .values({
@@ -24,6 +24,7 @@ function cacheRow(source: string, entityType: string, entityId: string, purged =
       entityType,
       entityId,
       purgedAt: purged ? new Date().toISOString() : null,
+      ...(fetchedAt !== undefined ? { fetchedAt } : {}),
     })
     .run()
 }
@@ -37,6 +38,15 @@ describe('integrations — getActiveEvents', () => {
     expect(await getActiveEvents(projectId)).toHaveLength(2)
     expect(await getActiveEvents(projectId, { sources: ['jira'] })).toHaveLength(1)
     expect(await getActiveEvents(projectId, { entityTypes: ['pr'] })).toHaveLength(1)
+  })
+
+  it('returns the most recently fetched rows first', async () => {
+    cacheRow('github', 'pr', 'old', false, '2026-06-01T00:00:00.000Z')
+    cacheRow('github', 'pr', 'new', false, '2026-06-09T00:00:00.000Z')
+    cacheRow('github', 'pr', 'mid', false, '2026-06-05T00:00:00.000Z')
+
+    const rows = await getActiveEvents(projectId)
+    expect(rows.map((r) => r.entityId)).toEqual(['new', 'mid', 'old'])
   })
 })
 

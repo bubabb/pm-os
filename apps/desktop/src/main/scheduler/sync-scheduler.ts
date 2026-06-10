@@ -3,7 +3,7 @@ import type { IntegrationCredential } from '@creare/database'
 import { eq, isNull } from 'drizzle-orm'
 import { generateId } from '@creare/shared'
 import { triggerSync } from '@creare/integrations'
-import { getIntegrationToken, isTokenExpired } from '../secrets'
+import { getIntegrationToken, isTokenExpired, withMergedConnectionMetadata } from '../secrets'
 
 // Background sync scheduler — runs in the Electron main process. On a fixed
 // interval it triggers an integration sync for every non-archived project that
@@ -59,7 +59,9 @@ export async function runSyncCycle(): Promise<void> {
         // project's healthy credentials for this cycle.
         const settled = await Promise.allSettled(
           usable.map(async (credential) => ({
-            credential,
+            // Merge the global connection's account metadata (baseUrl, email)
+            // with this source's per-project scope — shallow clone, row untouched.
+            credential: await withMergedConnectionMetadata(credential),
             token: await getIntegrationToken(credential.id),
           })),
         )

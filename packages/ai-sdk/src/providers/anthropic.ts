@@ -1,11 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { CompletionRequest, CompletionResponse } from '../types'
 
-// Sonnet 4.6 pricing (per million tokens, in USD → cents)
+// Anthropic pricing (per million tokens, in USD → cents)
 const PRICING: Record<string, { inputCentsPerMtok: number; outputCentsPerMtok: number }> = {
-  'claude-sonnet-4-6':           { inputCentsPerMtok: 300,  outputCentsPerMtok: 1500 },
-  'claude-opus-4-8':             { inputCentsPerMtok: 1500, outputCentsPerMtok: 7500 },
-  'claude-haiku-4-5-20251001':   { inputCentsPerMtok: 80,   outputCentsPerMtok: 400  },
+  'claude-sonnet-4-6':           { inputCentsPerMtok: 300, outputCentsPerMtok: 1500 },
+  'claude-opus-4-8':             { inputCentsPerMtok: 500, outputCentsPerMtok: 2500 },
+  'claude-haiku-4-5-20251001':   { inputCentsPerMtok: 100, outputCentsPerMtok: 500  },
 }
 
 function calcCostCents(model: string, inputTokens: number, outputTokens: number): number {

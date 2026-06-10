@@ -5,10 +5,11 @@ import type { AuthenticatedRequest } from '../auth'
 import {
   listWorkspaces, getWorkspace, createWorkspace, updateWorkspaceStatus, terminateWorkspace,
   listTasks, getTask, createTask, updateTask,
-  addEdge, getTaskEdges, getReadyTasks,
+  addEdge, getTaskEdges, getReadyTasks, listEdges,
   listApprovalGates, getApprovalGate, resolveApprovalGate,
 } from '@creare/agent-orchestration'
 import type { AgentWorkspace, Task } from '@creare/agent-orchestration'
+import { listSprints, listMilestones } from '@creare/boards'
 
 // Sub-resource guard — the gate must belong (via its task) to the project in the URL.
 function gateInProject(gateId: string, projectId: string): boolean {
@@ -40,6 +41,8 @@ interface CreateTaskBody {
   assigneeId?: string
   agentWorkspaceId?: string
   estimatedMinutes?: number
+  startDate?: string
+  dueDate?: string
 }
 
 interface UpdateTaskBody {
@@ -48,6 +51,8 @@ interface UpdateTaskBody {
   agentWorkspaceId?: string
   priority?: Task['priority']
   description?: string
+  startDate?: string
+  dueDate?: string
 }
 
 interface AddEdgeBody { fromTaskId: string; toTaskId: string }
@@ -206,6 +211,24 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
       if (!taskInProject(request.params.taskId, request.params.id)) return reply.code(404).send({ error: 'Task not found' })
       return getTaskEdges(request.params.taskId)
+    },
+  )
+
+  // ── Timeline (Gantt) ───────────────────────────────────────────────────────
+
+  app.get<{ Params: ProjectParams }>(
+    '/projects/:id/timeline',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest<{ Params: ProjectParams }>, reply) => {
+      const user = (request as AuthenticatedRequest).user
+      if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
+      const projectId = request.params.id
+      return {
+        tasks: listTasks(projectId),
+        edges: listEdges(projectId),
+        sprints: listSprints(projectId),
+        milestones: listMilestones(projectId),
+      }
     },
   )
 

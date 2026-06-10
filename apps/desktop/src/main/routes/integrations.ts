@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
-import { listIntegrationCredentials, storeIntegrationCredential, deleteIntegrationCredential, getIntegrationToken } from '../secrets'
+import { listIntegrationCredentials, storeIntegrationCredential, deleteIntegrationCredential, getIntegrationToken, withMergedConnectionMetadata } from '../secrets'
 import { getDb, integrationCredentials, events } from '@creare/database'
 import { eq } from 'drizzle-orm'
 import { generateId } from '@creare/shared'
@@ -12,12 +12,13 @@ import type { IntegrationCredential } from '@creare/database'
 interface ProjectParams { id: string }
 interface CredentialParams { id: string; credentialId: string }
 
+// Source-binding shape: a per-project source references a global connection
+// and carries only the resource scope (e.g. { owner, repo }) — never a token.
 interface CreateCredentialBody {
   source: IntegrationCredential['source']
+  connectionId: string
   label: string
-  token: string
   metadata?: Record<string, unknown>
-  expiresAt?: string
 }
 
 interface SyncBody { source?: IntegrationCredential['source'] }
@@ -46,14 +47,13 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
       if (!await assertProjectAccess(request.params.id, user.id)) {
         return reply.code(404).send({ error: 'Not found' })
       }
-      const { source, label, token, metadata, expiresAt } = request.body
+      const { source, connectionId, label, metadata } = request.body
       const credential = await storeIntegrationCredential({
         projectId: request.params.id,
         source,
+        connectionId,
         label,
-        token,
-        metadata,
-        expiresAt,
+        ...(metadata !== undefined ? { metadata } : {}),
       })
       // Return without sensitive fields
       const { encryptedToken: _, iv: __, ...safe } = credential
@@ -115,10 +115,12 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
         .from(integrationCredentials)
         .where(eq(integrationCredentials.projectId, request.params.id))
 
-      // Fetch tokens and build credential+token pairs
+      // Fetch tokens and build credential+token pairs. The credential passed to
+      // sync gets the connection's account metadata merged with the per-project
+      // scope (shallow clone — the DB row is never mutated).
       const pairs = await Promise.all(
         credentials.map(async (credential) => ({
-          credential,
+          credential: await withMergedConnectionMetadata(credential),
           token: await getIntegrationToken(credential.id),
         })),
       )

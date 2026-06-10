@@ -1,4 +1,6 @@
 import { complete } from '@creare/ai-sdk'
+import { getDb, externalEventCache } from '@creare/database'
+import { eq } from 'drizzle-orm'
 import type { ExternalEventCache } from '@creare/database'
 import type { ClassifiedItem, NormalizedEntity, ActionBucket } from './types'
 
@@ -128,6 +130,29 @@ async function withConcurrency<T, R>(
   return results
 }
 
+// Parse a persisted classification — null if missing or malformed
+function parseCachedClassification(row: ExternalEventCache): Classification | null {
+  if (!row.classification) return null
+  try {
+    const c = JSON.parse(row.classification) as Classification
+    if (c.bucket !== 'human' && c.bucket !== 'agent') return null
+    return c
+  } catch {
+    return null
+  }
+}
+
+// Persist a classification on its cache row so subsequent dashboard loads skip
+// re-classifying. Cache rows are immutable per fetch — a fresh fetch creates a
+// new row with a null classification, so a stored result never goes stale.
+function persistClassification(rowId: string, c: Classification): void {
+  getDb()
+    .update(externalEventCache)
+    .set({ classification: JSON.stringify(c), classifiedAt: new Date().toISOString() })
+    .where(eq(externalEventCache.id, rowId))
+    .run()
+}
+
 export async function classifyItems(
   cacheRows: ExternalEventCache[],
   apiKey: string,
@@ -142,12 +167,17 @@ export async function classifyItems(
     }
   }
 
+  // Stage 0: persisted classifications — no rules, no LLM
+  const cachedResults = parsed.map(({ row }) => parseCachedClassification(row))
+
   // Stage 1: rule engine (synchronous, zero LLM cost)
-  const ruleResults = parsed.map(({ entity }) => applyRules(entity))
+  const ruleResults = parsed.map(({ entity }, i) =>
+    cachedResults[i] ? null : applyRules(entity),
+  )
 
   // Stage 2: LLM for ambiguous items only — run in parallel, max 5 concurrent
   const ambiguousIndices = ruleResults
-    .map((r, i) => (r === null ? i : -1))
+    .map((r, i) => (r === null && cachedResults[i] === null ? i : -1))
     .filter((i) => i !== -1)
 
   const llmResults = await withConcurrency(
@@ -159,8 +189,10 @@ export async function classifyItems(
   // Merge results
   const llmMap = new Map(ambiguousIndices.map((idx, pos) => [idx, llmResults[pos]!]))
 
-  return parsed.map(({ entity }, i) => {
-    const c = ruleResults[i] ?? llmMap.get(i)!
+  return parsed.map(({ row, entity }, i) => {
+    const cached = cachedResults[i]
+    const c = cached ?? ruleResults[i] ?? llmMap.get(i)!
+    if (!cached) persistClassification(row.id, c)
     return {
       entity,
       bucket: c.bucket,

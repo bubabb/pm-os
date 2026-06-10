@@ -22,9 +22,13 @@ export class JiraConnector extends BaseConnector {
 
     const startAt = cursor ? parseInt(cursor, 10) : 0
     const maxResults = 50
-    const jql = encodeURIComponent(
-      'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC',
-    )
+    // Per-project resource scope: when a projectKey is set (source bound to a
+    // global connection), constrain the JQL to that Jira project so data from
+    // other projects on the same account never leaks in.
+    const meta = this.config.metadata as { projectKey?: string } | undefined
+    const projectKey = meta?.projectKey
+    const baseJql = 'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC'
+    const jql = encodeURIComponent(projectKey ? `project = ${projectKey} AND ${baseJql}` : baseJql)
 
     const res = await this.fetchWithRetry(
       `${baseUrl}/rest/api/3/search?jql=${jql}&startAt=${startAt}&maxResults=${maxResults}&fields=summary,status,assignee,updated,labels,priority`,

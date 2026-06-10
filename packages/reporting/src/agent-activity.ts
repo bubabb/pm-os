@@ -1,5 +1,5 @@
 import { getDb, traces, agentWorkspaces, tasks } from '@creare/database'
-import { and, eq, gte, desc } from 'drizzle-orm'
+import { eq, desc, inArray } from 'drizzle-orm'
 
 export interface TraceStub {
   id: string
@@ -44,10 +44,16 @@ export async function getAgentActivity(projectId: string): Promise<AgentActivity
 
   const [workspaceRows, taskRows] = await Promise.all([
     workspaceIds.length > 0
-      ? db.select({ id: agentWorkspaces.id, name: agentWorkspaces.name }).from(agentWorkspaces)
+      ? db
+          .select({ id: agentWorkspaces.id, name: agentWorkspaces.name })
+          .from(agentWorkspaces)
+          .where(inArray(agentWorkspaces.id, workspaceIds))
       : Promise.resolve([]),
     taskIds.length > 0
-      ? db.select({ id: tasks.id, title: tasks.title }).from(tasks)
+      ? db
+          .select({ id: tasks.id, title: tasks.title })
+          .from(tasks)
+          .where(inArray(tasks.id, taskIds))
       : Promise.resolve([]),
   ])
 
