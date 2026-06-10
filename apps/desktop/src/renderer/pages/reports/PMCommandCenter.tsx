@@ -12,11 +12,18 @@ import { RiskRadar } from './RiskRadar'
 
 export default function PMCommandCenter() {
   const { currentProject } = useProjectStore()
-  const {
-    data, isLoading, isRefreshing, error,
-    delegatingItem, acknowledgedIds,
-    load, refresh, setDelegating, delegate, acknowledge,
-  } = useDashboardStore()
+  // Selector form so this page only re-renders when the slices it reads change
+  const data            = useDashboardStore((s) => s.data)
+  const isLoading       = useDashboardStore((s) => s.isLoading)
+  const isRefreshing    = useDashboardStore((s) => s.isRefreshing)
+  const error           = useDashboardStore((s) => s.error)
+  const delegatingItem  = useDashboardStore((s) => s.delegatingItem)
+  const acknowledgedIds = useDashboardStore((s) => s.acknowledgedIds)
+  const load            = useDashboardStore((s) => s.load)
+  const refresh         = useDashboardStore((s) => s.refresh)
+  const setDelegating   = useDashboardStore((s) => s.setDelegating)
+  const delegate        = useDashboardStore((s) => s.delegate)
+  const acknowledge     = useDashboardStore((s) => s.acknowledge)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -31,7 +38,9 @@ export default function PMCommandCenter() {
     )
   }
 
-  if (isLoading) {
+  // Full-screen spinner only on a true cold load — when data is already in the
+  // store, keep rendering it while load() refreshes in the background.
+  if (isLoading && !data) {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -39,7 +48,7 @@ export default function PMCommandCenter() {
     )
   }
 
-  if (error) {
+  if (error && !data) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-destructive">{error}</p>
@@ -62,10 +71,10 @@ export default function PMCommandCenter() {
           </p>
         </div>
         <button
-          onClick={() => navigate('/settings')}
+          onClick={() => navigate('/connections')}
           className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >
-          Go to Settings
+          Go to Connections
         </button>
       </div>
     )

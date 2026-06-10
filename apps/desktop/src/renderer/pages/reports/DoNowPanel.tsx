@@ -1,23 +1,20 @@
 import { CheckCircle } from 'lucide-react'
 import type { ClassifiedItem } from '@creare/integrations'
+import { Badge, BADGE_SOURCE_CLASSES, SOURCE_LABELS, type BadgeSource } from '../../components/ui/Badge'
 
-const SOURCE_LABELS: Record<string, string> = {
-  jira: 'Jira', github: 'GitHub', confluence: 'Confluence',
-  notion: 'Notion', onedrive: 'OneDrive',
+function isBadgeSource(source: string): source is BadgeSource {
+  return source in BADGE_SOURCE_CLASSES
 }
 
-const SOURCE_COLORS: Record<string, string> = {
-  jira:       'bg-blue-500/10 text-blue-400',
-  github:     'bg-purple-500/10 text-purple-400',
-  confluence: 'bg-teal-500/10 text-teal-400',
-  notion:     'bg-gray-500/10 text-gray-400',
-  onedrive:   'bg-sky-500/10 text-sky-400',
-}
-
+/** Colored status dot (replaces emoji glyphs so screen readers stay quiet). */
 function UrgencyBadge({ urgency }: { urgency: number }) {
-  if (urgency >= 4) return <span className="text-base" title={`Urgency ${urgency}`}>🔴</span>
-  if (urgency === 3) return <span className="text-base" title={`Urgency ${urgency}`}>🟡</span>
-  return <span className="text-base" title={`Urgency ${urgency}`}>🟢</span>
+  const dot = urgency >= 4 ? 'bg-red-500' : urgency === 3 ? 'bg-amber-500' : 'bg-emerald-500'
+  return (
+    <span className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center" title={`Urgency ${urgency}`}>
+      <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${dot}`} />
+      <span className="sr-only">Urgency {urgency} of 5</span>
+    </span>
+  )
 }
 
 interface Props {
@@ -58,11 +55,12 @@ export function DoNowPanel({ items, acknowledgedIds, onAcknowledge }: Props) {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <span
-                          className={`mb-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${SOURCE_COLORS[item.entity.source] ?? 'bg-muted text-muted-foreground'}`}
+                        <Badge
+                          {...(isBadgeSource(item.entity.source) ? { source: item.entity.source } : {})}
+                          className="mb-1"
                         >
-                          {SOURCE_LABELS[item.entity.source] ?? item.entity.source}
-                        </span>
+                          {isBadgeSource(item.entity.source) ? SOURCE_LABELS[item.entity.source] : item.entity.source}
+                        </Badge>
                         <p className="text-sm font-medium leading-tight text-foreground line-clamp-2">
                           {item.entity.title}
                         </p>
@@ -70,8 +68,9 @@ export function DoNowPanel({ items, acknowledgedIds, onAcknowledge }: Props) {
                       </div>
                       <button
                         onClick={() => onAcknowledge(id)}
-                        className="mt-0.5 shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent hover:text-accent-foreground"
+                        className="mt-0.5 shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 hover:bg-accent hover:text-accent-foreground"
                         title="Acknowledge"
+                        aria-label={`Acknowledge ${item.entity.title}`}
                       >
                         <CheckCircle className="h-4 w-4" />
                       </button>

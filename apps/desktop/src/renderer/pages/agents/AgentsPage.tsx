@@ -6,6 +6,9 @@ import {
 } from 'lucide-react'
 import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
+import { Badge, type BadgeVariant } from '../../components/ui/Badge'
+import { QueryError } from '../../components/ui/QueryError'
+import { Field } from '../../components/ui/Field'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -66,20 +69,20 @@ const MODEL_PRESETS: { provider: ModelProvider; modelId: string; label: string }
   { provider: 'gemini',    modelId: 'gemini-2.0-flash',          label: 'Gemini 2.0 Flash' },
 ]
 
-const PRIORITY_COLORS: Record<Priority, string> = {
-  low:      'bg-zinc-100 text-zinc-600',
-  medium:   'bg-blue-100 text-blue-700',
-  high:     'bg-amber-100 text-amber-700',
-  critical: 'bg-red-100 text-red-700',
+const PRIORITY_VARIANT: Record<Priority, BadgeVariant> = {
+  low:      'neutral',
+  medium:   'info',
+  high:     'warning',
+  critical: 'danger',
 }
 
-const STATUS_BADGE: Record<TaskStatus, { label: string; cls: string }> = {
-  pending:          { label: 'Pending',          cls: 'bg-zinc-100 text-zinc-600' },
-  in_progress:      { label: 'In Progress',      cls: 'bg-blue-100 text-blue-700' },
-  waiting_approval: { label: 'Awaiting Approval',cls: 'bg-amber-100 text-amber-700' },
-  completed:        { label: 'Completed',         cls: 'bg-emerald-100 text-emerald-700' },
-  failed:           { label: 'Failed',            cls: 'bg-red-100 text-red-700' },
-  cancelled:        { label: 'Cancelled',         cls: 'bg-zinc-100 text-zinc-500' },
+const STATUS_BADGE: Record<TaskStatus, { label: string; variant: BadgeVariant }> = {
+  pending:          { label: 'Pending',           variant: 'neutral' },
+  in_progress:      { label: 'In Progress',       variant: 'info' },
+  waiting_approval: { label: 'Awaiting Approval', variant: 'warning' },
+  completed:        { label: 'Completed',         variant: 'success' },
+  failed:           { label: 'Failed',            variant: 'danger' },
+  cancelled:        { label: 'Cancelled',         variant: 'neutral' },
 }
 
 type PageTab = 'workspaces' | 'tasks' | 'gates'
@@ -145,8 +148,9 @@ function WorkspacesTab({ projectId }: { projectId: string }) {
   const [name, setName] = useState('')
   const [preset, setPreset] = useState(0)
   const [formError, setFormError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  const { data: workspaces = [], isLoading } = useQuery<Workspace[]>({
+  const { data: workspaces = [], isLoading, isError, error, refetch } = useQuery<Workspace[]>({
     queryKey: ['workspaces', projectId],
     queryFn: () => api.get(`/projects/${projectId}/workspaces`),
   })
@@ -166,13 +170,21 @@ function WorkspacesTab({ projectId }: { projectId: string }) {
   const updateStatus = useMutation({
     mutationFn: ({ workspaceId, status }: { workspaceId: string; status: WorkspaceStatus }) =>
       api.patch(`/projects/${projectId}/workspaces/${workspaceId}/status`, { status }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['workspaces', projectId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['workspaces', projectId] })
+      setActionError(null)
+    },
+    onError: (e: Error) => setActionError(e.message),
   })
 
   const terminate = useMutation({
     mutationFn: (workspaceId: string) =>
       api.delete(`/projects/${projectId}/workspaces/${workspaceId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['workspaces', projectId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['workspaces', projectId] })
+      setActionError(null)
+    },
+    onError: (e: Error) => setActionError(e.message),
   })
 
   function handleCreate(e: React.FormEvent) {
@@ -183,6 +195,9 @@ function WorkspacesTab({ projectId }: { projectId: string }) {
   }
 
   if (isLoading) return <Spinner />
+  if (isError) {
+    return <QueryError message={error instanceof Error ? error.message : undefined} onRetry={() => refetch()} />
+  }
 
   return (
     <div className="space-y-4">
@@ -200,13 +215,16 @@ function WorkspacesTab({ projectId }: { projectId: string }) {
       {showCreate && (
         <form onSubmit={handleCreate} className="rounded-lg border border-border bg-card p-4 space-y-3">
           <h3 className="text-sm font-medium text-foreground">Create workspace</h3>
-          <input
-            autoFocus
-            placeholder="Workspace name (e.g. Sprint Automation Agent)"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
-          />
+          <Field id="workspace-name" label="Workspace name">
+            <input
+              id="workspace-name"
+              autoFocus
+              placeholder="e.g. Sprint Automation Agent"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+            />
+          </Field>
           <div className="grid grid-cols-3 gap-2">
             {MODEL_PRESETS.map((p, i) => (
               <button
@@ -244,6 +262,8 @@ function WorkspacesTab({ projectId }: { projectId: string }) {
         </form>
       )}
 
+      {actionError && <p className="text-xs text-destructive">{actionError}</p>}
+
       {workspaces.length === 0 && !showCreate ? (
         <EmptyState
           icon={Bot}
@@ -256,9 +276,9 @@ function WorkspacesTab({ projectId }: { projectId: string }) {
             <div key={ws.id} className="flex items-center justify-between px-4 py-3">
               <div className="flex items-center gap-3">
                 <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                  ws.status === 'running' ? 'bg-emerald-100' : 'bg-muted'
+                  ws.status === 'running' ? 'bg-emerald-500/15' : 'bg-muted'
                 }`}>
-                  <Bot className={`h-4 w-4 ${ws.status === 'running' ? 'text-emerald-600' : 'text-muted-foreground'}`} />
+                  <Bot className={`h-4 w-4 ${ws.status === 'running' ? 'text-emerald-400' : 'text-muted-foreground'}`} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-foreground">{ws.name}</p>
@@ -326,32 +346,49 @@ function TasksTab({ projectId }: { projectId: string }) {
   const [newDesc, setNewDesc] = useState('')
   const [newType, setNewType] = useState<TaskType>('agent')
   const [newPriority, setNewPriority] = useState<Priority>('medium')
+  const [newStart, setNewStart] = useState('')
+  const [newDue, setNewDue] = useState('')
+  const [formError, setFormError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  const { data: allTasks = [], isLoading } = useQuery<Task[]>({
+  const { data: allTasks = [], isLoading, isError, error, refetch } = useQuery<Task[]>({
     queryKey: ['tasks', projectId],
     queryFn: () => api.get(`/projects/${projectId}/tasks`),
   })
 
   const create = useMutation({
-    mutationFn: (body: { title: string; description?: string; type: TaskType; priority: Priority }) =>
+    mutationFn: (body: { title: string; description?: string; type: TaskType; priority: Priority; startDate?: string; dueDate?: string }) =>
       api.post(`/projects/${projectId}/tasks`, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks', projectId] })
+      qc.invalidateQueries({ queryKey: ['timeline', projectId] }) // Gantt reads timeline
       setShowCreate(false)
       setNewTitle('')
       setNewDesc('')
+      setNewStart('')
+      setNewDue('')
+      setFormError(null)
     },
+    onError: (e: Error) => setFormError(e.message),
   })
 
   const updateStatus = useMutation({
     mutationFn: ({ taskId, status }: { taskId: string; status: TaskStatus }) =>
       api.patch(`/projects/${projectId}/tasks/${taskId}`, { status }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', projectId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks', projectId] })
+      qc.invalidateQueries({ queryKey: ['timeline', projectId] }) // Gantt reads timeline
+      setActionError(null)
+    },
+    onError: (e: Error) => setActionError(e.message),
   })
 
   const displayed = filter === 'all' ? allTasks : allTasks.filter((t) => t.status === filter)
 
   if (isLoading) return <Spinner />
+  if (isError) {
+    return <QueryError message={error instanceof Error ? error.message : undefined} onRetry={() => refetch()} />
+  }
 
   return (
     <div className="space-y-4">
@@ -382,24 +419,30 @@ function TasksTab({ projectId }: { projectId: string }) {
 
       {showCreate && (
         <form
-          onSubmit={(e) => { e.preventDefault(); if (newTitle.trim()) create.mutate({ title: newTitle.trim(), description: newDesc || undefined, type: newType, priority: newPriority }) }}
+          onSubmit={(e) => { e.preventDefault(); if (newTitle.trim()) create.mutate({ title: newTitle.trim(), description: newDesc || undefined, type: newType, priority: newPriority, startDate: newStart || undefined, dueDate: newDue || undefined }) }}
           className="rounded-lg border border-border bg-card p-4 space-y-3"
         >
           <h3 className="text-sm font-medium text-foreground">Create task</h3>
-          <input
-            autoFocus
-            placeholder="Task title"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
-          />
-          <textarea
-            placeholder="Description (optional)"
-            value={newDesc}
-            onChange={(e) => setNewDesc(e.target.value)}
-            rows={2}
-            className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
-          />
+          <Field id="task-title" label="Task title">
+            <input
+              id="task-title"
+              autoFocus
+              placeholder="What needs to be done?"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+            />
+          </Field>
+          <Field id="task-desc" label="Description (optional)">
+            <textarea
+              id="task-desc"
+              placeholder="Add context for the assignee or agent"
+              value={newDesc}
+              onChange={(e) => setNewDesc(e.target.value)}
+              rows={2}
+              className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+            />
+          </Field>
           <div className="flex gap-4">
             <div className="flex gap-1">
               {(['human', 'agent'] as TaskType[]).map((t) => (
@@ -420,6 +463,29 @@ function TasksTab({ projectId }: { projectId: string }) {
               ))}
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label htmlFor="task-start" className="mb-1 block text-[10px] text-muted-foreground">Start date (optional)</label>
+              <input
+                id="task-start"
+                type="date"
+                value={newStart}
+                onChange={(e) => setNewStart(e.target.value)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            <div>
+              <label htmlFor="task-due" className="mb-1 block text-[10px] text-muted-foreground">Due date (optional)</label>
+              <input
+                id="task-due"
+                type="date"
+                value={newDue}
+                onChange={(e) => setNewDue(e.target.value)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+          </div>
+          {formError && <p className="text-xs text-destructive">{formError}</p>}
           <div className="flex gap-2">
             <button type="button" onClick={() => setShowCreate(false)}
               className="rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent"
@@ -433,6 +499,8 @@ function TasksTab({ projectId }: { projectId: string }) {
           </div>
         </form>
       )}
+
+      {actionError && <p className="text-xs text-destructive">{actionError}</p>}
 
       {displayed.length === 0 ? (
         <EmptyState icon={Clock} title="No tasks" desc="Create your first task or delegate from the PM Command Center." />
@@ -453,9 +521,9 @@ function TasksTab({ projectId }: { projectId: string }) {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-sm font-medium text-foreground">{task.title}</span>
-                      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${PRIORITY_COLORS[task.priority]}`}>
+                      <Badge variant={PRIORITY_VARIANT[task.priority]} className="shrink-0 capitalize">
                         {task.priority}
-                      </span>
+                      </Badge>
                       <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] bg-muted text-muted-foreground capitalize">
                         {task.type}
                       </span>
@@ -465,9 +533,7 @@ function TasksTab({ projectId }: { projectId: string }) {
                       {task.startedAt && ` · Started ${formatDate(task.startedAt)}`}
                     </p>
                   </div>
-                  <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${badge.cls}`}>
-                    {badge.label}
-                  </span>
+                  <Badge variant={badge.variant} className="shrink-0">{badge.label}</Badge>
                 </div>
 
                 {isExpanded && (
@@ -509,8 +575,9 @@ function TasksTab({ projectId }: { projectId: string }) {
 function ApprovalGatesTab({ projectId }: { projectId: string }) {
   const qc = useQueryClient()
   const [notes, setNotes] = useState<Record<string, string>>({})
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  const { data: gates = [], isLoading } = useQuery<ApprovalGate[]>({
+  const { data: gates = [], isLoading, isError, error, refetch } = useQuery<ApprovalGate[]>({
     queryKey: ['approval-gates', projectId, 'pending'],
     queryFn: () => api.get(`/projects/${projectId}/approval-gates?status=pending`),
   })
@@ -518,10 +585,17 @@ function ApprovalGatesTab({ projectId }: { projectId: string }) {
   const resolve = useMutation({
     mutationFn: ({ gateId, resolution, reviewerNote }: { gateId: string; resolution: 'approved' | 'rejected'; reviewerNote?: string }) =>
       api.post(`/projects/${projectId}/approval-gates/${gateId}/resolve`, { resolution, reviewerNote }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['approval-gates', projectId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['approval-gates', projectId] })
+      setActionError(null)
+    },
+    onError: (e: Error) => setActionError(e.message),
   })
 
   if (isLoading) return <Spinner />
+  if (isError) {
+    return <QueryError message={error instanceof Error ? error.message : undefined} onRetry={() => refetch()} />
+  }
 
   if (gates.length === 0) {
     return (
@@ -536,13 +610,14 @@ function ApprovalGatesTab({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-3">
       <h2 className="text-sm font-medium text-foreground">Pending Approval Gates ({gates.length})</h2>
+      {actionError && <p className="text-xs text-destructive">{actionError}</p>}
       {gates.map((gate) => {
         let ctx: Record<string, unknown> = {}
         try { ctx = JSON.parse(gate.context) } catch { /* ignore */ }
         return (
-          <div key={gate.id} className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 space-y-3">
+          <div key={gate.id} className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
             <div className="flex items-start gap-2">
-              <ShieldAlert className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+              <ShieldAlert className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" aria-hidden="true" />
               <div>
                 <p className="text-sm font-medium text-foreground">Approval Required</p>
                 <p className="text-xs text-muted-foreground">Task ID: {gate.taskId} · Requested {formatDate(gate.createdAt)}</p>
@@ -555,6 +630,7 @@ function ApprovalGatesTab({ projectId }: { projectId: string }) {
             )}
             <textarea
               placeholder="Optional reviewer note…"
+              aria-label="Reviewer note"
               value={notes[gate.id] ?? ''}
               onChange={(e) => setNotes((n) => ({ ...n, [gate.id]: e.target.value }))}
               rows={2}
@@ -594,14 +670,14 @@ function ApprovalGatesTab({ projectId }: { projectId: string }) {
 // ── Shared components ─────────────────────────────────────────────────────────
 
 function WorkspaceStatusBadge({ status }: { status: WorkspaceStatus }) {
-  const cfg: Record<WorkspaceStatus, { label: string; cls: string }> = {
-    idle:       { label: 'Idle',    cls: 'bg-zinc-100 text-zinc-600' },
-    running:    { label: 'Running', cls: 'bg-emerald-100 text-emerald-700' },
-    paused:     { label: 'Paused', cls: 'bg-amber-100 text-amber-700' },
-    terminated: { label: 'Terminated', cls: 'bg-red-100 text-red-600' },
+  const cfg: Record<WorkspaceStatus, { label: string; variant: BadgeVariant }> = {
+    idle:       { label: 'Idle',       variant: 'neutral' },
+    running:    { label: 'Running',    variant: 'success' },
+    paused:     { label: 'Paused',     variant: 'warning' },
+    terminated: { label: 'Terminated', variant: 'danger' },
   }
-  const { label, cls } = cfg[status]
-  return <span className={`rounded px-2 py-0.5 text-xs font-medium ${cls}`}>{label}</span>
+  const { label, variant } = cfg[status]
+  return <Badge variant={variant}>{label}</Badge>
 }
 
 function IconBtn({
@@ -618,6 +694,7 @@ function IconBtn({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-label={title}
       className={`rounded p-1.5 transition-colors disabled:opacity-40 ${
         danger
           ? 'text-destructive hover:bg-destructive/10'

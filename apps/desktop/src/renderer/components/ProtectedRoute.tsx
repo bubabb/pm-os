@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
 import { useProjectStore } from '../store/projects'
+import { getToken } from '../lib/api'
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading, loadCurrentUser } = useAuthStore()
@@ -17,11 +18,22 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     async function bootstrap() {
       // Step 1: restore session from localStorage token if user not already in store
       if (!useAuthStore.getState().user) {
-        await loadCurrentUser()
+        // Only hit /auth/me when a token actually exists. With no token it 401s,
+        // and the api client's global 401 handler hard-redirects to /auth before
+        // the silent sign-in below can run.
+        if (getToken()) {
+          await loadCurrentUser()
+        }
         // loadCurrentUser() never throws — check store state after it resolves
         if (!useAuthStore.getState().user) {
-          navigate('/auth')
-          return
+          // No session — silently auto sign-in a local user (dev-stub provider).
+          // Only fall back to the /auth page if the silent sign-in fails.
+          try {
+            await useAuthStore.getState().signIn('github')
+          } catch {
+            navigate('/auth')
+            return
+          }
         }
       }
 

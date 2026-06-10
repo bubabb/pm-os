@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
+import { Badge, type BadgeVariant } from '../../components/ui/Badge'
+import { QueryError } from '../../components/ui/QueryError'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -47,12 +49,12 @@ interface ToolDeployment {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const DEPLOYMENT_STATUS_BADGE: Record<DeploymentStatus, { label: string; cls: string }> = {
-  deploying:   { label: 'Deploying',   cls: 'bg-blue-100 text-blue-700' },
-  active:      { label: 'Active',      cls: 'bg-emerald-100 text-emerald-700' },
-  rolled_back: { label: 'Rolled back', cls: 'bg-amber-100 text-amber-700' },
-  superseded:  { label: 'Superseded',  cls: 'bg-zinc-100 text-zinc-600' },
-  failed:      { label: 'Failed',      cls: 'bg-red-100 text-red-700' },
+const DEPLOYMENT_STATUS_BADGE: Record<DeploymentStatus, { label: string; variant: BadgeVariant }> = {
+  deploying:   { label: 'Deploying',   variant: 'info' },
+  active:      { label: 'Active',      variant: 'success' },
+  rolled_back: { label: 'Rolled back', variant: 'warning' },
+  superseded:  { label: 'Superseded',  variant: 'neutral' },
+  failed:      { label: 'Failed',      variant: 'danger' },
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -92,7 +94,7 @@ function Registry({ projectId }: { projectId: string }) {
   const [newName, setNewName] = useState('')
   const [newDescription, setNewDescription] = useState('')
 
-  const { data: tools = [], isLoading } = useQuery<Tool[]>({
+  const { data: tools = [], isLoading, isError, error, refetch } = useQuery<Tool[]>({
     queryKey: ['tools', projectId],
     queryFn: () => api.get(`/projects/${projectId}/tools`),
   })
@@ -112,6 +114,13 @@ function Registry({ projectId }: { projectId: string }) {
   const activeToolId = selectedToolId ?? tools[0]?.id ?? null
 
   if (isLoading) return <Spinner />
+  if (isError) {
+    return (
+      <div className="p-6">
+        <QueryError message={error instanceof Error ? error.message : undefined} onRetry={() => refetch()} />
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full">
@@ -239,7 +248,7 @@ function ToolDetail({ projectId, toolId }: { projectId: string; toolId: string }
       {/* Active deployment banner + rollback */}
       <div className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
         <div className="flex items-center gap-2 text-sm">
-          <Rocket className="h-4 w-4 text-emerald-600" />
+          <Rocket className="h-4 w-4 text-emerald-400" aria-hidden="true" />
           {active
             ? <span className="text-foreground">Active version: <span className="font-medium">{versionLabel(versions, active.toolVersionId)}</span></span>
             : <span className="text-muted-foreground">No version deployed yet.</span>}
@@ -293,9 +302,9 @@ function ToolDetail({ projectId, toolId }: { projectId: string; toolId: string }
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-sm font-medium text-foreground">v{v.version}</span>
                       {isActive && (
-                        <span className="flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-                          <CheckCircle2 className="h-3 w-3" /> Active
-                        </span>
+                        <Badge variant="success" className="rounded-full">
+                          <CheckCircle2 className="h-3 w-3" aria-hidden="true" /> Active
+                        </Badge>
                       )}
                     </div>
                     {v.changelog && <p className="mt-0.5 truncate text-xs text-muted-foreground">{v.changelog}</p>}
@@ -329,7 +338,7 @@ function ToolDetail({ projectId, toolId }: { projectId: string; toolId: string }
                 <li key={d.id} className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2 text-xs">
                   <span className="font-mono text-foreground">v{versionLabel(versions, d.toolVersionId)}</span>
                   <div className="flex items-center gap-3">
-                    <span className={`rounded-full px-2 py-0.5 font-medium ${badge.cls}`}>{badge.label}</span>
+                    <Badge variant={badge.variant} className="rounded-full">{badge.label}</Badge>
                     <span className="text-muted-foreground">{new Date(d.createdAt).toLocaleString()}</span>
                   </div>
                 </li>
@@ -405,7 +414,7 @@ function PublishVersionForm({ projectId, toolId, onDone }: { projectId: string; 
         placeholder="Changelog (optional)"
         className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
       />
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
       <button
         type="submit"
         disabled={publish.isPending || !version.trim()}

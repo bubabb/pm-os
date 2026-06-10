@@ -6,6 +6,10 @@ import {
 } from 'lucide-react'
 import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
+import { TimelineTab } from './TimelineTab'
+import { Badge, BADGE_VARIANT_CLASSES, type BadgeVariant } from '../../components/ui/Badge'
+import { QueryError } from '../../components/ui/QueryError'
+import { Field } from '../../components/ui/Field'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -75,20 +79,20 @@ interface Milestone {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const SPRINT_STATUS_BADGE: Record<SprintStatus, { label: string; cls: string }> = {
-  planning:  { label: 'Planning', cls: 'bg-zinc-100 text-zinc-600' },
-  active:    { label: 'Active',   cls: 'bg-emerald-100 text-emerald-700' },
-  completed: { label: 'Done',     cls: 'bg-blue-100 text-blue-700' },
+const SPRINT_STATUS_BADGE: Record<SprintStatus, { label: string; variant: BadgeVariant }> = {
+  planning:  { label: 'Planning', variant: 'neutral' },
+  active:    { label: 'Active',   variant: 'success' },
+  completed: { label: 'Done',     variant: 'info' },
 }
 
-const MILESTONE_STATUS_BADGE: Record<MilestoneStatus, { label: string; cls: string }> = {
-  pending:   { label: 'Pending',   cls: 'bg-zinc-100 text-zinc-600' },
-  at_risk:   { label: 'At Risk',   cls: 'bg-amber-100 text-amber-700' },
-  completed: { label: 'Completed', cls: 'bg-emerald-100 text-emerald-700' },
-  missed:    { label: 'Missed',    cls: 'bg-red-100 text-red-700' },
+const MILESTONE_STATUS_BADGE: Record<MilestoneStatus, { label: string; variant: BadgeVariant }> = {
+  pending:   { label: 'Pending',   variant: 'neutral' },
+  at_risk:   { label: 'At Risk',   variant: 'warning' },
+  completed: { label: 'Completed', variant: 'success' },
+  missed:    { label: 'Missed',    variant: 'danger' },
 }
 
-type PageTab = 'boards' | 'sprints' | 'milestones'
+type PageTab = 'boards' | 'sprints' | 'milestones' | 'timeline'
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -119,6 +123,7 @@ export default function BoardsPage() {
           { id: 'boards'     as PageTab, label: 'Boards' },
           { id: 'sprints'    as PageTab, label: 'Sprints' },
           { id: 'milestones' as PageTab, label: 'Milestones' },
+          { id: 'timeline'   as PageTab, label: 'Timeline' },
         ]).map(({ id, label }) => (
           <button
             key={id}
@@ -138,6 +143,7 @@ export default function BoardsPage() {
         {tab === 'boards'     && <BoardsTab projectId={currentProject.id} />}
         {tab === 'sprints'    && <SprintsTab projectId={currentProject.id} />}
         {tab === 'milestones' && <MilestonesTab projectId={currentProject.id} />}
+        {tab === 'timeline'   && <TimelineTab projectId={currentProject.id} />}
       </div>
     </div>
   )
@@ -151,8 +157,12 @@ function BoardsTab({ projectId }: { projectId: string }) {
   const [showCreate, setShowCreate] = useState(false)
   const [newName, setNewName] = useState('')
   const [newType, setNewType] = useState<BoardType>('kanban')
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  const { data: boardList = [], isLoading: boardsLoading } = useQuery<Board[]>({
+  const {
+    data: boardList = [], isLoading: boardsLoading,
+    isError: boardsError, error: boardsErr, refetch: refetchBoards,
+  } = useQuery<Board[]>({
     queryKey: ['boards', projectId],
     queryFn: () => api.get(`/projects/${projectId}/boards`),
   })
@@ -179,7 +189,9 @@ function BoardsTab({ projectId }: { projectId: string }) {
       setSelectedBoardId(board.id)
       setShowCreate(false)
       setNewName('')
+      setActionError(null)
     },
+    onError: (e: Error) => setActionError(e.message),
   })
 
   const deleteBoard = useMutation({
@@ -188,22 +200,35 @@ function BoardsTab({ projectId }: { projectId: string }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['boards', projectId] })
       setSelectedBoardId(null)
+      setActionError(null)
     },
+    onError: (e: Error) => setActionError(e.message),
   })
 
   const moveItem = useMutation({
     mutationFn: ({ itemId, columnId }: { itemId: string; columnId: string }) =>
       api.patch(`/projects/${projectId}/boards/${activeBoardId}/items/${itemId}`, { columnId }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['board-items', activeBoardId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['board-items', activeBoardId] })
+      setActionError(null)
+    },
+    onError: (e: Error) => setActionError(e.message),
   })
 
   const removeItem = useMutation({
     mutationFn: (itemId: string) =>
       api.delete(`/projects/${projectId}/boards/${activeBoardId}/items/${itemId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['board-items', activeBoardId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['board-items', activeBoardId] })
+      setActionError(null)
+    },
+    onError: (e: Error) => setActionError(e.message),
   })
 
   if (boardsLoading) return <Spinner />
+  if (boardsError) {
+    return <QueryError message={boardsErr instanceof Error ? boardsErr.message : undefined} onRetry={() => refetchBoards()} />
+  }
 
   const sortedColumns = [...columns].sort((a, b) => a.position - b.position)
 
@@ -243,13 +268,16 @@ function BoardsTab({ projectId }: { projectId: string }) {
           className="rounded-lg border border-border bg-card p-4 space-y-3"
         >
           <h3 className="text-sm font-medium text-foreground">Create board</h3>
-          <input
-            autoFocus
-            placeholder="Board name (e.g. Sprint 12)"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
-          />
+          <Field id="board-name" label="Board name">
+            <input
+              id="board-name"
+              autoFocus
+              placeholder="e.g. Sprint 12"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+            />
+          </Field>
           <div className="flex gap-2">
             {(['kanban', 'scrum'] as BoardType[]).map((t) => (
               <button key={t} type="button" onClick={() => setNewType(t)}
@@ -273,6 +301,8 @@ function BoardsTab({ projectId }: { projectId: string }) {
         </form>
       )}
 
+      {actionError && <p className="text-xs text-destructive">{actionError}</p>}
+
       {boardList.length === 0 && !showCreate ? (
         <EmptyState
           icon={LayoutGrid}
@@ -289,10 +319,10 @@ function BoardsTab({ projectId }: { projectId: string }) {
                   const overWip = col.wipLimit !== null && colItems.length > col.wipLimit
                   return (
                     <div key={col.id} className="flex w-52 shrink-0 flex-col rounded-lg border border-border bg-muted/30">
-                      <div className={`flex items-center justify-between rounded-t-lg px-3 py-2 ${col.isTerminal ? 'bg-emerald-50 border-b border-emerald-200' : 'bg-card border-b border-border'}`}>
+                      <div className={`flex items-center justify-between rounded-t-lg px-3 py-2 ${col.isTerminal ? 'bg-emerald-500/10 border-b border-emerald-500/30' : 'bg-card border-b border-border'}`}>
                         <span className="text-xs font-semibold text-foreground">{col.name}</span>
                         <div className="flex items-center gap-1">
-                          <span className={`text-[10px] font-medium ${overWip ? 'text-red-600' : 'text-muted-foreground'}`}>
+                          <span className={`text-[10px] font-medium ${overWip ? 'text-red-400' : 'text-muted-foreground'}`}>
                             {colItems.length}{col.wipLimit !== null ? `/${col.wipLimit}` : ''}
                           </span>
                         </div>
@@ -373,6 +403,7 @@ function KanbanCard({
           onClick={onRemove}
           disabled={moving}
           title="Remove from board"
+          aria-label={`Remove ${item.taskTitle ?? 'item'} from board`}
           className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
         >
           <Trash2 className="h-3 w-3" />
@@ -411,11 +442,12 @@ function SprintsTab({ projectId }: { projectId: string }) {
     queryFn: () => api.get(`/projects/${projectId}/boards`),
   })
 
-  const { data: allSprints = [], isLoading } = useQuery<Sprint[]>({
+  const { data: allSprints = [], isLoading, isError, error, refetch } = useQuery<Sprint[]>({
     queryKey: ['sprints', projectId],
     queryFn: () => api.get(`/projects/${projectId}/sprints`),
   })
 
+  const [actionError, setActionError] = useState<string | null>(null)
   const defaultBoardId = boards[0]?.id
 
   const create = useMutation({
@@ -436,18 +468,29 @@ function SprintsTab({ projectId }: { projectId: string }) {
   const startSprint = useMutation({
     mutationFn: ({ boardId, sprintId }: { boardId: string; sprintId: string }) =>
       api.post(`/projects/${projectId}/boards/${boardId}/sprints/${sprintId}/start`, {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sprints', projectId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sprints', projectId] })
+      setActionError(null)
+    },
+    onError: (e: Error) => setActionError(e.message),
   })
 
   const completeSprint = useMutation({
     mutationFn: ({ boardId, sprintId }: { boardId: string; sprintId: string }) =>
       api.post(`/projects/${projectId}/boards/${boardId}/sprints/${sprintId}/complete`, {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sprints', projectId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sprints', projectId] })
+      setActionError(null)
+    },
+    onError: (e: Error) => setActionError(e.message),
   })
 
   const displayed = filter === 'all' ? allSprints : allSprints.filter((s) => s.status === filter)
 
   if (isLoading) return <Spinner />
+  if (isError) {
+    return <QueryError message={error instanceof Error ? error.message : undefined} onRetry={() => refetch()} />
+  }
 
   function handleCreate(e: React.FormEvent) {
     e.preventDefault()
@@ -491,25 +534,32 @@ function SprintsTab({ projectId }: { projectId: string }) {
         <form onSubmit={handleCreate} className="rounded-lg border border-border bg-card p-4 space-y-3">
           <h3 className="text-sm font-medium text-foreground">Create sprint</h3>
           {!defaultBoardId && (
-            <p className="text-xs text-amber-600">Create a board first before adding sprints.</p>
+            <p className="text-xs text-amber-400">Create a board first before adding sprints.</p>
           )}
-          <input
-            autoFocus
-            placeholder="Sprint name (e.g. Sprint 12)"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
-          />
-          <input
-            placeholder="Goal (optional)"
-            value={newGoal}
-            onChange={(e) => setNewGoal(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
-          />
+          <Field id="sprint-name" label="Sprint name">
+            <input
+              id="sprint-name"
+              autoFocus
+              placeholder="e.g. Sprint 12"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+            />
+          </Field>
+          <Field id="sprint-goal" label="Goal (optional)">
+            <input
+              id="sprint-goal"
+              placeholder="What should this sprint achieve?"
+              value={newGoal}
+              onChange={(e) => setNewGoal(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+            />
+          </Field>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="mb-1 block text-[10px] text-muted-foreground">Start date</label>
+              <label htmlFor="sprint-start" className="mb-1 block text-[10px] text-muted-foreground">Start date</label>
               <input
+                id="sprint-start"
                 type="date"
                 value={newStart}
                 onChange={(e) => setNewStart(e.target.value)}
@@ -517,8 +567,9 @@ function SprintsTab({ projectId }: { projectId: string }) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-[10px] text-muted-foreground">End date</label>
+              <label htmlFor="sprint-end" className="mb-1 block text-[10px] text-muted-foreground">End date</label>
               <input
+                id="sprint-end"
                 type="date"
                 value={newEnd}
                 onChange={(e) => setNewEnd(e.target.value)}
@@ -541,6 +592,8 @@ function SprintsTab({ projectId }: { projectId: string }) {
         </form>
       )}
 
+      {actionError && <p className="text-xs text-destructive">{actionError}</p>}
+
       {displayed.length === 0 ? (
         <EmptyState icon={Flag} title="No sprints" desc="Create your first sprint to organize work into time-boxed iterations." />
       ) : (
@@ -553,7 +606,7 @@ function SprintsTab({ projectId }: { projectId: string }) {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium text-foreground">{sprint.name}</span>
-                      <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${badge.cls}`}>{badge.label}</span>
+                      <Badge variant={badge.variant} className="shrink-0">{badge.label}</Badge>
                     </div>
                     {sprint.goal && (
                       <p className="mt-0.5 text-xs text-muted-foreground">{sprint.goal}</p>
@@ -612,8 +665,9 @@ function MilestonesTab({ projectId }: { projectId: string }) {
   const [newDesc, setNewDesc] = useState('')
   const [newDue, setNewDue] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  const { data: milestoneList = [], isLoading } = useQuery<Milestone[]>({
+  const { data: milestoneList = [], isLoading, isError, error, refetch } = useQuery<Milestone[]>({
     queryKey: ['milestones', projectId],
     queryFn: () => api.get(`/projects/${projectId}/milestones`),
   })
@@ -627,7 +681,9 @@ function MilestonesTab({ projectId }: { projectId: string }) {
       setNewTitle('')
       setNewDesc('')
       setNewDue('')
+      setActionError(null)
     },
+    onError: (e: Error) => setActionError(e.message),
   })
 
   const updateStatus = useMutation({
@@ -636,10 +692,15 @@ function MilestonesTab({ projectId }: { projectId: string }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['milestones', projectId] })
       setEditingId(null)
+      setActionError(null)
     },
+    onError: (e: Error) => setActionError(e.message),
   })
 
   if (isLoading) return <Spinner />
+  if (isError) {
+    return <QueryError message={error instanceof Error ? error.message : undefined} onRetry={() => refetch()} />
+  }
 
   function handleCreate(e: React.FormEvent) {
     e.preventDefault()
@@ -669,23 +730,30 @@ function MilestonesTab({ projectId }: { projectId: string }) {
       {showCreate && (
         <form onSubmit={handleCreate} className="rounded-lg border border-border bg-card p-4 space-y-3">
           <h3 className="text-sm font-medium text-foreground">Create milestone</h3>
-          <input
-            autoFocus
-            placeholder="Milestone title (e.g. v1.0 Launch)"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
-          />
-          <textarea
-            placeholder="Description (optional)"
-            value={newDesc}
-            onChange={(e) => setNewDesc(e.target.value)}
-            rows={2}
-            className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
-          />
-          <div>
-            <label className="mb-1 block text-[10px] text-muted-foreground">Due date (optional)</label>
+          <Field id="milestone-title" label="Milestone title">
             <input
+              id="milestone-title"
+              autoFocus
+              placeholder="e.g. v1.0 Launch"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+            />
+          </Field>
+          <Field id="milestone-desc" label="Description (optional)">
+            <textarea
+              id="milestone-desc"
+              placeholder="What does this milestone deliver?"
+              value={newDesc}
+              onChange={(e) => setNewDesc(e.target.value)}
+              rows={2}
+              className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+            />
+          </Field>
+          <div>
+            <label htmlFor="milestone-due" className="mb-1 block text-[10px] text-muted-foreground">Due date (optional)</label>
+            <input
+              id="milestone-due"
               type="date"
               value={newDue}
               onChange={(e) => setNewDue(e.target.value)}
@@ -705,6 +773,8 @@ function MilestonesTab({ projectId }: { projectId: string }) {
           </div>
         </form>
       )}
+
+      {actionError && <p className="text-xs text-destructive">{actionError}</p>}
 
       {milestoneList.length === 0 && !showCreate ? (
         <EmptyState
@@ -729,7 +799,7 @@ function MilestonesTab({ projectId }: { projectId: string }) {
                       <p className="mt-0.5 text-xs text-muted-foreground">{m.description}</p>
                     )}
                     {m.dueDate && (
-                      <p className={`mt-1 flex items-center gap-1 text-[11px] ${isOverdue ? 'text-red-600 font-medium' : 'text-muted-foreground'}`}>
+                      <p className={`mt-1 flex items-center gap-1 text-[11px] ${isOverdue ? 'text-red-400 font-medium' : 'text-muted-foreground'}`}>
                         <Calendar className="h-3 w-3" />
                         Due {m.dueDate}
                         {isOverdue && ' · Overdue'}
@@ -747,7 +817,7 @@ function MilestonesTab({ projectId }: { projectId: string }) {
                             disabled={updateStatus.isPending}
                             className={`rounded px-2 py-1 text-[10px] font-medium capitalize transition-colors disabled:opacity-50 ${
                               m.status === s
-                                ? MILESTONE_STATUS_BADGE[s].cls
+                                ? BADGE_VARIANT_CLASSES[MILESTONE_STATUS_BADGE[s].variant]
                                 : 'bg-muted text-muted-foreground hover:text-foreground'
                             }`}
                           >
@@ -755,13 +825,15 @@ function MilestonesTab({ projectId }: { projectId: string }) {
                           </button>
                         ))}
                         <button onClick={() => setEditingId(null)}
+                          aria-label="Close status editor"
                           className="rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-accent"
                         >✕</button>
                       </div>
                     ) : (
                       <button
                         onClick={() => setEditingId(m.id)}
-                        className={`rounded px-2 py-0.5 text-xs font-medium ${badge.cls} hover:opacity-80`}
+                        aria-label={`Change status of ${m.title} (currently ${badge.label})`}
+                        className={`rounded px-2 py-0.5 text-xs font-medium ${BADGE_VARIANT_CLASSES[badge.variant]} hover:opacity-80`}
                       >
                         {badge.label}
                       </button>

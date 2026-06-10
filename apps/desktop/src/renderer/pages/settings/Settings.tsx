@@ -1,59 +1,103 @@
 import { useState } from 'react'
+import { NavLink } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  KeyRound, Plug, FolderOpen, Plus, Trash2, Loader2,
-  Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw,
+  FolderOpen, Plug, Plus, Trash2, Loader2, RefreshCw, CheckCircle2,
 } from 'lucide-react'
 import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
+import { Badge, SOURCE_LABELS } from '../../components/ui/Badge'
+import { QueryError } from '../../components/ui/QueryError'
+import { Field } from '../../components/ui/Field'
+
+type Tab = 'sources' | 'project'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-interface Secret {
+type ConnectionSource = 'github' | 'jira' | 'confluence' | 'notion' | 'onedrive'
+
+interface Connection {
   id: string
-  projectId: string
-  name: string
+  source: ConnectionSource
+  label: string
+  /** Stringified JSON from the API. */
+  metadata: string
+  expiresAt: string | null
   createdAt: string
   updatedAt: string
 }
 
-type IntegrationSource = 'github' | 'jira' | 'confluence' | 'notion' | 'onedrive'
-
-interface IntegrationCredential {
+interface ProjectSource {
   id: string
   projectId: string
-  source: IntegrationSource
+  source: ConnectionSource
+  connectionId: string
   label: string
+  /** Stringified JSON from the API. */
+  metadata: string
   lastSyncedAt: string | null
   syncError: string | null
   createdAt: string
 }
 
-// ── Constants ────────────────────────────────────────────────────────────────
+// ── Source config ─────────────────────────────────────────────────────────────
 
-const SOURCES: { value: IntegrationSource; label: string; hint: string }[] = [
-  { value: 'github',     label: 'GitHub',     hint: 'Personal access token (repo, read:org)' },
-  { value: 'jira',       label: 'Jira',        hint: 'Atlassian API token' },
-  { value: 'confluence', label: 'Confluence',  hint: 'Atlassian API token' },
-  { value: 'notion',     label: 'Notion',      hint: 'Notion integration secret' },
-  { value: 'onedrive',   label: 'OneDrive',    hint: 'Microsoft Graph access token' },
-]
-
-const SOURCE_COLORS: Record<IntegrationSource, string> = {
-  github:     'bg-zinc-800 text-zinc-100',
-  jira:       'bg-blue-900 text-blue-200',
-  confluence: 'bg-blue-700 text-blue-100',
-  notion:     'bg-zinc-700 text-zinc-100',
-  onedrive:   'bg-sky-800 text-sky-200',
+interface ScopeField {
+  key: string
+  label: string
+  required: boolean
+  placeholder?: string
 }
 
-type Tab = 'apikeys' | 'integrations' | 'project'
+/** Per-project resource scope fields for each source. */
+const SCOPE_FIELDS: Record<ConnectionSource, ScopeField[]> = {
+  github: [
+    { key: 'owner', label: 'Owner', required: true, placeholder: 'Owner (e.g. my-org)' },
+    { key: 'repo',  label: 'Repo',  required: true, placeholder: 'Repo (e.g. my-repo)' },
+  ],
+  jira: [
+    { key: 'projectKey', label: 'Project key', required: true, placeholder: 'Project key (e.g. PROJ)' },
+  ],
+  confluence: [
+    { key: 'spaceKey', label: 'Space ID', required: true, placeholder: 'Space ID' },
+  ],
+  notion: [
+    { key: 'databaseId', label: 'Database ID', required: true, placeholder: 'Database ID' },
+  ],
+  onedrive: [
+    { key: 'folder', label: 'Folder', required: false, placeholder: 'Folder (optional)' },
+  ],
+}
+
+function parseMetadata(raw: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function scopeSummary(source: ConnectionSource, metadata: Record<string, string>): string | null {
+  switch (source) {
+    case 'github':
+      return metadata.owner && metadata.repo ? `${metadata.owner}/${metadata.repo}` : metadata.owner ?? metadata.repo ?? null
+    case 'jira':
+      return metadata.projectKey ?? null
+    case 'confluence':
+      return metadata.spaceKey ?? null
+    case 'notion':
+      return metadata.databaseId ?? null
+    case 'onedrive':
+      return metadata.folder ?? null
+  }
+}
 
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function Settings() {
   const { currentProject, archiveProject } = useProjectStore()
-  const [tab, setTab] = useState<Tab>('apikeys')
+  const [tab, setTab] = useState<Tab>('sources')
 
   if (!currentProject) {
     return (
@@ -73,9 +117,8 @@ export default function Settings() {
       {/* Tabs */}
       <div className="mb-6 flex gap-1 border-b border-border">
         {([
-          { id: 'apikeys' as Tab,      label: 'API Keys',     icon: KeyRound },
-          { id: 'integrations' as Tab, label: 'Integrations', icon: Plug },
-          { id: 'project' as Tab,      label: 'Project',      icon: FolderOpen },
+          { id: 'sources' as Tab, label: 'Sources', icon: Plug },
+          { id: 'project' as Tab, label: 'Project', icon: FolderOpen },
         ]).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -92,346 +135,328 @@ export default function Settings() {
         ))}
       </div>
 
-      {tab === 'apikeys'      && <ApiKeysTab projectId={currentProject.id} />}
-      {tab === 'integrations' && <IntegrationsTab projectId={currentProject.id} />}
-      {tab === 'project'      && <ProjectTab project={currentProject} onArchive={archiveProject} />}
+      {tab === 'sources' && <SourcesTab projectId={currentProject.id} />}
+      {tab === 'project' && <ProjectTab project={currentProject} onArchive={archiveProject} />}
     </div>
   )
 }
 
-// ── API Keys Tab ──────────────────────────────────────────────────────────────
+// ── Sources Tab ───────────────────────────────────────────────────────────────
 
-function ApiKeysTab({ projectId }: { projectId: string }) {
+function SourcesTab({ projectId }: { projectId: string }) {
   const qc = useQueryClient()
-  const [name, setName] = useState('')
-  const [value, setValue] = useState('')
-  const [showValue, setShowValue] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
+  const [formOpen, setFormOpen] = useState(false)
+  const [listError, setListError] = useState<string | null>(null)
+  const [syncingSource, setSyncingSource] = useState<string | null>(null)
 
-  const { data: secrets = [], isLoading } = useQuery<Secret[]>({
-    queryKey: ['secrets', projectId],
-    queryFn: () => api.get(`/projects/${projectId}/secrets`),
+  const {
+    data: connections = [], isLoading: connectionsLoading,
+    isError: connectionsError, error: connectionsErr, refetch: refetchConnections,
+  } = useQuery<Connection[]>({
+    queryKey: ['connections'],
+    queryFn: () => api.get('/connections'),
   })
 
-  const add = useMutation({
-    mutationFn: (body: { name: string; value: string }) =>
-      api.post(`/projects/${projectId}/secrets`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['secrets', projectId] })
-      setName('')
-      setValue('')
-      setFormError(null)
-    },
-    onError: (e: Error) => setFormError(e.message),
-  })
-
-  const remove = useMutation({
-    mutationFn: (secretId: string) =>
-      api.delete(`/projects/${projectId}/secrets/${secretId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['secrets', projectId] }),
-    onError: (e: Error) => setFormError(e.message),
-  })
-
-  const anthropicKey = secrets.find((s) => s.name === 'ANTHROPIC_API_KEY')
-  const otherSecrets = secrets.filter((s) => s.name !== 'ANTHROPIC_API_KEY')
-
-  function handleAdd(e: React.FormEvent) {
-    e.preventDefault()
-    if (!name.trim() || !value.trim()) {
-      setFormError('Name and value are required.')
-      return
-    }
-    add.mutate({ name: name.trim(), value: value.trim() })
-  }
-
-  if (isLoading) return <Spinner />
-
-  return (
-    <div className="space-y-6">
-      {/* ANTHROPIC_API_KEY callout */}
-      <div className={`rounded-lg border p-4 ${
-        anthropicKey
-          ? 'border-emerald-800 bg-emerald-950/30'
-          : 'border-amber-800 bg-amber-950/30'
-      }`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {anthropicKey
-              ? <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              : <AlertCircle className="h-4 w-4 text-amber-400" />}
-            <span className="text-sm font-medium text-foreground">ANTHROPIC_API_KEY</span>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">Required</span>
-          </div>
-          {anthropicKey && (
-            <button
-              onClick={() => remove.mutate(anthropicKey.id)}
-              disabled={remove.isPending}
-              className="flex items-center gap-1 text-xs text-destructive hover:opacity-80 disabled:opacity-40"
-            >
-              <Trash2 className="h-3 w-3" /> Remove
-            </button>
-          )}
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {anthropicKey
-            ? `Set ${formatDate(anthropicKey.createdAt)} — PM Command Center AI features are active.`
-            : 'Not set — PM Command Center AI features (digest, NL queries, delegate) are disabled until this key is added.'}
-        </p>
-        {!anthropicKey && (
-          <QuickAddForm
-            label="Add ANTHROPIC_API_KEY"
-            fixedName="ANTHROPIC_API_KEY"
-            onAdd={(value) => add.mutate({ name: 'ANTHROPIC_API_KEY', value })}
-            isPending={add.isPending}
-          />
-        )}
-      </div>
-
-      {/* Other secrets */}
-      {otherSecrets.length > 0 && (
-        <section>
-          <h2 className="mb-3 text-sm font-medium text-foreground">Other secrets</h2>
-          <div className="divide-y divide-border rounded-lg border border-border">
-            {otherSecrets.map((s) => (
-              <div key={s.id} className="flex items-center justify-between px-4 py-3">
-                <div>
-                  <span className="text-sm font-mono text-foreground">{s.name}</span>
-                  <span className="ml-3 text-xs text-muted-foreground">Added {formatDate(s.createdAt)}</span>
-                </div>
-                <button
-                  onClick={() => remove.mutate(s.id)}
-                  disabled={remove.isPending}
-                  className="text-destructive hover:opacity-80 disabled:opacity-40"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Add secret form */}
-      <section>
-        <h2 className="mb-3 text-sm font-medium text-foreground">Add secret</h2>
-        <form onSubmit={handleAdd} className="space-y-3">
-          <input
-            type="text"
-            placeholder="Secret name (e.g. GITHUB_TOKEN)"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary"
-          />
-          <div className="relative">
-            <input
-              type={showValue ? 'text' : 'password'}
-              placeholder="Secret value"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary"
-            />
-            <button
-              type="button"
-              onClick={() => setShowValue((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              {showValue ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </button>
-          </div>
-          {formError && <p className="text-xs text-destructive">{formError}</p>}
-          <button
-            type="submit"
-            disabled={add.isPending}
-            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
-            {add.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Add secret
-          </button>
-        </form>
-      </section>
-    </div>
-  )
-}
-
-// ── Integrations Tab ──────────────────────────────────────────────────────────
-
-function IntegrationsTab({ projectId }: { projectId: string }) {
-  const qc = useQueryClient()
-  const [source, setSource] = useState<IntegrationSource>('github')
-  const [label, setLabel] = useState('')
-  const [token, setToken] = useState('')
-  const [showToken, setShowToken] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
-  const [syncingId, setSyncingId] = useState<string | null>(null)
-
-  const { data: credentials = [], isLoading } = useQuery<IntegrationCredential[]>({
-    queryKey: ['integrations', projectId],
+  const {
+    data: sources = [], isLoading: sourcesLoading,
+    isError: sourcesError, error: sourcesErr, refetch: refetchSources,
+  } = useQuery<ProjectSource[]>({
+    queryKey: ['sources', projectId],
     queryFn: () => api.get(`/projects/${projectId}/integrations`),
-  })
-
-  const add = useMutation({
-    mutationFn: (body: { source: IntegrationSource; label: string; token: string }) =>
-      api.post(`/projects/${projectId}/integrations`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['integrations', projectId] })
-      setLabel('')
-      setToken('')
-      setFormError(null)
-    },
-    onError: (e: Error) => setFormError(e.message),
   })
 
   const remove = useMutation({
     mutationFn: (credentialId: string) =>
       api.delete(`/projects/${projectId}/integrations/${credentialId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['integrations', projectId] }),
-    onError: (e: Error) => setFormError(e.message),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sources', projectId] })
+      setListError(null)
+    },
+    onError: (e: Error) => setListError(e.message),
   })
 
-  async function handleSync(credentialId: string, srcSource: IntegrationSource) {
-    setSyncingId(credentialId)
+  async function handleSync(source: ProjectSource) {
+    setSyncingSource(source.id)
+    setListError(null)
     try {
-      await api.post(`/projects/${projectId}/integrations/sync`, { source: srcSource })
+      await api.post(`/projects/${projectId}/integrations/sync`, { source: source.source })
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : 'Sync failed')
+      setListError(e instanceof Error ? e.message : 'Sync failed')
     } finally {
-      setSyncingId(null)
-      qc.invalidateQueries({ queryKey: ['integrations', projectId] })
+      setSyncingSource(null)
+      qc.invalidateQueries({ queryKey: ['sources', projectId] })
     }
   }
 
-  function handleAdd(e: React.FormEvent) {
-    e.preventDefault()
-    if (!label.trim() || !token.trim()) {
-      setFormError('Label and token are required.')
-      return
-    }
-    add.mutate({ source, label: label.trim(), token: token.trim() })
+  if (connectionsLoading || sourcesLoading) return <Spinner />
+
+  if (connectionsError || sourcesError) {
+    const err = connectionsError ? connectionsErr : sourcesErr
+    return (
+      <QueryError
+        message={err instanceof Error ? err.message : undefined}
+        onRetry={() => { void refetchConnections(); void refetchSources() }}
+      />
+    )
   }
 
-  const selectedSource = SOURCES.find((s) => s.value === source)!
-
-  if (isLoading) return <Spinner />
+  if (connections.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-border p-6 text-center">
+        <p className="text-sm text-muted-foreground">
+          No connected accounts yet. Add a GitHub, Jira, Confluence, Notion, or OneDrive
+          account on the{' '}
+          <NavLink to="/connections" className="font-medium text-primary hover:underline">
+            Connections page
+          </NavLink>{' '}
+          first, then come back here to bind it to this project.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
-      {/* Existing credentials */}
-      {credentials.length > 0 ? (
-        <section>
-          <h2 className="mb-3 text-sm font-medium text-foreground">Connected sources</h2>
-          <div className="divide-y divide-border rounded-lg border border-border">
-            {credentials.map((cred) => (
-              <div key={cred.id} className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <span className={`rounded px-2 py-0.5 text-xs font-medium ${SOURCE_COLORS[cred.source]}`}>
-                    {SOURCES.find((s) => s.value === cred.source)?.label ?? cred.source}
-                  </span>
-                  <div>
-                    <p className="text-sm text-foreground">{cred.label}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {cred.lastSyncedAt
-                        ? `Last synced ${formatDate(cred.lastSyncedAt)}`
-                        : 'Never synced'}
-                      {cred.syncError && (
-                        <span className="ml-2 text-destructive">· {cred.syncError}</span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleSync(cred.id, cred.source)}
-                    disabled={syncingId === cred.id}
-                    title="Sync now"
-                    className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
-                  >
-                    {syncingId === cred.id
-                      ? <Loader2 className="h-4 w-4 animate-spin" />
-                      : <RefreshCw className="h-4 w-4" />}
-                  </button>
-                  <button
-                    onClick={() => remove.mutate(cred.id)}
-                    disabled={remove.isPending}
-                    className="rounded p-1 text-destructive hover:bg-accent disabled:opacity-40"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : (
-        <div className="rounded-lg border border-dashed border-border p-6 text-center">
-          <Plug className="mx-auto mb-2 h-8 w-8 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">No integrations connected yet.</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Add a source below to start pulling data into the PM Command Center.
-          </p>
-        </div>
-      )}
-
-      {/* Add credential form */}
       <section>
-        <h2 className="mb-3 text-sm font-medium text-foreground">Add integration</h2>
-        <form onSubmit={handleAdd} className="space-y-3">
-          {/* Source picker */}
-          <div className="grid grid-cols-5 gap-2">
-            {SOURCES.map((s) => (
-              <button
-                key={s.value}
-                type="button"
-                onClick={() => setSource(s.value)}
-                className={`rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${
-                  source === s.value
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
-                }`}
-              >
-                {s.label}
-              </button>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Plug className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-medium text-foreground">Sources</h2>
+          </div>
+          <button
+            onClick={() => setFormOpen((o) => !o)}
+            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {formOpen ? 'Cancel' : 'Add source'}
+          </button>
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Bind a connected account to this project with a resource scope (repo, project key,
+          space, database) to start pulling data in.
+        </p>
+
+        {formOpen && (
+          <AddSourceForm
+            projectId={projectId}
+            connections={connections}
+            onDone={() => setFormOpen(false)}
+          />
+        )}
+
+        {sources.length === 0 ? (
+          !formOpen && (
+            <div className="rounded-lg border border-dashed border-border p-6 text-center">
+              <p className="text-sm text-muted-foreground">
+                No sources yet. Click &ldquo;Add source&rdquo; to bind a connected account to
+                this project.
+              </p>
+            </div>
+          )
+        ) : (
+          <div className="space-y-3">
+            {sources.map((source) => (
+              <SourceCard
+                key={source.id}
+                source={source}
+                connection={connections.find((c) => c.id === source.connectionId) ?? null}
+                syncing={syncingSource === source.id}
+                onSync={() => handleSync(source)}
+                onRemove={() => remove.mutate(source.id)}
+                removePending={remove.isPending}
+              />
             ))}
           </div>
-          <p className="text-xs text-muted-foreground">{selectedSource.hint}</p>
+        )}
 
-          <input
-            type="text"
-            placeholder="Label (e.g. My Org GitHub)"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary"
-          />
-
-          <div className="relative">
-            <input
-              type={showToken ? 'text' : 'password'}
-              placeholder="Access token / API key"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 font-mono text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary"
-            />
-            <button
-              type="button"
-              onClick={() => setShowToken((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </button>
-          </div>
-
-          {formError && <p className="text-xs text-destructive">{formError}</p>}
-
-          <button
-            type="submit"
-            disabled={add.isPending}
-            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
-            {add.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Connect {selectedSource.label}
-          </button>
-        </form>
+        {listError && <p className="mt-2 text-xs text-destructive">{listError}</p>}
       </section>
     </div>
+  )
+}
+
+function SourceCard({
+  source, connection, syncing, onSync, onRemove, removePending,
+}: {
+  source: ProjectSource
+  connection: Connection | null
+  syncing: boolean
+  onSync: () => void
+  onRemove: () => void
+  removePending: boolean
+}) {
+  const scope = scopeSummary(source.source, parseMetadata(source.metadata))
+
+  return (
+    <div className="rounded-lg border border-border p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Badge source={source.source}>{SOURCE_LABELS[source.source]}</Badge>
+          <div>
+            <p className="flex items-center gap-1.5 text-sm text-foreground">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
+              {source.label}
+              {scope && (
+                <span className="rounded bg-accent px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+                  {scope}
+                </span>
+              )}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              via {connection ? connection.label : 'removed account'}
+              {' · '}
+              {source.lastSyncedAt
+                ? `Last synced ${formatDate(source.lastSyncedAt)}`
+                : 'Never synced'}
+              {source.syncError && (
+                <span className="ml-2 text-destructive">· {source.syncError}</span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onSync}
+            disabled={syncing}
+            title="Sync now"
+            aria-label={`Sync ${source.label} now`}
+            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+          >
+            {syncing
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <RefreshCw className="h-4 w-4" />}
+          </button>
+          <button
+            onClick={onRemove}
+            disabled={removePending}
+            title="Remove"
+            aria-label={`Remove ${source.label}`}
+            className="rounded p-1 text-destructive hover:bg-accent disabled:opacity-40"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Add source form ───────────────────────────────────────────────────────────
+
+function AddSourceForm({
+  projectId, connections, onDone,
+}: {
+  projectId: string
+  connections: Connection[]
+  onDone: () => void
+}) {
+  const qc = useQueryClient()
+  const [connectionId, setConnectionId] = useState(connections[0]?.id ?? '')
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [label, setLabel] = useState('')
+  const [formError, setFormError] = useState<string | null>(null)
+
+  const connection = connections.find((c) => c.id === connectionId) ?? null
+  const scopeFields = connection ? SCOPE_FIELDS[connection.source] : []
+
+  const add = useMutation({
+    mutationFn: (body: { source: ConnectionSource; connectionId: string; label: string; metadata: Record<string, string> }) =>
+      api.post(`/projects/${projectId}/integrations`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sources', projectId] })
+      setValues({})
+      setLabel('')
+      setFormError(null)
+      onDone()
+    },
+    onError: (e: Error) => setFormError(e.message),
+  })
+
+  function handleConnectionChange(nextId: string) {
+    setConnectionId(nextId)
+    setValues({})
+    setFormError(null)
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!connection) {
+      setFormError('Pick a connected account.')
+      return
+    }
+    const missing = scopeFields.filter((f) => f.required && !(values[f.key] ?? '').trim())
+    if (missing.length > 0) {
+      setFormError(`${missing.map((f) => f.label).join(', ')} ${missing.length > 1 ? 'are' : 'is'} required.`)
+      return
+    }
+    const metadata: Record<string, string> = {}
+    for (const field of scopeFields) {
+      const v = (values[field.key] ?? '').trim()
+      if (v) metadata[field.key] = v
+    }
+    add.mutate({
+      source: connection.source,
+      connectionId: connection.id,
+      label: label.trim() || connection.label,
+      metadata,
+    })
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mb-3 space-y-3 rounded-lg border border-border p-4">
+      {/* Connection picker */}
+      <Field id="source-connection" label="Connected account">
+        <select
+          id="source-connection"
+          value={connectionId}
+          onChange={(e) => handleConnectionChange(e.target.value)}
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary"
+        >
+          {connections.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label} ({SOURCE_LABELS[c.source]})
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      {/* Scope fields for the chosen connection's source */}
+      {scopeFields.map((field) => (
+        <Field key={field.key} id={`source-${field.key}`} label={field.label}>
+          <input
+            id={`source-${field.key}`}
+            type="text"
+            placeholder={field.placeholder ?? field.label}
+            value={values[field.key] ?? ''}
+            onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary"
+          />
+        </Field>
+      ))}
+
+      <Field id="source-label" label="Label">
+        <input
+          id="source-label"
+          type="text"
+          placeholder={`Optional, defaults to "${connection?.label ?? 'account label'}"`}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary"
+        />
+      </Field>
+
+      {formError && <p className="text-xs text-destructive">{formError}</p>}
+
+      <button
+        type="submit"
+        disabled={add.isPending}
+        className="flex items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+      >
+        {add.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+        Add source
+      </button>
+    </form>
   )
 }
 
@@ -518,52 +543,6 @@ function ProjectTab({ project, onArchive }: ProjectTabProps) {
 }
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
-
-function QuickAddForm({
-  label, fixedName, onAdd, isPending,
-}: {
-  label: string
-  fixedName: string
-  onAdd: (value: string) => void
-  isPending: boolean
-}) {
-  const [val, setVal] = useState('')
-  const [show, setShow] = useState(false)
-
-  function handle(e: React.FormEvent) {
-    e.preventDefault()
-    if (val.trim()) onAdd(val.trim())
-  }
-
-  return (
-    <form onSubmit={handle} className="mt-3 flex gap-2">
-      <div className="relative flex-1">
-        <input
-          type={show ? 'text' : 'password'}
-          placeholder={label}
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 font-mono text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary"
-        />
-        <button
-          type="button"
-          onClick={() => setShow((v) => !v)}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-        >
-          {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-        </button>
-      </div>
-      <button
-        type="submit"
-        disabled={isPending || !val.trim()}
-        className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-      >
-        {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-        Save
-      </button>
-    </form>
-  )
-}
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (

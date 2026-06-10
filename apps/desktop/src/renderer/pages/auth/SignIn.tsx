@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/auth'
 
@@ -6,6 +6,28 @@ export default function SignIn() {
   const { signIn, isLoading } = useAuthStore()
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
+
+  // Login isn't required for local use — silently sign in a local user and go
+  // straight to the app. The buttons below only appear as a fallback if this fails.
+  useEffect(() => {
+    let cancelled = false
+    async function auto() {
+      if (useAuthStore.getState().user) {
+        navigate('/')
+        return
+      }
+      try {
+        await signIn('github')
+        if (!cancelled) navigate('/')
+      } catch {
+        /* fall through to the manual buttons */
+      }
+    }
+    void auto()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function handleSignIn(provider: 'github' | 'entra') {
     setError(null)

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
+import { Badge, type BadgeVariant } from '../../components/ui/Badge'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -67,10 +68,10 @@ interface AuditEntry {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const TRACE_STATUS_CFG: Record<TraceStatus, { label: string; cls: string; icon: React.ElementType }> = {
-  running:   { label: 'Running',   cls: 'bg-blue-100 text-blue-700',       icon: Clock },
-  completed: { label: 'Completed', cls: 'bg-emerald-100 text-emerald-700', icon: CheckCircle2 },
-  failed:    { label: 'Failed',    cls: 'bg-red-100 text-red-700',         icon: XCircle },
+const TRACE_STATUS_CFG: Record<TraceStatus, { label: string; variant: BadgeVariant; icon: React.ElementType }> = {
+  running:   { label: 'Running',   variant: 'info',    icon: Clock },
+  completed: { label: 'Completed', variant: 'success', icon: CheckCircle2 },
+  failed:    { label: 'Failed',    variant: 'danger',  icon: XCircle },
 }
 
 const TRACE_EVENT_COLORS: Record<TraceEventType, string> = {
@@ -200,7 +201,7 @@ function TracesTab({ projectId }: { projectId: string }) {
                   {isExpanded
                     ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
                     : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
-                  <StatusIcon className={`h-4 w-4 shrink-0 ${trace.status === 'running' ? 'text-blue-600 animate-pulse' : trace.status === 'failed' ? 'text-red-500' : 'text-emerald-600'}`} />
+                  <StatusIcon aria-hidden="true" className={`h-4 w-4 shrink-0 ${trace.status === 'running' ? 'text-blue-400 animate-pulse' : trace.status === 'failed' ? 'text-red-400' : 'text-emerald-400'}`} />
                   <div className="flex-1 min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">
                       {trace.workspaceName ?? trace.agentWorkspaceId.slice(0, 8)}
@@ -212,7 +213,7 @@ function TracesTab({ projectId }: { projectId: string }) {
                       {trace.costCents > 0 && ` · $${costDollars}`}
                     </p>
                   </div>
-                  <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${cfg.cls}`}>{cfg.label}</span>
+                  <Badge variant={cfg.variant} className="shrink-0">{cfg.label}</Badge>
                 </div>
 
                 {isExpanded && (

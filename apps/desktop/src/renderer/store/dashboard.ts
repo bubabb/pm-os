@@ -34,6 +34,8 @@ export interface DashboardData {
 
 interface DashboardStore {
   data: DashboardData | null
+  /** Which project `data` belongs to — lets load() keep showing fresh data during a background reload. */
+  loadedProjectId: string | null
   isLoading: boolean
   isRefreshing: boolean
   error: string | null
@@ -48,6 +50,7 @@ interface DashboardStore {
 
 export const useDashboardStore = create<DashboardStore>((set, get) => ({
   data: null,
+  loadedProjectId: null,
   isLoading: false,
   isRefreshing: false,
   error: null,
@@ -55,10 +58,18 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   acknowledgedIds: new Set(),
 
   load: async (projectId) => {
-    set({ isLoading: true, error: null })
+    // Keep rendering existing data for this project while we reload in the
+    // background; only blank to the full-screen spinner on a true cold load
+    // (or when the project changed and the cached data is for another project).
+    const { data: existing, loadedProjectId } = get()
+    if (existing && loadedProjectId === projectId) {
+      set({ error: null })
+    } else {
+      set({ data: null, isLoading: true, error: null })
+    }
     try {
       const data = await api.get<DashboardData>(`/projects/${projectId}/dashboard`)
-      set({ data, isLoading: false })
+      set({ data, loadedProjectId: projectId, isLoading: false })
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Failed to load dashboard', isLoading: false })
     }
@@ -69,7 +80,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     try {
       await api.post(`/projects/${projectId}/integrations/sync`, {})
       const data = await api.get<DashboardData>(`/projects/${projectId}/dashboard`)
-      set({ data, isRefreshing: false })
+      set({ data, loadedProjectId: projectId, isRefreshing: false })
     } catch {
       set({ isRefreshing: false })
     }

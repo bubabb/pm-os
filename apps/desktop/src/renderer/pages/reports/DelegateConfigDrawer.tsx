@@ -1,5 +1,5 @@
 import { X, Bot, Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ClassifiedItem } from '@creare/integrations'
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -16,6 +16,17 @@ interface Props {
 export function DelegateConfigDrawer({ item, onConfirm, onClose }: Props) {
   const [action, setAction] = useState(item.suggestedAction)
   const [isSending, setIsSending] = useState(false)
+  const actionInputRef = useRef<HTMLTextAreaElement>(null)
+
+  // Dialog behavior: focus the first input on open, close on Escape
+  useEffect(() => {
+    actionInputRef.current?.focus()
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
 
   async function handleConfirm() {
     setIsSending(true)
@@ -32,15 +43,21 @@ export function DelegateConfigDrawer({ item, onConfirm, onClose }: Props) {
       <div className="fixed inset-0 z-40 bg-background/50 backdrop-blur-sm" onClick={onClose} />
 
       {/* Drawer */}
-      <div className="fixed right-0 top-0 z-50 flex h-full w-96 flex-col border-l border-border bg-card shadow-2xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delegate-drawer-title"
+        className="fixed right-0 top-0 z-50 flex h-full w-96 flex-col border-l border-border bg-card shadow-2xl"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <div className="flex items-center gap-2">
-            <Bot className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold text-card-foreground">Delegate to Agent</h2>
+            <Bot className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h2 id="delegate-drawer-title" className="text-sm font-semibold text-card-foreground">Delegate to Agent</h2>
           </div>
           <button
             onClick={onClose}
+            aria-label="Close delegate drawer"
             className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
           >
             <X className="h-4 w-4" />
@@ -65,10 +82,12 @@ export function DelegateConfigDrawer({ item, onConfirm, onClose }: Props) {
 
           {/* Action instruction */}
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+            <label htmlFor="delegate-action" className="mb-1.5 block text-xs font-medium text-muted-foreground">
               What should the agent do?
             </label>
             <textarea
+              id="delegate-action"
+              ref={actionInputRef}
               value={action}
               onChange={(e) => setAction(e.target.value)}
               rows={4}

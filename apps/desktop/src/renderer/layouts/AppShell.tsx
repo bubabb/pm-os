@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Kanban, Bot, Wrench, Eye, BarChart3,
+  LayoutDashboard, Kanban, Bot, Wrench, Eye, BarChart3, Plug,
   ChevronDown, LogOut, Settings, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 import { useAuthStore } from '../store/auth'
@@ -14,6 +14,7 @@ const navItems = [
   { to: '/tools',       label: 'Tools',          icon: Wrench },
   { to: '/observability', label: 'Observability', icon: Eye },
   { to: '/reports',     label: 'Reports',        icon: BarChart3 },
+  { to: '/connections', label: 'Connections',    icon: Plug },
 ]
 
 export default function AppShell() {
@@ -43,6 +44,7 @@ export default function AppShell() {
           )}
           <button
             onClick={() => setCollapsed((c) => !c)}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
           >
             {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
@@ -86,6 +88,8 @@ export default function AppShell() {
         <div className="relative border-t border-border px-2 py-2">
           <button
             onClick={() => setUserMenuOpen((o) => !o)}
+            aria-label="User menu"
+            aria-expanded={userMenuOpen}
             className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
           >
             <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
