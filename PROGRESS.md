@@ -10,6 +10,18 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
+- **Multi-LLM + Confluence fix + macOS launcher (2026-06-10, Fable 5): DONE.** typecheck 21/21 · tests 45/45 · build clean.
+  • **Model-agnostic LLM:** `ai-sdk` now implements OpenAI (`openai`) + Gemini (`@google/generative-ai`) providers
+    alongside Anthropic; `complete()` dispatches all three; anthropic provider suppresses `temperature` for models
+    that reject sampling params (opus-4-7/4-8, fable-5). Classifier/digest/NL-queries no longer hardcode Claude —
+    provider+model are resolved from global settings `DEFAULT_REASONING_PROVIDER`/`DEFAULT_REASONING_MODEL` +
+    `<PROVIDER>_API_KEY` (fallback anthropic/claude-haiku-4-5). Connections page: per-provider key cards + a
+    default-reasoning-model picker (gated on the key being set); `GET /settings/reasoning-defaults` exposes the choice.
+    Agent workspaces already supported per-workspace model. **No schema change** (global_settings is generic KV).
+  • **Confluence scope** = Space **ID** (metadata key `spaceKey`→`spaceId` end-to-end; UI labeled + clarified).
+  • **macOS launcher:** `install-desktop-entry.mjs` darwin branch builds `~/Applications/Creare.app` (Info.plist +
+    launcher stub + icns via sips/iconutil when present); runs via `predev` on the Mac. **UNTESTED on real macOS.**
+  • Approx OpenAI/Gemini pricing constants are placeholders (commented "verify").
 - **Deepreview fixes (2026-06-10, Fable 5, 3 batches): DONE, uncommitted.** typecheck 21/21 · tests **45/45** · build clean.
   Grounded UI+perf deepreview → all findings fixed:
   • **Backend/perf:** classification now CACHED on `external_event_cache` (cols `classification`/`classified_at`,
