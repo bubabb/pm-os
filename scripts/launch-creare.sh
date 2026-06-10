@@ -13,13 +13,15 @@ REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO"
 
 # corepack's pnpm shim lives in ~/.local/bin on this box; the desktop session's
-# PATH may not include it.
-export PATH="$HOME/.local/bin:$PATH"
+# PATH may not include it. On macOS a Finder-launched .app gets a minimal PATH,
+# so also add the Homebrew (ARM + Intel) bin dirs where node/pnpm typically live.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 LOG="${XDG_CACHE_HOME:-$HOME/.cache}/creare-launch.log"
 mkdir -p "$(dirname "$LOG")"
 exec >>"$LOG" 2>&1
-echo "===== Creare launch $(date -Iseconds) ====="
+# (+%…) instead of -Iseconds: macOS's BSD date lacks -I on older releases.
+echo "===== Creare launch $(date '+%Y-%m-%dT%H:%M:%S%z') ====="
 
 # Build the production bundle once if it's missing (e.g. after a clean checkout
 # or `pnpm clean`). To pick up new code afterwards, re-run:
