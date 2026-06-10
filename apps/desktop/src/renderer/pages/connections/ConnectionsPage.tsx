@@ -118,27 +118,84 @@ export default function ConnectionsPage() {
       </p>
 
       <div className="space-y-8">
-        <ClaudeSection />
+        <AiModelsSection />
         <ConnectedAccountsSection />
       </div>
     </div>
   )
 }
 
-// ── Section 1: Claude (AI) ────────────────────────────────────────────────────
+// ── Section 1: AI Models ──────────────────────────────────────────────────────
 
-function ClaudeSection() {
-  const qc = useQueryClient()
-  const [formError, setFormError] = useState<string | null>(null)
+type AiProviderId = 'anthropic' | 'openai' | 'gemini'
 
+interface AiProviderConfig {
+  id: AiProviderId
+  name: string
+  settingKey: string
+  placeholder: string
+}
+
+const AI_PROVIDERS: AiProviderConfig[] = [
+  { id: 'anthropic', name: 'Anthropic', settingKey: 'ANTHROPIC_API_KEY', placeholder: 'sk-ant-…' },
+  { id: 'openai',    name: 'OpenAI',    settingKey: 'OPENAI_API_KEY',    placeholder: 'sk-…' },
+  { id: 'gemini',    name: 'Gemini',    settingKey: 'GEMINI_API_KEY',    placeholder: 'AIza…' },
+]
+
+// Keep aligned with AgentsPage MODEL_PRESETS
+const REASONING_MODELS: { provider: AiProviderId; modelId: string; label: string }[] = [
+  { provider: 'anthropic', modelId: 'claude-opus-4-8',           label: 'Claude Opus 4.8' },
+  { provider: 'anthropic', modelId: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6' },
+  { provider: 'anthropic', modelId: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+  { provider: 'openai',    modelId: 'gpt-4o',                    label: 'GPT-4o' },
+  { provider: 'gemini',    modelId: 'gemini-2.0-flash',          label: 'Gemini 2.0 Flash' },
+]
+
+function AiModelsSection() {
   const { data: keys = [], isLoading, isError, error, refetch } = useQuery<string[]>({
     queryKey: ['globalSettings'],
     queryFn: () => api.get('/settings/keys'),
   })
 
+  return (
+    <section>
+      <div className="mb-3 flex items-center gap-2">
+        <Sparkles className="h-4 w-4 text-muted-foreground" />
+        <h2 className="text-sm font-medium text-foreground">AI Models</h2>
+      </div>
+      <p className="mb-3 text-xs text-muted-foreground">
+        API keys for the AI providers power PM planning and classification — actionable items,
+        risk detection, and delegate suggestions — across all projects. Add a key for at least
+        one provider, then pick the default reasoning model.
+      </p>
+
+      {isLoading ? (
+        <Spinner />
+      ) : isError ? (
+        <QueryError message={error instanceof Error ? error.message : undefined} onRetry={() => refetch()} />
+      ) : (
+        <div className="space-y-3">
+          {AI_PROVIDERS.map((provider) => (
+            <ProviderKeyCard
+              key={provider.id}
+              provider={provider}
+              hasKey={keys.includes(provider.settingKey)}
+            />
+          ))}
+          <DefaultModelPicker keys={keys} />
+        </div>
+      )}
+    </section>
+  )
+}
+
+function ProviderKeyCard({ provider, hasKey }: { provider: AiProviderConfig; hasKey: boolean }) {
+  const qc = useQueryClient()
+  const [formError, setFormError] = useState<string | null>(null)
+
   const save = useMutation({
     mutationFn: (value: string) =>
-      api.put('/settings/ANTHROPIC_API_KEY', { value }),
+      api.put(`/settings/${provider.settingKey}`, { value }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['globalSettings'] })
       setFormError(null)
@@ -147,73 +204,120 @@ function ClaudeSection() {
   })
 
   const remove = useMutation({
-    mutationFn: () => api.delete('/settings/ANTHROPIC_API_KEY'),
+    mutationFn: () => api.delete(`/settings/${provider.settingKey}`),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['globalSettings'] })
+      qc.invalidateQueries({ queryKey: ['reasoningDefaults'] })
+      setFormError(null)
+    },
+    onError: (e: Error) => setFormError(e.message),
+  })
+
+  return (
+    <div className={`rounded-lg border p-4 ${
+      hasKey
+        ? 'border-emerald-500/40 bg-emerald-500/5'
+        : 'border-border'
+    }`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {hasKey
+            ? <CheckCircle2 className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+            : <AlertCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
+          <span className="text-sm font-medium text-foreground">{provider.name} API key</span>
+          <Badge variant={hasKey ? 'success' : 'neutral'}>
+            {hasKey ? 'Connected' : 'Not set'}
+          </Badge>
+        </div>
+        {hasKey && (
+          <button
+            onClick={() => remove.mutate()}
+            disabled={remove.isPending}
+            className="flex items-center gap-1 text-xs text-destructive hover:opacity-80 disabled:opacity-40"
+          >
+            <Trash2 className="h-3 w-3" /> Remove
+          </button>
+        )}
+      </div>
+      {!hasKey && (
+        <QuickAddForm
+          label={provider.placeholder}
+          ariaLabel={`${provider.name} API key`}
+          onAdd={(value) => save.mutate(value)}
+          isPending={save.isPending}
+        />
+      )}
+      {formError && <p className="mt-2 text-xs text-destructive">{formError}</p>}
+    </div>
+  )
+}
+
+function DefaultModelPicker({ keys }: { keys: string[] }) {
+  const qc = useQueryClient()
+  const [formError, setFormError] = useState<string | null>(null)
+
+  const { data: defaults, isLoading } = useQuery<{ provider: string; model: string }>({
+    queryKey: ['reasoningDefaults'],
+    queryFn: () => api.get('/settings/reasoning-defaults'),
+  })
+
+  const save = useMutation({
+    mutationFn: async ({ provider, model }: { provider: AiProviderId; model: string }) => {
+      await api.put('/settings/DEFAULT_REASONING_PROVIDER', { value: provider })
+      await api.put('/settings/DEFAULT_REASONING_MODEL', { value: model })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['reasoningDefaults'] })
       qc.invalidateQueries({ queryKey: ['globalSettings'] })
       setFormError(null)
     },
     onError: (e: Error) => setFormError(e.message),
   })
 
-  const hasKey = keys.includes('ANTHROPIC_API_KEY')
+  function isProviderConnected(provider: AiProviderId): boolean {
+    const config = AI_PROVIDERS.find((p) => p.id === provider)!
+    return keys.includes(config.settingKey)
+  }
+
+  const current = defaults ? `${defaults.provider}:${defaults.model}` : ''
+  const currentKnown = REASONING_MODELS.some((m) => `${m.provider}:${m.modelId}` === current)
+
+  function handleChange(value: string) {
+    const [provider, model] = value.split(':') as [AiProviderId, string]
+    save.mutate({ provider, model })
+  }
 
   return (
-    <section>
-      <div className="mb-3 flex items-center gap-2">
-        <Sparkles className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium text-foreground">Claude (AI)</h2>
-      </div>
-      <p className="mb-3 text-xs text-muted-foreground">
-        Your Anthropic API key powers the PM planning and classification — actionable items,
-        risk detection, and delegate suggestions — across all projects.
-      </p>
-
-      {isLoading ? (
-        <Spinner />
-      ) : isError ? (
-        <QueryError message={error instanceof Error ? error.message : undefined} onRetry={() => refetch()} />
-      ) : (
-        <div className={`rounded-lg border p-4 ${
-          hasKey
-            ? 'border-emerald-500/40 bg-emerald-500/5'
-            : 'border-amber-500/40 bg-amber-500/5'
-        }`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {hasKey
-                ? <CheckCircle2 className="h-4 w-4 text-emerald-400" aria-hidden="true" />
-                : <AlertCircle className="h-4 w-4 text-amber-400" aria-hidden="true" />}
-              <span className="text-sm font-medium text-foreground">Anthropic API key</span>
-              <Badge variant={hasKey ? 'success' : 'warning'}>
-                {hasKey ? 'Connected' : 'Not set'}
-              </Badge>
-            </div>
-            {hasKey && (
-              <button
-                onClick={() => remove.mutate()}
-                disabled={remove.isPending}
-                className="flex items-center gap-1 text-xs text-destructive hover:opacity-80 disabled:opacity-40"
+    <div className="rounded-lg border border-border p-4">
+      <Field
+        id="default-reasoning-model"
+        label="Default reasoning model"
+        hint="Used for PM classification, digests, and natural-language queries. Only models whose provider key is set can be selected."
+      >
+        <select
+          id="default-reasoning-model"
+          value={current}
+          onChange={(e) => handleChange(e.target.value)}
+          disabled={isLoading || save.isPending}
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary disabled:opacity-50"
+        >
+          {!currentKnown && <option value={current} disabled>{isLoading ? 'Loading…' : current}</option>}
+          {REASONING_MODELS.map((m) => {
+            const connected = isProviderConnected(m.provider)
+            return (
+              <option
+                key={`${m.provider}:${m.modelId}`}
+                value={`${m.provider}:${m.modelId}`}
+                disabled={!connected}
               >
-                <Trash2 className="h-3 w-3" /> Remove
-              </button>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {hasKey
-              ? 'Set — AI planning features are active for all projects.'
-              : 'Not set — AI planning features (digest, NL queries, delegate) are disabled until this key is added.'}
-          </p>
-          {!hasKey && (
-            <QuickAddForm
-              label="sk-ant-…"
-              onAdd={(value) => save.mutate(value)}
-              isPending={save.isPending}
-            />
-          )}
-          {formError && <p className="mt-2 text-xs text-destructive">{formError}</p>}
-        </div>
-      )}
-    </section>
+                {m.label}{connected ? '' : ' — key not set'}
+              </option>
+            )
+          })}
+        </select>
+      </Field>
+      {formError && <p className="mt-2 text-xs text-destructive">{formError}</p>}
+    </div>
   )
 }
 
@@ -478,9 +582,10 @@ function AddAccountForm({ onDone }: { onDone: (connected: boolean) => void }) {
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
 function QuickAddForm({
-  label, onAdd, isPending,
+  label, ariaLabel, onAdd, isPending,
 }: {
   label: string
+  ariaLabel: string
   onAdd: (value: string) => void
   isPending: boolean
 }) {
@@ -498,7 +603,7 @@ function QuickAddForm({
         <input
           type={show ? 'text' : 'password'}
           placeholder={label}
-          aria-label="Anthropic API key"
+          aria-label={ariaLabel}
           value={val}
           onChange={(e) => setVal(e.target.value)}
           className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 font-mono text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary"

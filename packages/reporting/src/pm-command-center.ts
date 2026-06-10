@@ -1,6 +1,7 @@
 import { getActiveEvents, classifyItems, getLatestDigest } from '@creare/integrations'
 import { getSprintContext } from './sprint-reader'
 import { getAgentActivity } from './agent-activity'
+import type { ModelProvider } from '@creare/ai-sdk'
 import type { ClassifiedItem } from '@creare/integrations'
 import type { SprintContext } from './sprint-reader'
 import type { TraceStub } from './agent-activity'
@@ -28,6 +29,8 @@ export interface DashboardResponse {
 export async function getDashboard(
   projectId: string,
   apiKey: string | null,
+  provider: ModelProvider,
+  model: string,
 ): Promise<DashboardResponse> {
   const [sprintContext, agentActivity, activeEvents] = await Promise.all([
     getSprintContext(projectId),
@@ -40,7 +43,7 @@ export async function getDashboard(
   let classified: DashboardResponse['classified'] = { doNow: [], delegate: [], risks: [] }
 
   if (hasIntegrations && apiKey) {
-    const items = await classifyItems(activeEvents, apiKey)
+    const items = await classifyItems(activeEvents, apiKey, provider, model)
     classified = partitionItems(items)
   }
 

@@ -1,4 +1,5 @@
 import { complete } from '@creare/ai-sdk'
+import type { ModelProvider } from '@creare/ai-sdk'
 import { getDb, externalEventCache } from '@creare/database'
 import { eq } from 'drizzle-orm'
 import type { ExternalEventCache } from '@creare/database'
@@ -65,12 +66,17 @@ Respond with JSON only — no markdown, no explanation:
 
 urgency: 5=critical/today, 4=high/this session, 3=medium/today, 2=low/this week, 1=watch`
 
-async function classifyWithLLM(entity: NormalizedEntity, apiKey: string): Promise<Classification> {
+async function classifyWithLLM(
+  entity: NormalizedEntity,
+  apiKey: string,
+  provider: ModelProvider,
+  model: string,
+): Promise<Classification> {
   try {
     const response = await complete(
       {
-        provider: 'anthropic',
-        model: 'claude-haiku-4-5-20251001',
+        provider,
+        model,
         systemPrompt: CLASSIFIER_SYSTEM,
         messages: [
           {
@@ -156,6 +162,8 @@ function persistClassification(rowId: string, c: Classification): void {
 export async function classifyItems(
   cacheRows: ExternalEventCache[],
   apiKey: string,
+  provider: ModelProvider,
+  model: string,
 ): Promise<ClassifiedItem[]> {
   // Parse all payloads first — skip malformed rows
   const parsed: Array<{ row: ExternalEventCache; entity: NormalizedEntity }> = []
@@ -183,7 +191,7 @@ export async function classifyItems(
   const llmResults = await withConcurrency(
     ambiguousIndices,
     5,
-    (i) => classifyWithLLM(parsed[i]!.entity, apiKey),
+    (i) => classifyWithLLM(parsed[i]!.entity, apiKey, provider, model),
   )
 
   // Merge results

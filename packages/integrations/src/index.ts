@@ -4,6 +4,7 @@ import { sync } from './sync-engine'
 import { classifyItems as classifyRows } from './classifier'
 import { correlateEntities as correlate } from './correlator'
 import { generateDigest, getLatestDigest as getCachedDigest } from './digest-generator'
+import type { ModelProvider } from '@creare/ai-sdk'
 import type { IntegrationCredential, ExternalEventCache, PmDigestCache } from '@creare/database'
 import type { ClassifiedItem, IntegrationSource, SyncStatus } from './types'
 
@@ -80,8 +81,10 @@ export async function correlateEntities(
 export async function classifyItems(
   rows: ExternalEventCache[],
   apiKey: string,
+  provider: ModelProvider,
+  model: string,
 ): Promise<ClassifiedItem[]> {
-  return classifyRows(rows, apiKey)
+  return classifyRows(rows, apiKey, provider, model)
 }
 
 export async function generatePmDigest(
@@ -89,8 +92,10 @@ export async function generatePmDigest(
   digestType: PmDigestCache['digestType'],
   items: ClassifiedItem[],
   apiKey: string,
+  provider: ModelProvider,
+  model: string,
 ): Promise<PmDigestCache> {
-  return generateDigest(projectId, digestType, items, apiKey)
+  return generateDigest(projectId, digestType, items, apiKey, provider, model)
 }
 
 export async function getLatestDigest(

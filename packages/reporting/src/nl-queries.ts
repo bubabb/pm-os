@@ -1,11 +1,14 @@
 import { complete } from '@creare/ai-sdk'
 import { getDb, sprints, events } from '@creare/database'
 import { and, eq, gte, desc } from 'drizzle-orm'
+import type { ModelProvider } from '@creare/ai-sdk'
 
 export async function queryProject(
   projectId: string,
   question: string,
   apiKey: string,
+  provider: ModelProvider,
+  model: string,
 ): Promise<string> {
   const db = getDb()
   const since72h = new Date(Date.now() - 72 * 3_600_000).toISOString()
@@ -19,8 +22,8 @@ export async function queryProject(
 
   const response = await complete(
     {
-      provider: 'anthropic',
-      model: 'claude-haiku-4-5-20251001',
+      provider,
+      model,
       systemPrompt: 'You are a PM assistant with access to recent project activity. Answer the question concisely and factually based on the activity provided. If you cannot answer from the data, say so.',
       messages: [
         {
@@ -36,15 +39,20 @@ export async function queryProject(
   return response.content
 }
 
-export async function generateSprintSummary(sprintId: string, apiKey: string): Promise<string> {
+export async function generateSprintSummary(
+  sprintId: string,
+  apiKey: string,
+  provider: ModelProvider,
+  model: string,
+): Promise<string> {
   const db = getDb()
   const [sprint] = await db.select().from(sprints).where(eq(sprints.id, sprintId)).limit(1)
   if (!sprint) throw new Error(`Sprint ${sprintId} not found`)
 
   const response = await complete(
     {
-      provider: 'anthropic',
-      model: 'claude-sonnet-4-6',
+      provider,
+      model,
       systemPrompt: 'You are a PM assistant. Generate a concise sprint summary covering: goal, what was completed, what was deferred, key decisions, velocity vs target.',
       messages: [{ role: 'user', content: `Sprint data: ${JSON.stringify(sprint)}` }],
       maxTokens: 600,
@@ -55,7 +63,12 @@ export async function generateSprintSummary(sprintId: string, apiKey: string): P
   return response.content
 }
 
-export async function generateExecutiveSummary(projectId: string, apiKey: string): Promise<string> {
+export async function generateExecutiveSummary(
+  projectId: string,
+  apiKey: string,
+  provider: ModelProvider,
+  model: string,
+): Promise<string> {
   const db = getDb()
   const since7d = new Date(Date.now() - 7 * 86_400_000).toISOString()
 
@@ -68,8 +81,8 @@ export async function generateExecutiveSummary(projectId: string, apiKey: string
 
   const response = await complete(
     {
-      provider: 'anthropic',
-      model: 'claude-sonnet-4-6',
+      provider,
+      model,
       systemPrompt: 'You are a PM assistant. Generate a 3-paragraph executive summary of the past week: what shipped, what is in progress, and what risks or decisions need executive attention. No jargon.',
       messages: [{ role: 'user', content: `Project activity (last 7 days):\n${JSON.stringify(recentEvents)}` }],
       maxTokens: 600,
@@ -84,6 +97,8 @@ export async function generateChangelog(
   projectId: string,
   since: string,
   apiKey: string,
+  provider: ModelProvider,
+  model: string,
 ): Promise<string> {
   const db = getDb()
 
@@ -102,8 +117,8 @@ export async function generateChangelog(
 
   const response = await complete(
     {
-      provider: 'anthropic',
-      model: 'claude-haiku-4-5-20251001',
+      provider,
+      model,
       systemPrompt: 'Generate a user-facing changelog from the completed tasks. Group by theme. Use plain language. Format as markdown with ## headers.',
       messages: [{ role: 'user', content: JSON.stringify(completionEvents) }],
       maxTokens: 800,

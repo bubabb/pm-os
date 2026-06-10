@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
-import { listGlobalSettingKeys, setGlobalSetting, deleteGlobalSetting } from '../secrets'
+import { listGlobalSettingKeys, setGlobalSetting, deleteGlobalSetting, getGlobalSetting } from '../secrets'
 
 // Workspace-level (GLOBAL) encrypted settings — requireAuth, but NOT project-scoped.
 // Values are never returned — only the keys present.
@@ -15,6 +15,18 @@ export async function globalSettingsRoutes(app: FastifyInstance): Promise<void> 
     { preHandler: requireAuth },
     async () => {
       return listGlobalSettingKeys()
+    },
+  )
+
+  // Default reasoning model — provider/model ids are NOT secrets, so exposing
+  // these two values (and only these) is safe. API keys stay write-only.
+  app.get(
+    '/settings/reasoning-defaults',
+    { preHandler: requireAuth },
+    async () => {
+      const provider = (await getGlobalSetting('DEFAULT_REASONING_PROVIDER')) ?? 'anthropic'
+      const model = (await getGlobalSetting('DEFAULT_REASONING_MODEL')) ?? 'claude-haiku-4-5-20251001'
+      return { provider, model }
     },
   )
 

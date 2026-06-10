@@ -6,6 +6,7 @@ import { getGlobalSetting } from '../secrets'
 import { assertProjectAccess } from '../utils/project-access'
 import { createTask } from '@creare/agent-orchestration'
 import type { AuthenticatedRequest } from '../auth'
+import type { ModelProvider } from '@creare/ai-sdk'
 import type { ClassifiedItem } from '@creare/integrations'
 import type { PmDigestCache } from '@creare/database'
 
@@ -14,16 +15,25 @@ interface DigestParams { id: string; type: string }
 interface DelegateBody { entity: ClassifiedItem['entity']; suggestedAction: string }
 interface QueryQuery { q: string }
 
+const VALID_PROVIDERS: ModelProvider[] = ['anthropic', 'openai', 'gemini']
+const DEFAULT_REASONING_PROVIDER: ModelProvider = 'anthropic'
+const DEFAULT_REASONING_MODEL = 'claude-haiku-4-5-20251001'
+
 async function getProjectAndApiKey(
   projectId: string,
   userId: string,
-): Promise<{ apiKey: string | null } | null> {
+): Promise<{ apiKey: string | null; provider: ModelProvider; model: string } | null> {
   const project = await assertProjectAccess(projectId, userId)
   if (!project) return null
 
-  // The Claude API key is a workspace-level setting — not per-project.
-  const apiKey = await getGlobalSetting('ANTHROPIC_API_KEY')
-  return { apiKey }
+  // Reasoning model + per-provider API keys are workspace-level settings — not per-project.
+  const rawProvider = await getGlobalSetting('DEFAULT_REASONING_PROVIDER')
+  const provider = VALID_PROVIDERS.includes(rawProvider as ModelProvider)
+    ? (rawProvider as ModelProvider)
+    : DEFAULT_REASONING_PROVIDER
+  const model = (await getGlobalSetting('DEFAULT_REASONING_MODEL')) ?? DEFAULT_REASONING_MODEL
+  const apiKey = await getGlobalSetting(`${provider.toUpperCase()}_API_KEY`)
+  return { apiKey, provider, model }
 }
 
 export async function reportingRoutes(app: FastifyInstance): Promise<void> {
@@ -35,7 +45,7 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
       const user = (request as AuthenticatedRequest).user
       const ctx = await getProjectAndApiKey(request.params.id, user.id)
       if (!ctx) return reply.code(404).send({ error: 'Not found' })
-      return getDashboard(request.params.id, ctx.apiKey)
+      return getDashboard(request.params.id, ctx.apiKey, ctx.provider, ctx.model)
     },
   )
 
@@ -62,14 +72,16 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
         return cached
       }
 
-      // Generate fresh — requires API key
+      // Generate fresh — requires the API key for the selected provider
       if (!ctx.apiKey) {
-        return reply.code(422).send({ error: 'ANTHROPIC_API_KEY not configured' })
+        return reply.code(422).send({ error: `${ctx.provider.toUpperCase()}_API_KEY not configured` })
       }
 
       const events = await getActiveEvents(request.params.id)
-      const items  = events.length > 0 ? await classifyItems(events, ctx.apiKey) : []
-      return generatePmDigest(request.params.id, digestType, items, ctx.apiKey)
+      const items  = events.length > 0
+        ? await classifyItems(events, ctx.apiKey, ctx.provider, ctx.model)
+        : []
+      return generatePmDigest(request.params.id, digestType, items, ctx.apiKey, ctx.provider, ctx.model)
     },
   )
 
@@ -110,10 +122,14 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
       const user = (request as AuthenticatedRequest).user
       const ctx = await getProjectAndApiKey(request.params.id, user.id)
       if (!ctx) return reply.code(404).send({ error: 'Not found' })
-      if (!ctx.apiKey) return reply.code(422).send({ error: 'ANTHROPIC_API_KEY not configured' })
+      if (!ctx.apiKey) {
+        return reply.code(422).send({ error: `${ctx.provider.toUpperCase()}_API_KEY not configured` })
+      }
       if (!request.query.q?.trim()) return reply.code(400).send({ error: 'Missing q param' })
 
-      const answer = await queryProject(request.params.id, request.query.q, ctx.apiKey)
+      const answer = await queryProject(
+        request.params.id, request.query.q, ctx.apiKey, ctx.provider, ctx.model,
+      )
       return { question: request.query.q, answer }
     },
   )

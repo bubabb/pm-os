@@ -8,6 +8,10 @@ const PRICING: Record<string, { inputCentsPerMtok: number; outputCentsPerMtok: n
   'claude-haiku-4-5-20251001':   { inputCentsPerMtok: 100, outputCentsPerMtok: 500  },
 }
 
+// Models that REJECT sampling params — sending `temperature`/`top_p` to these
+// returns HTTP 400 (Opus 4.7/4.8 and Fable 5 removed sampling params).
+const NO_SAMPLING_PARAMS = /claude-opus-4-(7|8)|claude-fable-5/
+
 function calcCostCents(model: string, inputTokens: number, outputTokens: number): number {
   const pricing = PRICING[model] ?? PRICING['claude-sonnet-4-6']!
   const inputCents  = (inputTokens  / 1_000_000) * pricing.inputCentsPerMtok
@@ -27,7 +31,9 @@ export async function completeAnthropic(
     max_tokens: request.maxTokens ?? 1024,
     ...(request.systemPrompt !== undefined ? { system: request.systemPrompt } : {}),
     messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
-    ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
+    ...(request.temperature !== undefined && !NO_SAMPLING_PARAMS.test(request.model)
+      ? { temperature: request.temperature }
+      : {}),
   })
 
   const durationMs = Date.now() - startMs

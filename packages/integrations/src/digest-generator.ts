@@ -2,6 +2,7 @@ import { getDb, pmDigestCache } from '@creare/database'
 import { generateId } from '@creare/shared'
 import { and, desc, eq, gt } from 'drizzle-orm'
 import { complete } from '@creare/ai-sdk'
+import type { ModelProvider } from '@creare/ai-sdk'
 import type { PmDigestCache } from '@creare/database'
 import type { ClassifiedItem } from './types'
 
@@ -34,13 +35,15 @@ export async function generateDigest(
   digestType: PmDigestCache['digestType'],
   items: ClassifiedItem[],
   apiKey: string,
+  provider: ModelProvider,
+  model: string,
 ): Promise<PmDigestCache> {
   const db = getDb()
 
   const response = await complete(
     {
-      provider: 'anthropic',
-      model: 'claude-haiku-4-5-20251001',
+      provider,
+      model,
       systemPrompt: DIGEST_PROMPTS[digestType],
       messages: [
         {
