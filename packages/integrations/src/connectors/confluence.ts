@@ -15,15 +15,16 @@ export class ConfluenceConnector extends BaseConnector {
     const baseUrl = this.config.baseUrl
     if (!baseUrl) return { entities: [], nextCursor: null }
 
-    // Per-project resource scope: when a spaceKey is set (source bound to a
+    // Per-project resource scope: when a spaceId is set (source bound to a
     // global connection), filter pages to that space so other spaces on the
-    // same account never leak in.
-    const meta = this.config.metadata as { spaceKey?: string } | undefined
-    const spaceKey = meta?.spaceKey
+    // same account never leak in. This is the numeric space ID passed to the
+    // v2 API's `space-id` param, not the space key.
+    const meta = this.config.metadata as { spaceId?: string } | undefined
+    const spaceId = meta?.spaceId
     const params = new URLSearchParams({
       'sort': '-modified-date',
       'limit': '25',
-      ...(spaceKey ? { 'space-id': spaceKey } : {}),
+      ...(spaceId ? { 'space-id': spaceId } : {}),
       ...(cursor ? { cursor } : {}),
     })
 

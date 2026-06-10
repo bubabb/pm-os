@@ -329,7 +329,7 @@ export const integrationCredentials = sqliteTable('integration_credentials', {
   label:          text('label').notNull(),                // e.g. "Acme Jira" — user-facing display name
   encryptedToken: text('encrypted_token').notNull(),      // AES-256-GCM ciphertext, base64-encoded
   iv:             text('iv').notNull(),                   // AES-256-GCM IV, base64 (unique per encryption)
-  metadata:       text('metadata').notNull().default('{}'), // JSON: per-project resource scope e.g. { owner, repo } / { projectKey } / { spaceKey }
+  metadata:       text('metadata').notNull().default('{}'), // JSON: per-project resource scope e.g. { owner, repo } / { projectKey } / { spaceId } / { databaseId }
   expiresAt:      text('expires_at'),                    // null = non-expiring (PAT); set for OAuth short-lived tokens
   // Links this per-project source to a global connection. Nullable for legacy rows
   // created before global connections existed. Token ciphertext is COPIED from the

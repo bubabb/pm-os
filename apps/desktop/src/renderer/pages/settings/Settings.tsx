@@ -59,7 +59,7 @@ const SCOPE_FIELDS: Record<ConnectionSource, ScopeField[]> = {
     { key: 'projectKey', label: 'Project key', required: true, placeholder: 'Project key (e.g. PROJ)' },
   ],
   confluence: [
-    { key: 'spaceKey', label: 'Space ID', required: true, placeholder: 'Space ID' },
+    { key: 'spaceId', label: 'Space ID', required: true, placeholder: 'Numeric space ID (not the space key)' },
   ],
   notion: [
     { key: 'databaseId', label: 'Database ID', required: true, placeholder: 'Database ID' },
@@ -85,7 +85,7 @@ function scopeSummary(source: ConnectionSource, metadata: Record<string, string>
     case 'jira':
       return metadata.projectKey ?? null
     case 'confluence':
-      return metadata.spaceKey ?? null
+      return metadata.spaceId ?? null
     case 'notion':
       return metadata.databaseId ?? null
     case 'onedrive':
