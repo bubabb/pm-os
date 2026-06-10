@@ -48,3 +48,7 @@ coverage/
 .stfolder.removed-*/
 .stignore
 *.syncthing-enc/
+
+# Playwright
+playwright-report/
+test-results/

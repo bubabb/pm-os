@@ -8,6 +8,7 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "e2e": "electron-vite build && playwright test",
     "lint": "eslint src"
   },
   "dependencies": {
@@ -39,6 +40,7 @@
     "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.43.0",
     "@testing-library/react": "^15.0.0",
     "@vitejs/plugin-react": "^4.2.0",
     "autoprefixer": "^10.4.0",
