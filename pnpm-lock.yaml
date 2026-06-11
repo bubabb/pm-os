@@ -266,6 +266,9 @@ importers:
       '@creare/ai-sdk':
         specifier: workspace:*
         version: link:../ai-sdk
+      '@creare/boards':
+        specifier: workspace:*
+        version: link:../boards
       '@creare/database':
         specifier: workspace:*
         version: link:../database

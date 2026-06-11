@@ -1,5 +1,5 @@
 import {
-  getDb, boards, boardColumns, sprints, boardItems, milestones, milestoneTasks, tasks, events,
+  getDb, boards, boardColumns, sprints, boardItems, milestones, milestoneTasks, tasks, events, remoteLinks,
 } from '@creare/database'
 import { eq, and, asc, ne, desc, getTableColumns } from 'drizzle-orm'
 import { generateId } from '@creare/shared'
@@ -401,6 +401,274 @@ export function addMilestoneTask(milestoneId: string, taskId: string): Milestone
 
 export function listMilestoneTasks(milestoneId: string): MilestoneTask[] {
   return getDb().select().from(milestoneTasks).where(eq(milestoneTasks.milestoneId, milestoneId)).all()
+}
+
+// ── Mirror sync (apply a remote snapshot) ─────────────────────────────────────
+//
+// Plain-data instruction shapes defined HERE so the integrations mirror-sync
+// layer can depend on boards without boards importing @creare/integrations
+// (which would create a circular dependency). Integrations translates its
+// ReconcilePlan into a MirrorApply and calls applyMirrorSnapshot.
+
+export type RemoteLink = InferSelectModel<typeof remoteLinks>
+
+export interface MirrorApplyColumn {
+  remoteId: string
+  name: string
+  position: number
+  isTerminal: boolean
+  syncHash: string
+}
+
+export interface MirrorApplyItem {
+  remoteId: string
+  title: string
+  url: string | null
+  columnRemoteId: string | null // which column (status option) it belongs in; null = first/no-status column
+  state: string
+  version: string
+  contentHash: string
+}
+
+export interface MirrorApply {
+  projectId: string
+  credentialId: string
+  source: string
+  boardId: string | null // null = CREATE the board (initial import)
+  // Link conventions (must stay in sync with integrations/mirror/outbox.ts):
+  //   board link:  containerRemoteId = the Status FIELD remote id (statusFieldRemoteId, may be null)
+  //   column link: containerRemoteId = the ProjectV2 node id (board.remoteId)
+  //   item link:   containerRemoteId = the ProjectV2 node id (board.remoteId)
+  board: { remoteId: string; title: string; url: string | null; version: string; statusFieldRemoteId: string | null }
+  columns: MirrorApplyColumn[] // full desired column set (ordered by position)
+  upsertItems: MirrorApplyItem[] // create-or-update these items
+  deleteRemoteIds: string[] // item remoteIds removed/archived remotely → remove locally
+}
+
+function _findRemoteLink(
+  credentialId: string,
+  localType: RemoteLink['localType'],
+  remoteType: string,
+  remoteId: string,
+): RemoteLink | null {
+  const [link] = getDb().select().from(remoteLinks)
+    .where(and(
+      eq(remoteLinks.credentialId, credentialId),
+      eq(remoteLinks.localType, localType),
+      eq(remoteLinks.remoteType, remoteType),
+      eq(remoteLinks.remoteId, remoteId),
+    ))
+    .limit(1).all()
+  return link ?? null
+}
+
+// Applies a full remote snapshot (board + columns + items) inside a single
+// transaction, creating or reconciling local rows and their remote_links.
+export function applyMirrorSnapshot(apply: MirrorApply): { boardId: string } {
+  const db = getDb()
+  const now = new Date().toISOString()
+  const isImport = apply.boardId === null
+
+  const boardId = db.transaction(() => {
+    // ── Board ──────────────────────────────────────────────────────────────
+    let localBoardId: string
+    if (apply.boardId === null) {
+      localBoardId = generateId()
+      db.insert(boards).values({
+        id: localBoardId,
+        projectId: apply.projectId,
+        name: apply.board.title,
+        type: 'kanban',
+        createdAt: now,
+        updatedAt: now,
+      }).run()
+      db.insert(remoteLinks).values({
+        id: generateId(),
+        projectId: apply.projectId,
+        credentialId: apply.credentialId,
+        source: apply.source,
+        localType: 'board',
+        localId: localBoardId,
+        remoteType: 'pv2_project',
+        remoteId: apply.board.remoteId,
+        // Board-link convention: containerRemoteId carries the Status FIELD
+        // remote id (null when the remote project has no Status field).
+        containerRemoteId: apply.board.statusFieldRemoteId,
+        remoteUrl: apply.board.url,
+        remoteVersion: apply.board.version,
+        lastPulledAt: now,
+        createdAt: now,
+        updatedAt: now,
+      }).run()
+      _logEvent(apply.projectId, 'board.mirror.created', 'boards', 'system', null, 'board', localBoardId, {
+        source: apply.source,
+        remoteId: apply.board.remoteId,
+        name: apply.board.title,
+      })
+    } else {
+      localBoardId = apply.boardId
+      // Keep the board link's Status FIELD id current (same convention as the
+      // create path above) — the remote field id can change across pulls.
+      const boardLink = _findRemoteLink(apply.credentialId, 'board', 'pv2_project', apply.board.remoteId)
+      if (boardLink && boardLink.containerRemoteId !== apply.board.statusFieldRemoteId) {
+        db.update(remoteLinks).set({
+          containerRemoteId: apply.board.statusFieldRemoteId,
+          updatedAt: now,
+        }).where(eq(remoteLinks.id, boardLink.id)).run()
+      }
+    }
+
+    // ── Columns ────────────────────────────────────────────────────────────
+    // Ensure a local column (+ remote link) exists for every desired column.
+    const columnIdByRemoteId = new Map<string, string>()
+    for (const col of apply.columns) {
+      const link = _findRemoteLink(apply.credentialId, 'board_column', 'pv2_status_option', col.remoteId)
+      if (!link) {
+        const created = createColumn(localBoardId, { name: col.name, position: col.position, isTerminal: col.isTerminal })
+        db.insert(remoteLinks).values({
+          id: generateId(),
+          projectId: apply.projectId,
+          credentialId: apply.credentialId,
+          source: apply.source,
+          localType: 'board_column',
+          localId: created.id,
+          remoteType: 'pv2_status_option',
+          remoteId: col.remoteId,
+          containerRemoteId: apply.board.remoteId,
+          remoteVersion: apply.board.version,
+          lastSyncedHash: col.syncHash,
+          lastPulledAt: now,
+          createdAt: now,
+          updatedAt: now,
+        }).run()
+        columnIdByRemoteId.set(col.remoteId, created.id)
+      } else {
+        const existing = getColumn(link.localId)
+        if (existing && (existing.name !== col.name || existing.position !== col.position || existing.isTerminal !== col.isTerminal)) {
+          updateColumn(existing.id, { name: col.name, position: col.position, isTerminal: col.isTerminal })
+        }
+        // Always record the latest remote state hash on the link.
+        db.update(remoteLinks).set({
+          lastSyncedHash: col.syncHash,
+          remoteVersion: apply.board.version,
+          lastPulledAt: now,
+          updatedAt: now,
+        }).where(eq(remoteLinks.id, link.id)).run()
+        columnIdByRemoteId.set(col.remoteId, link.localId)
+      }
+    }
+
+    // Fallback column for items with no status: the first desired column, or
+    // (if the snapshot carries no columns) the board's first existing column.
+    const fallbackColumnId: string | undefined =
+      apply.columns.length > 0
+        ? columnIdByRemoteId.get(apply.columns[0]!.remoteId)
+        : listColumns(localBoardId)[0]?.id
+
+    const resolveColumnId = (remoteColumnId: string | null): string => {
+      const target = (remoteColumnId !== null ? columnIdByRemoteId.get(remoteColumnId) : undefined) ?? fallbackColumnId
+      if (!target) throw new Error('applyMirrorSnapshot: no local column available to place items')
+      return target
+    }
+
+    // ── Items (upsert) ─────────────────────────────────────────────────────
+    for (const item of apply.upsertItems) {
+      const link = _findRemoteLink(apply.credentialId, 'board_item', 'pv2_item', item.remoteId)
+      const targetColumnId = resolveColumnId(item.columnRemoteId)
+      const taskStatus = item.state === 'closed' ? 'completed' : 'pending'
+
+      if (!link || link.deletedAt !== null) {
+        // Create the backing task — board_items.taskId is NOT NULL.
+        const taskId = generateId()
+        db.insert(tasks).values({
+          id: taskId,
+          projectId: apply.projectId,
+          title: item.title,
+          type: 'human',
+          status: taskStatus,
+          createdAt: now,
+          updatedAt: now,
+        }).run()
+        const boardItem = addBoardItem(localBoardId, targetColumnId, taskId)
+        if (!link) {
+          db.insert(remoteLinks).values({
+            id: generateId(),
+            projectId: apply.projectId,
+            credentialId: apply.credentialId,
+            source: apply.source,
+            localType: 'board_item',
+            localId: boardItem.id,
+            remoteType: 'pv2_item',
+            remoteId: item.remoteId,
+            containerRemoteId: apply.board.remoteId,
+            remoteUrl: item.url,
+            remoteVersion: item.version,
+            lastSyncedHash: item.contentHash,
+            lastPulledAt: now,
+            createdAt: now,
+            updatedAt: now,
+          }).run()
+        } else {
+          // Tombstoned link for an item that reappeared remotely — resurrect it.
+          db.update(remoteLinks).set({
+            localId: boardItem.id,
+            remoteUrl: item.url,
+            remoteVersion: item.version,
+            lastSyncedHash: item.contentHash,
+            lastPulledAt: now,
+            deletedAt: null,
+            updatedAt: now,
+          }).where(eq(remoteLinks.id, link.id)).run()
+        }
+      } else {
+        const boardItem = getBoardItem(link.localId)
+        if (boardItem) {
+          if (boardItem.columnId !== targetColumnId) {
+            db.update(boardItems).set({ columnId: targetColumnId, updatedAt: now }).where(eq(boardItems.id, boardItem.id)).run()
+            _logEvent(apply.projectId, 'board.item.moved', 'boards', 'system', null, 'item', boardItem.id, {
+              boardItemId: boardItem.id,
+              fromColumnId: boardItem.columnId,
+              toColumnId: targetColumnId,
+              taskId: boardItem.taskId,
+            })
+          }
+          const [task] = db.select().from(tasks).where(eq(tasks.id, boardItem.taskId)).limit(1).all()
+          if (task && (task.title !== item.title || task.status !== taskStatus)) {
+            db.update(tasks).set({ title: item.title, status: taskStatus, updatedAt: now }).where(eq(tasks.id, task.id)).run()
+          }
+        }
+        db.update(remoteLinks).set({
+          remoteUrl: item.url,
+          remoteVersion: item.version,
+          lastSyncedHash: item.contentHash,
+          lastPulledAt: now,
+          updatedAt: now,
+        }).where(eq(remoteLinks.id, link.id)).run()
+      }
+    }
+
+    // ── Deletes ────────────────────────────────────────────────────────────
+    // Remove the board_item, keep the task (history), tombstone the link.
+    for (const remoteId of apply.deleteRemoteIds) {
+      const link = _findRemoteLink(apply.credentialId, 'board_item', 'pv2_item', remoteId)
+      if (!link || link.deletedAt !== null) continue
+      db.delete(boardItems).where(eq(boardItems.id, link.localId)).run()
+      db.update(remoteLinks).set({ deletedAt: now, updatedAt: now }).where(eq(remoteLinks.id, link.id)).run()
+    }
+
+    if (!isImport) {
+      _logEvent(apply.projectId, 'board.mirror.synced', 'boards', 'system', null, 'board', localBoardId, {
+        source: apply.source,
+        remoteId: apply.board.remoteId,
+        upserted: apply.upsertItems.length,
+        deleted: apply.deleteRemoteIds.length,
+      })
+    }
+
+    return localBoardId
+  })
+
+  return { boardId }
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

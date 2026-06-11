@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@creare/ai-sdk": "workspace:*",
+    "@creare/boards": "workspace:*",
     "@creare/database": "workspace:*",
     "@creare/shared": "workspace:*",
     "drizzle-orm": "^0.45.2"
