@@ -56,6 +56,17 @@ export class GitHubConnector extends BaseConnector {
     const { owner, repo } = this.repo
     if (!owner || !repo) return { entities: [], nextCursor: null }
 
+    // Repo existence check — fetchWithRetry throws on 401/403 but returns 404,
+    // so an unreadable repo (private/renamed/token lacks access) must be made
+    // loud here instead of falling through as a silent empty success
+    const repoRes = await this.fetchWithRetry(
+      `${BASE}/repos/${owner}/${repo}`,
+      { headers: this.headers },
+    )
+    if (repoRes.status === 404) {
+      throw new Error(`GitHub repo ${owner}/${repo} not found, or your token lacks access (check the repo name, its visibility, and that the token has the "repo" scope).`)
+    }
+
     const PER_PAGE = 50
     const page = cursor ? parseInt(cursor, 10) : 1
     const entities: NormalizedEntity[] = []

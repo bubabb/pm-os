@@ -9,22 +9,28 @@ interface SprintContext {
 
 interface Props {
   sprintContext: SprintContext
+  /** Real integration sync time from dashboard.integrations.lastSyncedAt (not the cache-derived value). */
+  integrationsLastSyncedAt: string | null
   isRefreshing: boolean
   onRefresh: () => void
 }
 
-export function ContextStrip({ sprintContext, isRefreshing, onRefresh }: Props) {
-  const { activeSprint, atRiskMilestones, overnightDelta, lastSyncedAt } = sprintContext
+/** Format an ISO timestamp as a coarse relative time ("just now", "5m ago", "2h ago", "3d ago"). */
+export function formatRelativeTime(isoTimestamp: string | null): string {
+  if (!isoTimestamp) return 'never'
+  const diffMs = Date.now() - new Date(isoTimestamp).getTime()
+  const diffMins = Math.floor(diffMs / 60_000)
+  if (diffMins < 1) return 'just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  return `${Math.floor(diffHours / 24)}d ago`
+}
 
-  const lastSynced = lastSyncedAt
-    ? (() => {
-        const diffMs = Date.now() - new Date(lastSyncedAt).getTime()
-        const diffMins = Math.floor(diffMs / 60_000)
-        if (diffMins < 1) return 'just now'
-        if (diffMins < 60) return `${diffMins}m ago`
-        return `${Math.floor(diffMins / 60)}h ago`
-      })()
-    : 'never'
+export function ContextStrip({ sprintContext, integrationsLastSyncedAt, isRefreshing, onRefresh }: Props) {
+  const { activeSprint, atRiskMilestones, overnightDelta } = sprintContext
+
+  const lastSynced = formatRelativeTime(integrationsLastSyncedAt)
 
   return (
     <div className="flex items-center gap-6 border-b border-border bg-card/60 px-6 py-2.5 text-sm">
@@ -72,12 +78,12 @@ export function ContextStrip({ sprintContext, isRefreshing, onRefresh }: Props) 
       {/* Sync status */}
       <div className="flex items-center gap-2 text-muted-foreground">
         <Clock className="h-3.5 w-3.5" />
-        <span>Synced {lastSynced}</span>
+        <span>{isRefreshing ? 'Syncing…' : `Last synced ${lastSynced}`}</span>
         <button
           onClick={onRefresh}
           disabled={isRefreshing}
-          className="ml-1 rounded p-0.5 transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-40"
-          aria-label="Refresh"
+          className="ml-1 rounded p-0.5 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+          aria-label={isRefreshing ? 'Sync in progress' : 'Sync now'}
         >
           <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
         </button>

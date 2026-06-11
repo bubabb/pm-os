@@ -23,9 +23,32 @@ interface CreateCredentialBody {
 
 interface SyncBody { source?: IntegrationCredential['source'] }
 interface EventsQuery { source?: string; entityType?: string; since?: string }
+interface BulkCreateBody { items: CreateCredentialBody[] }
+
+// Builds credential+token pairs for the project and triggers a sync for one
+// source. Callers fire-and-forget this (never await in a request handler).
+async function syncProjectSource(
+  projectId: string,
+  source: IntegrationCredential['source'],
+): Promise<void> {
+  const db = getDb()
+  const credentials = await db
+    .select()
+    .from(integrationCredentials)
+    .where(eq(integrationCredentials.projectId, projectId))
+
+  const pairs = await Promise.all(
+    credentials.map(async (credential) => ({
+      credential: await withMergedConnectionMetadata(credential),
+      token: await getIntegrationToken(credential.id),
+    })),
+  )
+
+  await triggerSync(projectId, pairs, source)
+}
 
 export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
-  // List credentials (no tokens returned)
+  // List credentials (no tokens returned), enriched with per-credential sync state
   app.get<{ Params: ProjectParams }>(
     '/projects/:id/integrations',
     { preHandler: requireAuth },
@@ -34,7 +57,18 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
       if (!await assertProjectAccess(request.params.id, user.id)) {
         return reply.code(404).send({ error: 'Not found' })
       }
-      return listIntegrationCredentials(request.params.id)
+      const credentials = await listIntegrationCredentials(request.params.id)
+      const statuses = await getSyncStatus(request.params.id)
+      const statusByCredentialId = new Map(statuses.map((s) => [s.credentialId, s]))
+      return credentials.map((row) => {
+        const syncState = statusByCredentialId.get(row.id)
+        return {
+          ...row,
+          lastSyncedAt: syncState?.lastSyncedAt ?? null,
+          syncStatus: syncState?.status ?? 'idle',
+          syncError: syncState?.lastErrorMessage ?? null,
+        }
+      })
     },
   )
 
@@ -69,7 +103,69 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
         resourceId: safe.id,
         payload: JSON.stringify({ source: safe.source, label: safe.label }),
       }).catch((err) => console.error('[creare] Event log write failed:', err))
+      // Fire-and-forget — first sync starts immediately instead of waiting for
+      // the 15-min poll; the response returns without blocking on it.
+      syncProjectSource(request.params.id, source).catch(console.error)
       return safe
+    },
+  )
+
+  // Bulk-store credentials (multi-select source binding)
+  app.post<{ Params: ProjectParams; Body: BulkCreateBody }>(
+    '/projects/:id/integrations/bulk',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest<{ Params: ProjectParams; Body: BulkCreateBody }>, reply) => {
+      const user = (request as AuthenticatedRequest).user
+      if (!await assertProjectAccess(request.params.id, user.id)) {
+        return reply.code(404).send({ error: 'Not found' })
+      }
+      const items = request.body?.items
+      if (!Array.isArray(items) || items.length === 0) {
+        return reply.code(400).send({ error: 'items must be a non-empty array' })
+      }
+
+      const db = getDb()
+      const created: Array<Omit<IntegrationCredential, 'encryptedToken' | 'iv'>> = []
+      const failed: Array<{ label: string; error: string }> = []
+
+      // Per-item try/catch — one bad item never aborts the rest of the batch
+      for (const item of items) {
+        try {
+          const credential = await storeIntegrationCredential({
+            projectId: request.params.id,
+            source: item.source,
+            connectionId: item.connectionId,
+            label: item.label,
+            ...(item.metadata !== undefined ? { metadata: item.metadata } : {}),
+          })
+          const { encryptedToken: _, iv: __, ...safe } = credential
+          created.push(safe)
+          db.insert(events).values({
+            id: generateId(),
+            type: 'integration.credential.created',
+            domain: 'integrations',
+            projectId: request.params.id,
+            actorType: 'user',
+            actorId: user.id,
+            resourceType: 'integration_credential',
+            resourceId: safe.id,
+            payload: JSON.stringify({ source: safe.source, label: safe.label }),
+          }).catch((err) => console.error('[creare] Event log write failed:', err))
+        } catch (err) {
+          failed.push({
+            label: item.label,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+
+      // Fire-and-forget one sync per distinct source that got a new credential
+      const distinctSources = [...new Set(created.map((c) => c.source))]
+      for (const source of distinctSources) {
+        syncProjectSource(request.params.id, source).catch(console.error)
+      }
+
+      return { created, failed }
     },
   )
 

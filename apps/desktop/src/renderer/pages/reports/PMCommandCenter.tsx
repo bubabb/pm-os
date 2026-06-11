@@ -1,9 +1,9 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plug, Loader2 } from 'lucide-react'
+import { Plug, Loader2, RefreshCw, CloudOff } from 'lucide-react'
 import { useProjectStore } from '../../store/projects'
 import { useDashboardStore } from '../../store/dashboard'
-import { ContextStrip } from './ContextStrip'
+import { ContextStrip, formatRelativeTime } from './ContextStrip'
 import { DoNowPanel } from './DoNowPanel'
 import { DelegatePanel } from './DelegatePanel'
 import { DelegateConfigDrawer } from './DelegateConfigDrawer'
@@ -20,7 +20,7 @@ export default function PMCommandCenter() {
   const delegatingItem  = useDashboardStore((s) => s.delegatingItem)
   const acknowledgedIds = useDashboardStore((s) => s.acknowledgedIds)
   const load            = useDashboardStore((s) => s.load)
-  const refresh         = useDashboardStore((s) => s.refresh)
+  const syncAndRefresh  = useDashboardStore((s) => s.syncAndRefresh)
   const setDelegating   = useDashboardStore((s) => s.setDelegating)
   const delegate        = useDashboardStore((s) => s.delegate)
   const acknowledge     = useDashboardStore((s) => s.acknowledge)
@@ -56,8 +56,12 @@ export default function PMCommandCenter() {
     )
   }
 
-  // Onboarding state — no integrations configured
-  if (data && !data.hasIntegrations) {
+  if (!data) return null
+
+  const { sprintContext, classified, agentActivity, digest, integrations } = data
+
+  // Onboarding state 1 — nothing connected yet
+  if (integrations.connectedCount === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
         <div className="rounded-full bg-muted p-4">
@@ -72,7 +76,7 @@ export default function PMCommandCenter() {
         </div>
         <button
           onClick={() => navigate('/connections')}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           Go to Connections
         </button>
@@ -80,9 +84,40 @@ export default function PMCommandCenter() {
     )
   }
 
-  if (!data) return null
-
-  const { sprintContext, classified, agentActivity, digest } = data
+  // Onboarding state 2 — connected, but nothing synced yet. Sync must be
+  // reachable from here (the ContextStrip refresh only renders in state 3).
+  if (integrations.syncedItemCount === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+        <div className="rounded-full bg-muted p-4">
+          <CloudOff className="h-8 w-8 text-muted-foreground" />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            {integrations.connectedCount === 1
+              ? 'Integration connected — no data synced yet'
+              : `${integrations.connectedCount} integrations connected — no data synced yet`}
+          </h2>
+          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+            Run a sync to pull your work items in. Only open issues and pull requests are synced —
+            if everything is closed, the dashboard will stay empty.
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Last synced {formatRelativeTime(integrations.lastSyncedAt)}
+          </p>
+        </div>
+        <button
+          onClick={() => syncAndRefresh(currentProject.id)}
+          disabled={isRefreshing}
+          aria-label={isRefreshing ? 'Sync in progress' : 'Sync now'}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          {isRefreshing ? 'Syncing…' : 'Sync now'}
+        </button>
+      </div>
+    )
+  }
 
   async function handleDelegate(item: typeof delegatingItem, action: string) {
     if (!currentProject || !item) return
@@ -101,8 +136,9 @@ export default function PMCommandCenter() {
       {/* Context strip */}
       <ContextStrip
         sprintContext={sprintContext}
+        integrationsLastSyncedAt={integrations.lastSyncedAt}
         isRefreshing={isRefreshing}
-        onRefresh={() => refresh(currentProject.id)}
+        onRefresh={() => syncAndRefresh(currentProject.id)}
       />
 
       {/* Digest stale banner */}

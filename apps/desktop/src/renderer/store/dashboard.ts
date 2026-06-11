@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
+import { toast } from '../components/ui/Toast'
 import type { ClassifiedItem } from '@creare/integrations'
 
 // Matches DashboardResponse from @creare/reporting
@@ -20,6 +21,22 @@ interface TraceStub {
   costCents: number
 }
 
+/** Summary of connected integrations — drives the dashboard onboarding states. */
+export interface IntegrationsSummary {
+  connectedCount: number
+  syncedItemCount: number
+  lastSyncedAt: string | null
+}
+
+/** One row from GET /projects/:id/integrations/status */
+interface IntegrationSyncStatus {
+  credentialId: string
+  source: string
+  status: 'idle' | 'syncing' | 'error'
+  lastSyncedAt: string | null
+  lastErrorMessage: string | null
+}
+
 export interface DashboardData {
   sprintContext: SprintContext
   classified: {
@@ -30,6 +47,7 @@ export interface DashboardData {
   agentActivity: { running: TraceStub[]; completedToday: TraceStub[]; failed: TraceStub[] }
   digest: { morningBrief: string | null; isStale: boolean; generatedAt: string | null }
   hasIntegrations: boolean
+  integrations: IntegrationsSummary
 }
 
 interface DashboardStore {
@@ -37,15 +55,72 @@ interface DashboardStore {
   /** Which project `data` belongs to — lets load() keep showing fresh data during a background reload. */
   loadedProjectId: string | null
   isLoading: boolean
+  /** True from the moment a sync is triggered until sources finish syncing AND the dashboard reloads. */
   isRefreshing: boolean
   error: string | null
   delegatingItem: ClassifiedItem | null
   acknowledgedIds: Set<string>
   load: (projectId: string) => Promise<void>
-  refresh: (projectId: string) => Promise<void>
+  /**
+   * Trigger a sync (fire-and-forget on the backend), poll integration status
+   * until no source reports `syncing` (or the poll times out), reload the
+   * dashboard, and toast the outcome. The spinner (`isRefreshing`) stays on
+   * until the dashboard has actually been reloaded.
+   */
+  syncAndRefresh: (projectId: string) => Promise<void>
   setDelegating: (item: ClassifiedItem | null) => void
   delegate: (projectId: string, item: ClassifiedItem, action: string) => Promise<void>
   acknowledge: (entityId: string) => void
+}
+
+const SYNC_POLL_INTERVAL_MS = 1_500
+const SYNC_POLL_TIMEOUT_MS = 120_000
+/** Grace window for the fire-and-forget sync to actually flip a source into `syncing`. */
+const SYNC_GRACE_MS = 6_000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Poll integration status until no source is `syncing`. Because the sync POST
+ * is fire-and-forget, the first polls may land before any source flips to
+ * `syncing` — so we keep polling through a grace window unless we have already
+ * seen a sync in flight or `lastSyncedAt` advanced past the pre-sync baseline.
+ * Returns the first error message encountered, or null on a clean finish.
+ */
+async function pollUntilSynced(
+  projectId: string,
+  baselineLastSyncedAt: string | null
+): Promise<string | null> {
+  const startedAt = Date.now()
+  const baselineMs = baselineLastSyncedAt ? new Date(baselineLastSyncedAt).getTime() : 0
+  let sawSyncing = false
+
+  for (;;) {
+    await sleep(SYNC_POLL_INTERVAL_MS)
+    const statuses = await api.get<IntegrationSyncStatus[]>(
+      `/projects/${projectId}/integrations/status`
+    )
+
+    const anySyncing = statuses.some((s) => s.status === 'syncing')
+    if (anySyncing) {
+      sawSyncing = true
+    } else {
+      const advanced = statuses.some(
+        (s) => s.lastSyncedAt !== null && new Date(s.lastSyncedAt).getTime() > baselineMs
+      )
+      const graceOver = Date.now() - startedAt >= SYNC_GRACE_MS
+      if (sawSyncing || advanced || graceOver || statuses.length === 0) {
+        const errored = statuses.find((s) => s.status === 'error')
+        return errored ? (errored.lastErrorMessage ?? `${errored.source} sync failed`) : null
+      }
+    }
+
+    if (Date.now() - startedAt >= SYNC_POLL_TIMEOUT_MS) {
+      return 'Sync timed out — data may still be updating in the background'
+    }
+  }
 }
 
 export const useDashboardStore = create<DashboardStore>((set, get) => ({
@@ -75,14 +150,31 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     }
   },
 
-  refresh: async (projectId) => {
+  syncAndRefresh: async (projectId) => {
+    if (get().isRefreshing) return
     set({ isRefreshing: true })
+
+    const baselineLastSyncedAt = get().data?.integrations?.lastSyncedAt ?? null
+
     try {
+      // Fire-and-forget on the backend — returns immediately.
       await api.post(`/projects/${projectId}/integrations/sync`, {})
+
+      // Wait for the sync to actually finish before touching the dashboard.
+      const syncError = await pollUntilSynced(projectId, baselineLastSyncedAt)
+
+      // Reload the dashboard with whatever the sync produced.
       const data = await api.get<DashboardData>(`/projects/${projectId}/dashboard`)
       set({ data, loadedProjectId: projectId, isRefreshing: false })
-    } catch {
+
+      if (syncError) {
+        toast.error(syncError)
+      } else {
+        toast.success('Synced')
+      }
+    } catch (err) {
       set({ isRefreshing: false })
+      toast.error(err instanceof Error ? err.message : 'Sync failed')
     }
   },
 

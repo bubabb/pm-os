@@ -36,6 +36,8 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
       const user = (request as AuthenticatedRequest).user
       const ctx = await getProjectAndApiKey(request.params.id, user.id)
       if (!ctx) return reply.code(404).send({ error: 'Not found' })
+      // getDashboard derives the integrations summary (connected sources, synced
+      // item count, last sync time) itself — nothing extra to wire here.
       return getDashboard(request.params.id, ctx.apiKey, ctx.provider, ctx.model)
     },
   )

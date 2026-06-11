@@ -54,9 +54,14 @@ const dashboard = (apiKey: string | null = 'test-key') =>
   getDashboard(projectId, apiKey, 'anthropic', 'test-model')
 
 describe('reporting — PM command center dashboard', () => {
-  it('reports no integrations and an empty, stale dashboard for a fresh project', async () => {
+  it('reports connected-but-unsynced and an empty, stale dashboard for a fresh project', async () => {
     const d = await dashboard()
-    expect(d.hasIntegrations).toBe(false)
+    // A credential is bound (seedCredential in beforeEach) but nothing has synced:
+    // the connected-but-empty state, distinct from "no integrations".
+    expect(d.hasIntegrations).toBe(true)
+    expect(d.integrations.connectedCount).toBeGreaterThan(0)
+    expect(d.integrations.syncedItemCount).toBe(0)
+    expect(d.integrations.lastSyncedAt).toBeNull()
     expect(d.classified).toEqual({ doNow: [], delegate: [], risks: [] })
     expect(d.digest).toEqual({ morningBrief: null, isStale: true, generatedAt: null })
     expect(d.sprintContext.activeSprint).toBeNull()

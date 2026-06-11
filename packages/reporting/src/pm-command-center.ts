@@ -1,4 +1,6 @@
-import { getActiveEvents, classifyItems, getLatestDigest } from '@creare/integrations'
+import { getDb, integrationCredentials } from '@creare/database'
+import { count, eq } from 'drizzle-orm'
+import { getActiveEvents, classifyItems, getLatestDigest, getSyncStatus } from '@creare/integrations'
 import { getSprintContext } from './sprint-reader'
 import { getAgentActivity } from './agent-activity'
 import { llmAvailable } from '@creare/ai-sdk'
@@ -24,7 +26,19 @@ export interface DashboardResponse {
     isStale: boolean
     generatedAt: string | null
   }
+  /** Kept for backward compatibility — true when the project has at least one connected source. */
   hasIntegrations: boolean
+  integrations: IntegrationsSummary
+}
+
+// Distinguishes the three onboarding states the UI renders:
+//   connectedCount === 0                          → no sources connected ("Connect your tools")
+//   connectedCount > 0 && syncedItemCount === 0   → connected but nothing synced yet (show Sync)
+//   syncedItemCount > 0                           → has data (full dashboard)
+export interface IntegrationsSummary {
+  connectedCount: number
+  syncedItemCount: number
+  lastSyncedAt: string | null
 }
 
 export async function getDashboard(
@@ -33,19 +47,33 @@ export async function getDashboard(
   provider: ModelProvider,
   model: string,
 ): Promise<DashboardResponse> {
-  const [sprintContext, agentActivity, activeEvents] = await Promise.all([
+  const [sprintContext, agentActivity, activeEvents, syncStates, connectedCount] = await Promise.all([
     getSprintContext(projectId),
     getAgentActivity(projectId),
     getActiveEvents(projectId),
+    getSyncStatus(projectId),
+    countConnectedSources(projectId),
   ])
 
-  const hasIntegrations = activeEvents.length > 0
+  // "Connected" means a source credential exists — NOT that the event cache has
+  // rows. A freshly connected source has connectedCount > 0 but zero synced items.
+  const hasIntegrations = connectedCount > 0
+
+  const integrations: IntegrationsSummary = {
+    connectedCount,
+    syncedItemCount: activeEvents.length,
+    // ISO-8601 timestamps compare correctly as strings — take the most recent.
+    lastSyncedAt: syncStates.reduce<string | null>(
+      (max, s) => (s.lastSyncedAt !== null && (max === null || s.lastSyncedAt > max) ? s.lastSyncedAt : max),
+      null,
+    ),
+  }
 
   let classified: DashboardResponse['classified'] = { doNow: [], delegate: [], risks: [] }
 
   // claude-cli has no key but is still callable via the membership login, so gate on
   // llmAvailable() rather than the key's truthiness.
-  if (hasIntegrations && llmAvailable(provider, apiKey)) {
+  if (activeEvents.length > 0 && llmAvailable(provider, apiKey)) {
     const items = await classifyItems(activeEvents, apiKey ?? '', provider, model)
     classified = partitionItems(items)
   }
@@ -65,7 +93,20 @@ export async function getDashboard(
       generatedAt: cachedDigest?.generatedAt ?? null,
     },
     hasIntegrations,
+    integrations,
   }
+}
+
+// Number of integration_credentials (sources) bound to the project. A credential
+// row IS the connection — it exists as soon as the user connects a tool, before
+// any sync has populated the event cache.
+async function countConnectedSources(projectId: string): Promise<number> {
+  const db = getDb()
+  const [row] = await db
+    .select({ value: count() })
+    .from(integrationCredentials)
+    .where(eq(integrationCredentials.projectId, projectId))
+  return row?.value ?? 0
 }
 
 function partitionItems(items: ClassifiedItem[]): DashboardResponse['classified'] {
