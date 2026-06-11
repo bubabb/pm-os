@@ -17,7 +17,13 @@ const llm = vi.hoisted(() => ({
     provider: 'anthropic' as const,
   })),
 }))
-vi.mock('@creare/ai-sdk', () => ({ complete: llm.complete }))
+vi.mock('@creare/ai-sdk', () => ({
+  complete: llm.complete,
+  // Keep in sync with the real ai-sdk helpers: keyed providers need a non-empty key;
+  // claude-cli is always callable via the membership login.
+  llmAvailable: (provider: string, apiKey: string | null) =>
+    provider === 'claude-cli' ? true : !!apiKey,
+}))
 
 let projectId: string
 let credentialId: string

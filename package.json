@@ -14,6 +14,7 @@
     "typecheck": "turbo run typecheck",
     "rebuild:sqlite:node": "node scripts/rebuild-better-sqlite3.mjs node",
     "rebuild:sqlite:electron": "node scripts/rebuild-better-sqlite3.mjs electron",
+    "check:auth": "node scripts/check-claude-cli-auth.mjs",
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {

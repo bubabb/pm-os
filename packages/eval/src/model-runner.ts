@@ -3,8 +3,9 @@ import type { ModelProvider } from '@creare/ai-sdk'
 import type { ModelRunner, Scorer } from './types'
 
 // Builds a ModelRunner that sends each case input as a single user message through
-// the model-agnostic ai-sdk. Requires a live API key — used by real eval runs, not
-// by the package's own unit tests (which use stub runners).
+// the model-agnostic ai-sdk. Keyed providers need a live API key; the claude-cli
+// provider uses the membership login and ignores the key (pass ''). Used by real
+// eval runs, not by the package's own unit tests (which use stub runners).
 export function makeModelRunner(
   opts: { provider: ModelProvider; model: string; systemPrompt?: string; temperature?: number; maxTokens?: number },
   apiKey: string,

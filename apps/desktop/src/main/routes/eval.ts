@@ -1,14 +1,13 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
 import { assertProjectAccess } from '../utils/project-access'
-import { getGlobalSetting } from '../secrets'
+import { resolveReasoningConfig, providerNeedsKey } from '../secrets'
 import type { AuthenticatedRequest } from '../auth'
 import {
   runEval, persistEvalRun, listEvalRuns,
   exactMatch, includes, regexMatch, makeModelRunner, makeLlmJudge,
 } from '@creare/eval'
 import type { EvalCase, Scorer } from '@creare/eval'
-import type { ModelProvider } from '@creare/ai-sdk'
 
 interface ProjectParams { id: string }
 interface ListRunsQuery { suite?: string }
@@ -24,21 +23,6 @@ interface RunEvalBody {
 }
 
 const SCORER_KINDS: ScorerKind[] = ['exact', 'includes', 'regex', 'llm_judge']
-
-// Workspace-level reasoning defaults — same resolution as reporting.ts.
-const VALID_PROVIDERS: ModelProvider[] = ['anthropic', 'openai', 'gemini']
-const DEFAULT_REASONING_PROVIDER: ModelProvider = 'anthropic'
-const DEFAULT_REASONING_MODEL = 'claude-haiku-4-5-20251001'
-
-async function getReasoningConfig(): Promise<{ apiKey: string | null; provider: ModelProvider; model: string }> {
-  const rawProvider = await getGlobalSetting('DEFAULT_REASONING_PROVIDER')
-  const provider = VALID_PROVIDERS.includes(rawProvider as ModelProvider)
-    ? (rawProvider as ModelProvider)
-    : DEFAULT_REASONING_PROVIDER
-  const model = (await getGlobalSetting('DEFAULT_REASONING_MODEL')) ?? DEFAULT_REASONING_MODEL
-  const apiKey = await getGlobalSetting(`${provider.toUpperCase()}_API_KEY`)
-  return { apiKey, provider, model }
-}
 
 // Validates the POST body shape; returns an error message or null when valid.
 function validateRunEvalBody(b: RunEvalBody): string | null {
@@ -81,8 +65,8 @@ export async function evalRoutes(app: FastifyInstance): Promise<void> {
       const invalid = validateRunEvalBody(request.body)
       if (invalid) return reply.code(400).send({ error: invalid })
 
-      const { apiKey, provider, model } = await getReasoningConfig()
-      if (!apiKey) {
+      const { apiKey, provider, model } = await resolveReasoningConfig()
+      if (providerNeedsKey(provider) && !apiKey) {
         return reply.code(422).send({ error: `${provider.toUpperCase()}_API_KEY not configured` })
       }
 

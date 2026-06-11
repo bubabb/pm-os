@@ -23,3 +23,11 @@ export {
   listGlobalSettingKeys,
   deleteGlobalSetting,
 } from './global-settings-service'
+export {
+  VALID_PROVIDERS,
+  DEFAULT_REASONING_PROVIDER,
+  DEFAULT_REASONING_MODEL,
+  providerNeedsKey,
+  resolveReasoningConfig,
+} from './reasoning-config'
+export type { ReasoningConfig } from './reasoning-config'

@@ -1,6 +1,7 @@
 import { getActiveEvents, classifyItems, getLatestDigest } from '@creare/integrations'
 import { getSprintContext } from './sprint-reader'
 import { getAgentActivity } from './agent-activity'
+import { llmAvailable } from '@creare/ai-sdk'
 import type { ModelProvider } from '@creare/ai-sdk'
 import type { ClassifiedItem } from '@creare/integrations'
 import type { SprintContext } from './sprint-reader'
@@ -42,8 +43,10 @@ export async function getDashboard(
 
   let classified: DashboardResponse['classified'] = { doNow: [], delegate: [], risks: [] }
 
-  if (hasIntegrations && apiKey) {
-    const items = await classifyItems(activeEvents, apiKey, provider, model)
+  // claude-cli has no key but is still callable via the membership login, so gate on
+  // llmAvailable() rather than the key's truthiness.
+  if (hasIntegrations && llmAvailable(provider, apiKey)) {
+    const items = await classifyItems(activeEvents, apiKey ?? '', provider, model)
     classified = partitionItems(items)
   }
 

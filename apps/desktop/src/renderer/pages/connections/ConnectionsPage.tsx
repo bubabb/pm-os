@@ -127,7 +127,7 @@ export default function ConnectionsPage() {
 
 // ── Section 1: AI Models ──────────────────────────────────────────────────────
 
-type AiProviderId = 'anthropic' | 'openai' | 'gemini'
+type AiProviderId = 'claude-cli' | 'anthropic' | 'openai' | 'gemini'
 
 interface AiProviderConfig {
   id: AiProviderId
@@ -136,20 +136,102 @@ interface AiProviderConfig {
   placeholder: string
 }
 
+// Keyed providers that need an API key. claude-cli is intentionally NOT here — it
+// authenticates via the local Claude membership login and needs no key.
 const AI_PROVIDERS: AiProviderConfig[] = [
   { id: 'anthropic', name: 'Anthropic', settingKey: 'ANTHROPIC_API_KEY', placeholder: 'sk-ant-…' },
   { id: 'openai',    name: 'OpenAI',    settingKey: 'OPENAI_API_KEY',    placeholder: 'sk-…' },
   { id: 'gemini',    name: 'Gemini',    settingKey: 'GEMINI_API_KEY',    placeholder: 'AIza…' },
 ]
 
-// Keep aligned with AgentsPage MODEL_PRESETS
+// Keep aligned with AgentsPage MODEL_PRESETS. The claude-cli entries are the default —
+// they run on the Claude membership (no API key), so they're always selectable.
 const REASONING_MODELS: { provider: AiProviderId; modelId: string; label: string }[] = [
-  { provider: 'anthropic', modelId: 'claude-opus-4-8',           label: 'Claude Opus 4.8' },
-  { provider: 'anthropic', modelId: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6' },
-  { provider: 'anthropic', modelId: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+  { provider: 'claude-cli', modelId: 'claude-opus-4-8',           label: 'Claude Opus 4.8 (membership)' },
+  { provider: 'claude-cli', modelId: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6 (membership)' },
+  { provider: 'claude-cli', modelId: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (membership)' },
+  { provider: 'anthropic', modelId: 'claude-opus-4-8',           label: 'Claude Opus 4.8 (API key)' },
+  { provider: 'anthropic', modelId: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6 (API key)' },
+  { provider: 'anthropic', modelId: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (API key)' },
   { provider: 'openai',    modelId: 'gpt-4o',                    label: 'GPT-4o' },
   { provider: 'gemini',    modelId: 'gemini-2.0-flash',          label: 'Gemini 2.0 Flash' },
 ]
+
+interface ClaudeCliHealth {
+  ok: boolean
+  installed: boolean
+  version: string | null
+  authenticated: 'yes' | 'no' | 'unknown'
+  subscriptionType: string | null
+  message: string
+}
+
+// Live status for the membership-backed claude-cli provider — the default reasoning
+// path. Surfaces a clear, actionable error when the CLI isn't installed or signed in.
+function MembershipStatusCard() {
+  const { data, isLoading, refetch, isFetching } = useQuery<ClaudeCliHealth>({
+    queryKey: ['claudeCliHealth'],
+    queryFn: () => api.get('/settings/claude-cli-health'),
+    refetchOnWindowFocus: true,
+  })
+
+  // ok → green · unknown (e.g. macOS Keychain) → amber/neutral · not signed in → red.
+  const tone = isLoading
+    ? 'neutral'
+    : data?.ok
+      ? 'ok'
+      : data?.authenticated === 'unknown'
+        ? 'warn'
+        : 'error'
+
+  const classes = {
+    neutral: 'border-border',
+    ok: 'border-emerald-500/40 bg-emerald-500/5',
+    warn: 'border-amber-500/40 bg-amber-500/5',
+    error: 'border-destructive/50 bg-destructive/5',
+  }[tone]
+
+  return (
+    <div className={`mb-3 rounded-lg border p-4 ${classes}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {isLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden="true" />
+          ) : data?.ok ? (
+            <CheckCircle2 className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+          ) : (
+            <AlertCircle
+              className={`h-4 w-4 ${tone === 'error' ? 'text-destructive' : 'text-amber-400'}`}
+              aria-hidden="true"
+            />
+          )}
+          <span className="text-sm font-medium text-foreground">Claude membership</span>
+          <Badge variant={data?.ok ? 'success' : tone === 'warn' ? 'neutral' : 'neutral'}>
+            {isLoading
+              ? 'Checking…'
+              : data?.ok
+                ? `Signed in${data.subscriptionType ? ` · ${data.subscriptionType}` : ''}`
+                : !data?.installed
+                  ? 'CLI not found'
+                  : data?.authenticated === 'unknown'
+                    ? 'Unverified'
+                    : 'Not signed in'}
+          </Badge>
+        </div>
+        <button
+          onClick={() => refetch()}
+          disabled={isFetching}
+          className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-40"
+        >
+          Recheck
+        </button>
+      </div>
+      {!isLoading && !data?.ok && (
+        <p className="mt-2 text-xs text-muted-foreground">{data?.message}</p>
+      )}
+    </div>
+  )
+}
 
 function AiModelsSection() {
   const { data: keys = [], isLoading, isError, error, refetch } = useQuery<string[]>({
@@ -164,10 +246,13 @@ function AiModelsSection() {
         <h2 className="text-sm font-medium text-foreground">AI Models</h2>
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
-        API keys for the AI providers power PM planning and classification — actionable items,
-        risk detection, and delegate suggestions — across all projects. Add a key for at least
-        one provider, then pick the default reasoning model.
+        AI powers PM planning and classification — actionable items, risk detection, and delegate
+        suggestions — across all projects. By default this runs on your Claude membership (no API
+        key required). Adding a provider key below is optional — only needed if you'd rather bill a
+        pay-per-token API key. Pick the default reasoning model after.
       </p>
+
+      <MembershipStatusCard />
 
       {isLoading ? (
         <Spinner />
@@ -275,6 +360,8 @@ function DefaultModelPicker({ keys }: { keys: string[] }) {
   })
 
   function isProviderConnected(provider: AiProviderId): boolean {
+    // claude-cli uses the Claude membership login — always available, no key needed.
+    if (provider === 'claude-cli') return true
     const config = AI_PROVIDERS.find((p) => p.id === provider)!
     return keys.includes(config.settingKey)
   }

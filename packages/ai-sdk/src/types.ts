@@ -1,4 +1,4 @@
-export type ModelProvider = 'anthropic' | 'openai' | 'gemini'
+export type ModelProvider = 'anthropic' | 'openai' | 'gemini' | 'claude-cli'
 
 export interface Message {
   role: 'user' | 'assistant'

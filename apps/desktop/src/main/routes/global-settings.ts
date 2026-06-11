@@ -1,6 +1,10 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
-import { listGlobalSettingKeys, setGlobalSetting, deleteGlobalSetting, getGlobalSetting } from '../secrets'
+import {
+  listGlobalSettingKeys, setGlobalSetting, deleteGlobalSetting, getGlobalSetting,
+  DEFAULT_REASONING_PROVIDER, DEFAULT_REASONING_MODEL,
+} from '../secrets'
+import { checkClaudeCli } from '@creare/ai-sdk'
 
 // Workspace-level (GLOBAL) encrypted settings — requireAuth, but NOT project-scoped.
 // Values are never returned — only the keys present.
@@ -24,10 +28,18 @@ export async function globalSettingsRoutes(app: FastifyInstance): Promise<void> 
     '/settings/reasoning-defaults',
     { preHandler: requireAuth },
     async () => {
-      const provider = (await getGlobalSetting('DEFAULT_REASONING_PROVIDER')) ?? 'anthropic'
-      const model = (await getGlobalSetting('DEFAULT_REASONING_MODEL')) ?? 'claude-haiku-4-5-20251001'
+      const provider = (await getGlobalSetting('DEFAULT_REASONING_PROVIDER')) ?? DEFAULT_REASONING_PROVIDER
+      const model = (await getGlobalSetting('DEFAULT_REASONING_MODEL')) ?? DEFAULT_REASONING_MODEL
       return { provider, model }
     },
+  )
+
+  // Claude membership (claude-cli provider) health — confirms the CLI is installed
+  // and signed in, so the UI can surface a clear error before reasoning calls fail.
+  app.get(
+    '/settings/claude-cli-health',
+    { preHandler: requireAuth },
+    async () => checkClaudeCli(),
   )
 
   // Set (upsert) a setting value

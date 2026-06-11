@@ -2,11 +2,11 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
 import { getDashboard, queryProject } from '@creare/reporting'
 import { getLatestDigest, generatePmDigest, getActiveEvents, classifyItems } from '@creare/integrations'
-import { getGlobalSetting } from '../secrets'
+import { resolveReasoningConfig, providerNeedsKey } from '../secrets'
 import { assertProjectAccess } from '../utils/project-access'
 import { createTask } from '@creare/agent-orchestration'
 import type { AuthenticatedRequest } from '../auth'
-import type { ModelProvider } from '@creare/ai-sdk'
+import type { ReasoningConfig } from '../secrets'
 import type { ClassifiedItem } from '@creare/integrations'
 import type { PmDigestCache } from '@creare/database'
 
@@ -15,25 +15,16 @@ interface DigestParams { id: string; type: string }
 interface DelegateBody { entity: ClassifiedItem['entity']; suggestedAction: string }
 interface QueryQuery { q: string }
 
-const VALID_PROVIDERS: ModelProvider[] = ['anthropic', 'openai', 'gemini']
-const DEFAULT_REASONING_PROVIDER: ModelProvider = 'anthropic'
-const DEFAULT_REASONING_MODEL = 'claude-haiku-4-5-20251001'
-
 async function getProjectAndApiKey(
   projectId: string,
   userId: string,
-): Promise<{ apiKey: string | null; provider: ModelProvider; model: string } | null> {
+): Promise<ReasoningConfig | null> {
   const project = await assertProjectAccess(projectId, userId)
   if (!project) return null
 
-  // Reasoning model + per-provider API keys are workspace-level settings — not per-project.
-  const rawProvider = await getGlobalSetting('DEFAULT_REASONING_PROVIDER')
-  const provider = VALID_PROVIDERS.includes(rawProvider as ModelProvider)
-    ? (rawProvider as ModelProvider)
-    : DEFAULT_REASONING_PROVIDER
-  const model = (await getGlobalSetting('DEFAULT_REASONING_MODEL')) ?? DEFAULT_REASONING_MODEL
-  const apiKey = await getGlobalSetting(`${provider.toUpperCase()}_API_KEY`)
-  return { apiKey, provider, model }
+  // Reasoning model + auth are workspace-level settings — not per-project. Defaults
+  // to the membership-backed claude-cli provider (no API key required).
+  return resolveReasoningConfig()
 }
 
 export async function reportingRoutes(app: FastifyInstance): Promise<void> {
@@ -72,8 +63,8 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
         return cached
       }
 
-      // Generate fresh — requires the API key for the selected provider
-      if (!ctx.apiKey) {
+      // Generate fresh — keyed providers require their API key; claude-cli uses membership.
+      if (providerNeedsKey(ctx.provider) && !ctx.apiKey) {
         return reply.code(422).send({ error: `${ctx.provider.toUpperCase()}_API_KEY not configured` })
       }
 
@@ -122,7 +113,7 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
       const user = (request as AuthenticatedRequest).user
       const ctx = await getProjectAndApiKey(request.params.id, user.id)
       if (!ctx) return reply.code(404).send({ error: 'Not found' })
-      if (!ctx.apiKey) {
+      if (providerNeedsKey(ctx.provider) && !ctx.apiKey) {
         return reply.code(422).send({ error: `${ctx.provider.toUpperCase()}_API_KEY not configured` })
       }
       if (!request.query.q?.trim()) return reply.code(400).send({ error: 'Missing q param' })

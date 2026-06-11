@@ -18,6 +18,7 @@ import { observabilityRoutes } from './routes/observability'
 import { toolsRoutes } from './routes/tools'
 import { evalRoutes } from './routes/eval'
 import { memoryRoutes } from './routes/memory'
+import { checkClaudeCli } from '@creare/ai-sdk'
 
 const PORT = parseInt(process.env['CREARE_PORT'] ?? '4321', 10)
 
@@ -80,6 +81,17 @@ export async function startServer(): Promise<void> {
 
   await app.listen({ port: PORT, host: '127.0.0.1' })
   console.log(`[creare] API server running on http://127.0.0.1:${PORT}`)
+
+  // Reasoning defaults to the membership-backed claude-cli provider — verify it's
+  // installed and signed in, and surface a clear line in the terminal if not.
+  // Non-blocking: never delays or fails server startup.
+  void checkClaudeCli()
+    .then((h) => {
+      const tag = '[creare] reasoning (claude-cli):'
+      if (h.ok) console.log(`${tag} ${h.message}`)
+      else console.warn(`${tag} ${h.message}`)
+    })
+    .catch(() => {})
 }
 
 export async function stopServer(): Promise<void> {
