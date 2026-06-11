@@ -9,8 +9,12 @@
 // Token handling: the caller (routes layer) resolves the credential's plaintext
 // token via the secrets layer — this module NEVER decrypts anything.
 //
-// Error policy: GraphQL/scope/rate-limit errors from GitHubProjectsClient
-// propagate to the caller after a `mirror.pull.failed` event is recorded —
+// Connector-agnostic: the credential's `source` selects the connector via
+// buildConnector (sync-engine.ts), and the snapshot comes from the connector's
+// fetchBoardSnapshot — this module never constructs a provider client directly.
+//
+// Error policy: GraphQL/scope/rate-limit errors from the connector's snapshot
+// fetch propagate to the caller after a `mirror.pull.failed` event is recorded —
 // the route maps them to HTTP responses / read-only banners.
 
 import {
@@ -26,7 +30,7 @@ import { and, count, eq, inArray, isNull } from 'drizzle-orm'
 import { applyMirrorSnapshot } from '@creare/boards'
 import type { MirrorApply, MirrorApplyColumn, MirrorApplyItem } from '@creare/boards'
 import type { IntegrationCredential, RemoteLink } from '@creare/database'
-import { GitHubProjectsClient } from '../connectors/github-projects'
+import { buildConnector } from '../sync-engine'
 import {
   planReconcile,
   columnSyncHash,
@@ -34,7 +38,14 @@ import {
   PV2_ITEM_REMOTE_TYPE,
   PV2_STATUS_OPTION_REMOTE_TYPE,
 } from './reconciler'
-import type { IntegrationSource, MirrorBoardSnapshot, MirrorColumnSnapshot, MirrorItemSnapshot } from '../types'
+import type {
+  ConnectorConfig,
+  IntegrationSource,
+  MirrorBoardSnapshot,
+  MirrorColumnSnapshot,
+  MirrorItemSnapshot,
+  RemoteBoardOption,
+} from '../types'
 
 // Mutation statuses that count as "waiting to be pushed" — the chip's
 // pendingPushes number. Failed pushes are surfaced separately (failedPushes);
@@ -50,6 +61,42 @@ export interface MirrorStatus {
   pendingPushes: number
   openConflicts: number
   failedPushes: number
+}
+
+// ── Connector construction (shared with sync-engine.ts / outbox.ts) ─────────
+
+// Same ConnectorConfig shape the read-side sync and the push outbox build:
+// baseUrl and source-specific scope come from the credential's metadata JSON.
+function connectorConfig(credential: IntegrationCredential, token: string): ConnectorConfig {
+  const metadata = (() => {
+    try { return JSON.parse(credential.metadata) as Record<string, unknown> }
+    catch { return {} }
+  })()
+  const rawBaseUrl = metadata['baseUrl'] as string | undefined
+  return {
+    credentialId: credential.id,
+    projectId: credential.projectId,
+    token,
+    ...(rawBaseUrl !== undefined ? { baseUrl: rawBaseUrl } : {}),
+    metadata,
+  }
+}
+
+function connectorFor(credential: IntegrationCredential, token: string) {
+  return buildConnector(credential.source as IntegrationSource, connectorConfig(credential, token))
+}
+
+/**
+ * Remote boards the given connection can mirror — powers the "Import remote
+ * board" picker. Connector-agnostic: connectors without board-mirror support
+ * inherit the BaseConnector default and return []. The routes layer calls this
+ * instead of constructing a connector itself.
+ */
+export async function listRemoteBoards(
+  source: IntegrationSource,
+  config: ConnectorConfig,
+): Promise<RemoteBoardOption[]> {
+  return buildConnector(source, config).listRemoteBoards()
 }
 
 // ── Snapshot → MirrorApply mapping ──────────────────────────────────────────
@@ -103,9 +150,10 @@ async function emitMirrorEvent(
 // ── Import (initial pull — creates the local mirrored board) ────────────────
 
 /**
- * Import a remote GitHub ProjectV2 as a new mirrored local board.
- * Everything in the snapshot is applied: all columns, all items as upserts,
- * no deletes (there is no local state yet to delete against).
+ * Import a remote board (GitHub ProjectV2, …) as a new mirrored local board —
+ * the connector is selected by the credential's source. Everything in the
+ * snapshot is applied: all columns, all items as upserts, no deletes (there is
+ * no local state yet to delete against).
  */
 export async function createMirror(
   credential: IntegrationCredential,
@@ -124,7 +172,7 @@ export async function createMirror(
 
   try {
     const snapshot: MirrorBoardSnapshot =
-      await new GitHubProjectsClient(token).fetchProjectSnapshot(remoteProjectId)
+      await connectorFor(credential, token).fetchBoardSnapshot(remoteProjectId)
 
     const apply: MirrorApply = {
       projectId,
@@ -235,7 +283,7 @@ export async function pullMirror(
         inArray(mutationQueue.status, [...UNRESOLVED_OP_STATUSES]),
       ))
 
-    const snapshot = await new GitHubProjectsClient(token).fetchProjectSnapshot(projectV2Id)
+    const snapshot = await connectorFor(credential, token).fetchBoardSnapshot(projectV2Id)
 
     const plan = planReconcile(snapshot, links, pendingOps)
 

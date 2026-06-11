@@ -31,12 +31,19 @@ export type {
 // Pull/import surface + durable push outbox. The desktop routes layer resolves
 // plaintext tokens via the secrets layer and passes them in — this package
 // never decrypts anything.
-export { createMirror, pullMirror, getMirrorStatus } from './mirror/mirror-sync'
+export { createMirror, pullMirror, getMirrorStatus, listRemoteBoards } from './mirror/mirror-sync'
 export type { MirrorStatus } from './mirror/mirror-sync'
 export { enqueueMutation, enqueueBoardItemMove, drainMutationQueue, recoverStaleInFlight } from './mirror/outbox'
 export type { DrainResult } from './mirror/outbox'
-// Exposed for the mirrors remote-board picker (listRemoteBoards) — Phase 1
-// mirrors are GitHub-only, so the routes layer builds this connector directly.
+// Conflict resolution backend — lists open sync_conflicts in human terms and
+// applies the user's verdict (local_wins / remote_wins / dismiss).
+export { listOpenConflicts, resolveConflict } from './mirror/conflicts'
+export type { ConflictView, ConflictResolution } from './mirror/conflicts'
+// The single source→connector construction — routes that need a raw connector
+// (rare) build it here instead of importing connector classes.
+export { buildConnector } from './sync-engine'
+// DEPRECATED escape hatch: superseded by listRemoteBoards(source, config) above,
+// kept only until the mirrors route migrates off direct construction.
 export { GitHubConnector } from './connectors/github'
 
 // Lists the resources (repos/projects/spaces/databases/folders) the given

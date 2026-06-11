@@ -3,6 +3,7 @@ import { GitHubProjectsClient } from './github-projects'
 import type {
   ConnectorCapabilities,
   FetchResult,
+  MirrorBoardSnapshot,
   MutationEnvelope,
   MutationKind,
   MutationResult,
@@ -76,8 +77,14 @@ export class GitHubConnector extends BaseConnector {
   }
 
   // ProjectV2 boards this token can see — powers the "Import remote board" picker
-  async listRemoteBoards(): Promise<RemoteBoardOption[]> {
+  override async listRemoteBoards(): Promise<RemoteBoardOption[]> {
     return new GitHubProjectsClient(this.config.token).listProjects()
+  }
+
+  // Full ProjectV2 snapshot — the pull side of the board mirror (mirror-sync
+  // reaches GitHub exclusively through this method, never via the client).
+  override async fetchBoardSnapshot(remoteBoardId: string): Promise<MirrorBoardSnapshot> {
+    return new GitHubProjectsClient(this.config.token).fetchProjectSnapshot(remoteBoardId)
   }
 
   // All repos the token can access — owned, private, and invited/collaborator

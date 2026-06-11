@@ -3,9 +3,11 @@ import type {
   ConnectorConfig,
   FetchResult,
   IntegrationSource,
+  MirrorBoardSnapshot,
   MutationEnvelope,
   MutationKind,
   MutationResult,
+  RemoteBoardOption,
   RemoteRef,
   ResourceOption,
 } from '../types'
@@ -31,6 +33,23 @@ export abstract class BaseConnector {
   // Default: no picker support; subclasses override.
   async listResources(): Promise<ResourceOption[]> {
     return []
+  }
+
+  // ── Board-mirror surface (docs/architecture/bidirectional-sync.md) ──
+  // Defaults make every connector mirror-less; connectors that can mirror a
+  // remote board (GitHub Projects v2, later Jira boards / Notion databases…)
+  // override BOTH methods.
+
+  // Remote boards this connection's token can mirror — powers the
+  // "Import remote board" picker.
+  async listRemoteBoards(): Promise<RemoteBoardOption[]> {
+    return []
+  }
+
+  // Full normalized snapshot (columns + items) of one remote board — the pull
+  // side of the mirror. mirror-sync calls this instead of any provider client.
+  async fetchBoardSnapshot(_remoteBoardId: string): Promise<MirrorBoardSnapshot> {
+    throw new Error(`${this.source} does not support board mirroring`)
   }
 
   // ── Write surface (docs/architecture/bidirectional-sync.md §3.1) ──

@@ -12,7 +12,7 @@ import {
 import { getDb, integrationCredentials, remoteLinks, events } from '@creare/database'
 import { and, eq, isNull } from 'drizzle-orm'
 import { generateId } from '@creare/shared'
-import { GitHubConnector, createMirror, pullMirror, getMirrorStatus } from '@creare/integrations'
+import { listRemoteBoards, createMirror, pullMirror, getMirrorStatus } from '@creare/integrations'
 import type { ConnectorConfig } from '@creare/integrations'
 import type { AuthenticatedRequest } from '../auth'
 
@@ -27,9 +27,10 @@ interface BoardParams      { id: string; boardId: string }
 interface CreateMirrorBody { connectionId: string; remoteId: string; label: string }
 
 export async function mirrorsRoutes(app: FastifyInstance): Promise<void> {
-  // List the remote boards (GitHub ProjectsV2) this connection's token can
-  // access — powers the mirror-source picker. Phase 1 is GitHub-only, so the
-  // connector is built directly (same config pattern as the resources route).
+  // List the remote boards this connection's token can access — powers the
+  // mirror-source picker. Connector-agnostic: listRemoteBoards dispatches on
+  // the connection's source (same config pattern as the resources route);
+  // connectors without board-mirror support return [].
   app.get<{ Params: ConnectionParams }>(
     '/connections/:connectionId/remote-boards',
     { preHandler: requireAuth },
@@ -39,13 +40,20 @@ export async function mirrorsRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         const token = await getConnectionToken(connection.id)
+        const metadata = (() => {
+          try { return JSON.parse(connection.metadata) as Record<string, unknown> }
+          catch { return {} }
+        })()
+        const baseUrl = typeof metadata['baseUrl'] === 'string' ? metadata['baseUrl'] : undefined
+
         const config: ConnectorConfig = {
           credentialId: '',
           projectId: '',
           token,
-          metadata: {},
+          ...(baseUrl !== undefined ? { baseUrl } : {}),
+          metadata,
         }
-        return await new GitHubConnector(config).listRemoteBoards()
+        return await listRemoteBoards(connection.source, config)
       } catch (err) {
         // Upstream API failure (bad token, missing scope, network, rate limit)
         const message = err instanceof Error ? err.message : String(err)

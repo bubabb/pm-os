@@ -14,7 +14,9 @@ import type { ConnectorConfig, IntegrationSource, NormalizedEntity } from './typ
 const MAX_ITEMS_PER_SYNC = 500
 const PURGED_ROW_RETENTION_MS = 7 * 24 * 3600 * 1000 // hard-delete soft-purged rows after 7 days
 
-function buildConnector(source: IntegrationSource, config: ConnectorConfig): BaseConnector {
+// The single source→connector construction, shared by the read-side sync (here),
+// the board mirror (mirror/mirror-sync.ts), and the routes layer (via index.ts).
+export function buildConnector(source: IntegrationSource, config: ConnectorConfig): BaseConnector {
   switch (source) {
     case 'github':     return new GitHubConnector(config)
     case 'jira':       return new JiraConnector(config)
