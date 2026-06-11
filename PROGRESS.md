@@ -5,11 +5,34 @@ This is the current-state pointer; the append-only detail log is
 `agent-state/agent-log.md`, per-domain state is `agent-state/domain-state/`,
 and cross-task handoffs are `agent-state/handoffs/`.
 
-**Updated:** 2026-06-10
+**Updated:** 2026-06-11
 
 ---
 
 ## STATUS NOW
+- **Membership/claude-cli provider (2026-06-11, Opus 4.8): DONE.** typecheck clean · tests **73/73** · build clean.
+  **Committed locally** on branch `feat/claude-cli-membership-provider` (commit `4d5c223`); NOT merged to `main`,
+  NOT pushed (no GitHub remote yet). Session log: `docs/sessions/session-2026-06-11-claude-cli-provider.md`.
+  • **New `claude-cli` provider** in `ai-sdk` — uses the Claude **membership** (local CLI login), NOT an API key.
+    Shells out to `claude -p --output-format json --model <m> [--append-system-prompt]`, stdin = rendered prompt;
+    maps `result`/`usage`/`total_cost_usd` → CompletionResponse (costCents from total_cost_usd, covered by membership).
+    `complete()`'s `apiKey` is now **optional**; only keyed providers require it. Print mode has no temperature/maxTokens.
+  • **Everything defaults to the CLI:** new shared `apps/desktop/.../secrets/reasoning-config.ts`
+    (`resolveReasoningConfig()`, `DEFAULT_REASONING_PROVIDER` = **claude-cli**, `VALID_PROVIDERS` now includes it).
+    `reporting.ts` + `eval.ts` routes use it and gate the 422 "key not configured" behind `providerNeedsKey()`.
+    `global-settings.ts` reasoning-defaults falls back to the shared claude-cli defaults. New helpers in ai-sdk:
+    `providerNeedsKey()` / `llmAvailable(provider, apiKey)`. `getDashboard` gates classification on `llmAvailable`,
+    not key truthiness. Keyed providers (anthropic/openai/gemini) remain selectable **overrides**, not removed.
+  • **Renderer** `ConnectionsPage.tsx`: reasoning-model picker now offers claude-cli "(membership)" models (always
+    selectable, no key); API-key cards reworded as optional; `isProviderConnected('claude-cli')` always true.
+  • **Startup health-check** `checkClaudeCli()` (ai-sdk) — FREE, no token spend: `claude --version` + reads the
+    credential store. Cross-platform: file `~/.claude/.credentials.json` (Linux/Win), **macOS Keychain**
+    (`security find-generic-password -s "Claude Code-credentials"`), **Windows Cred Manager** (PS Win32 CredRead).
+    3-state `authenticated: yes|no|unknown`. Surfaced at startup (terminal `[creare] reasoning (claude-cli): …`),
+    via `GET /settings/claude-cli-health`, and a `MembershipStatusCard` banner in the UI. Verified on Kali: signed in, **max**.
+  • **Dev script** `pnpm check:auth` (`scripts/check-claude-cli-auth.mjs`) — read-only; dumps store + entry name per OS
+    to confirm/fix the `CREDENTIAL_SERVICE` constant. **TODO on Mac/Windows:** run it to verify the real entry name
+    (the 'Claude Code-credentials' name is a best-effort guess). Also unresolved: claude-cli inherits the cwd `CLAUDE.md`.
 - **Backlog wave (2026-06-10, Fable 5): DONE.** typecheck 23/23 · unit tests **73/73** · build clean · **E2E green**.
   • **Test coverage +28** (45→73): classifier rules + classification cache, correlator, sync-engine empty-fetch/txn
     guards, pm-command-center dashboard assembly + agent-activity (complete() mocked), observability edge cases.
