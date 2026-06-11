@@ -513,6 +513,81 @@ export const learnings = sqliteTable('learnings', {
 }))
 
 // ---------------------------------------------------------------------------
+// 9. Bidirectional Sync — Remote Links, Mutation Queue, Conflicts
+// See docs/architecture/bidirectional-sync.md
+// ---------------------------------------------------------------------------
+
+// Identity map between local entities and their remote counterparts.
+// One row per (local entity ↔ remote entity) pairing, scoped to a credential.
+export const remoteLinks = sqliteTable('remote_links', {
+  ...id(),
+  projectId:         text('project_id').notNull().references(() => projects.id),
+  credentialId:      text('credential_id').notNull().references(() => integrationCredentials.id),
+  source:            text('source').notNull(),               // e.g. "jira", "github"
+  localType:         text('local_type', { enum: ['board', 'board_column', 'board_item', 'task'] }).notNull(),
+  localId:           text('local_id').notNull(),             // UUID of the local entity
+  remoteType:        text('remote_type').notNull(),          // source-specific, e.g. "issue", "epic"
+  remoteId:          text('remote_id').notNull(),            // source-system identifier
+  containerRemoteId: text('container_remote_id'),            // remote parent, e.g. board/project the entity lives in
+  remoteUrl:         text('remote_url'),
+  remoteVersion:     text('remote_version'),                 // etag / updated-at / version token from the source
+  lastSyncedHash:    text('last_synced_hash'),               // hash of last synced canonical state — change detection
+  lastPulledAt:      text('last_pulled_at'),
+  lastPushedAt:      text('last_pushed_at'),
+  deletedAt:         text('deleted_at'),                     // soft-delete tombstone — keeps identity for late echoes
+  ...timestamps,
+}, (table) => ({
+  // A local entity maps to at most one remote entity
+  uniqueLocal:      uniqueIndex('remote_links_local_unique_idx').on(table.localType, table.localId),
+  // A remote entity maps to at most one local entity per credential
+  uniqueRemote:     uniqueIndex('remote_links_remote_unique_idx').on(table.credentialId, table.remoteType, table.remoteId),
+  projectSourceIdx: index('remote_links_project_source_idx').on(table.projectId, table.source),
+}))
+
+// Outbound mutation queue — local changes waiting to be pushed to the source.
+// opId is the idempotency key; workers drain per credential in createdAt order.
+export const mutationQueue = sqliteTable('mutation_queue', {
+  ...id(),
+  opId:         text('op_id').notNull().unique(),            // idempotency key for the operation
+  projectId:    text('project_id').notNull().references(() => projects.id),
+  credentialId: text('credential_id').notNull().references(() => integrationCredentials.id),
+  source:       text('source').notNull(),
+  remoteLinkId: text('remote_link_id').references(() => remoteLinks.id), // null for creates (link not yet established)
+  kind:         text('kind').notNull(),                      // e.g. "create", "update", "move", "delete"
+  payload:      text('payload').notNull().default('{}'),     // JSON: operation-specific data
+  baseVersion:  text('base_version'),                        // remote version the mutation was computed against
+  status:       text('status').notNull().default('pending'), // pending | in_flight | applied | failed | conflicted | cancelled
+  attempts:     integer('attempts').notNull().default(0),
+  lastError:    text('last_error'),
+  result:       text('result'),                              // JSON: response data from the source on success
+  appliedAt:    text('applied_at'),
+  ...timestamps,
+}, (table) => ({
+  // Worker drain query: WHERE credential_id = ? AND status = 'pending' ORDER BY created_at
+  credentialStatusCreatedIdx: index('mutation_queue_credential_status_created_idx')
+    .on(table.credentialId, table.status, table.createdAt),
+}))
+
+// Three-way merge conflicts detected during sync — base/local/remote snapshots
+// preserved verbatim so the user (or a policy) can resolve later.
+export const syncConflicts = sqliteTable('sync_conflicts', {
+  ...id(),
+  projectId:      text('project_id').notNull().references(() => projects.id),
+  remoteLinkId:   text('remote_link_id').notNull().references(() => remoteLinks.id),
+  mutationId:     text('mutation_id').references(() => mutationQueue.id), // null for pull-side conflicts
+  baseSnapshot:   text('base_snapshot').notNull().default('{}'),   // JSON: last common ancestor
+  localSnapshot:  text('local_snapshot').notNull().default('{}'),  // JSON: local state at detection
+  remoteSnapshot: text('remote_snapshot').notNull().default('{}'), // JSON: remote state at detection
+  resolution:     text('resolution'),                              // e.g. "local_wins", "remote_wins", "merged" — null = unresolved
+  resolvedAt:     text('resolved_at'),
+  createdAt:      text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  // NO updatedAt — conflicts are resolved once, then immutable
+}, (table) => ({
+  // Unresolved-conflicts lookup: WHERE project_id = ? AND resolved_at IS NULL
+  projectResolvedIdx: index('sync_conflicts_project_resolved_idx').on(table.projectId, table.resolvedAt),
+}))
+
+// ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
 
@@ -615,6 +690,25 @@ export const userSettingsRelations = relations(userSettings, ({ one }) => ({
   project: one(projects, { fields: [userSettings.projectId], references: [projects.id] }),
 }))
 
+export const remoteLinksRelations = relations(remoteLinks, ({ one, many }) => ({
+  project:    one(projects, { fields: [remoteLinks.projectId], references: [projects.id] }),
+  credential: one(integrationCredentials, { fields: [remoteLinks.credentialId], references: [integrationCredentials.id] }),
+  mutations:  many(mutationQueue),
+  conflicts:  many(syncConflicts),
+}))
+
+export const mutationQueueRelations = relations(mutationQueue, ({ one }) => ({
+  project:    one(projects, { fields: [mutationQueue.projectId], references: [projects.id] }),
+  credential: one(integrationCredentials, { fields: [mutationQueue.credentialId], references: [integrationCredentials.id] }),
+  remoteLink: one(remoteLinks, { fields: [mutationQueue.remoteLinkId], references: [remoteLinks.id] }),
+}))
+
+export const syncConflictsRelations = relations(syncConflicts, ({ one }) => ({
+  project:    one(projects, { fields: [syncConflicts.projectId], references: [projects.id] }),
+  remoteLink: one(remoteLinks, { fields: [syncConflicts.remoteLinkId], references: [remoteLinks.id] }),
+  mutation:   one(mutationQueue, { fields: [syncConflicts.mutationId], references: [mutationQueue.id] }),
+}))
+
 // ---------------------------------------------------------------------------
 // Exported types — use these everywhere, never hand-write interfaces
 // ---------------------------------------------------------------------------
@@ -681,5 +775,11 @@ export type Connection                  = InferSelectModel<typeof connections>
 export type NewConnection               = InferInsertModel<typeof connections>
 export type GlobalSetting               = InferSelectModel<typeof globalSettings>
 export type NewGlobalSetting            = InferInsertModel<typeof globalSettings>
+export type RemoteLink                  = InferSelectModel<typeof remoteLinks>
+export type NewRemoteLink               = InferInsertModel<typeof remoteLinks>
+export type MutationQueueRow            = InferSelectModel<typeof mutationQueue>
+export type NewMutationQueueRow         = InferInsertModel<typeof mutationQueue>
+export type SyncConflict                = InferSelectModel<typeof syncConflicts>
+export type NewSyncConflict             = InferInsertModel<typeof syncConflicts>
 
-export const SCHEMA_VERSION = '1.7.0'
+export const SCHEMA_VERSION = '1.8.0'

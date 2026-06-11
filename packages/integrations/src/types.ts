@@ -51,3 +51,57 @@ export interface FetchResult {
   entities: NormalizedEntity[]
   nextCursor: string | null
 }
+
+// ── Bidirectional sync (docs/architecture/bidirectional-sync.md §3.1, §6.1) ──
+
+export type MutationKind =
+  | 'create_item' | 'update_item' | 'move_item'
+  | 'comment' | 'close_item' | 'reopen_item' | 'archive_item'
+
+// Provider-agnostic pointer to a remote object.
+export interface RemoteRef {
+  remoteType: string        // 'pv2_item' | 'issue' | 'pr' | 'ticket' | 'page' | 'db_page' | 'file'
+  remoteId: string
+  containerId?: string      // ProjectV2 node id / 'owner/repo' / projectKey / databaseId / driveId
+}
+
+export type MutationOp =
+  | { kind: 'move_item';    ref: RemoteRef; toStatusRemoteId: string; statusFieldRemoteId?: string }
+  | { kind: 'create_item';  container: RemoteRef; title: string; body?: string; itemType?: string; fields?: Record<string, string> }
+  | { kind: 'update_item';  ref: RemoteRef; patch: { title?: string; body?: string; assignee?: string | null; labels?: string[]; fields?: Record<string, string> } }
+  | { kind: 'comment';      ref: RemoteRef; body: string }
+  | { kind: 'close_item';   ref: RemoteRef; reason?: string }
+  | { kind: 'reopen_item';  ref: RemoteRef }
+  | { kind: 'archive_item'; ref: RemoteRef }
+
+export interface MutationEnvelope {
+  opId: string
+  credentialId: string
+  projectId: string
+  source: IntegrationSource
+  baseVersion: string | null
+  op: MutationOp
+}
+
+export interface MutationResult {
+  ref: RemoteRef
+  remoteVersion: string | null
+  remoteUrl?: string
+  raw: Record<string, unknown>
+}
+
+export interface ConnectorCapabilities { write: MutationKind[] }
+
+// Mirror snapshot shapes (normalized across connectors)
+export interface MirrorColumnSnapshot { remoteId: string; name: string; position: number; isTerminal: boolean }
+export interface MirrorItemSnapshot {
+  remoteId: string; containerRemoteId: string; title: string; url: string | null
+  statusRemoteId: string | null; state: 'open' | 'closed' | 'draft'
+  archived: boolean; version: string; contentHash: string
+}
+export interface MirrorBoardSnapshot {
+  remoteId: string; title: string; url: string | null; version: string
+  statusFieldRemoteId: string | null
+  columns: MirrorColumnSnapshot[]; items: MirrorItemSnapshot[]
+}
+export interface RemoteBoardOption { id: string; label: string; sublabel?: string; url?: string }

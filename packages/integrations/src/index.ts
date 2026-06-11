@@ -14,6 +14,18 @@ import type { IntegrationCredential, ExternalEventCache, PmDigestCache } from '@
 import type { ClassifiedItem, ConnectorConfig, IntegrationSource, ResourceOption, SyncStatus } from './types'
 
 export type { IntegrationSource, ClassifiedItem, SyncStatus, NormalizedEntity, ConnectorConfig, ResourceOption } from './types'
+export type {
+  MutationKind,
+  RemoteRef,
+  MutationOp,
+  MutationEnvelope,
+  MutationResult,
+  ConnectorCapabilities,
+  MirrorColumnSnapshot,
+  MirrorItemSnapshot,
+  MirrorBoardSnapshot,
+  RemoteBoardOption,
+} from './types'
 
 // Lists the resources (repos/projects/spaces/databases/folders) the given
 // connection token can access — powers the UI resource picker. The connector
