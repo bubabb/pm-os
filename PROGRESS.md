@@ -32,7 +32,12 @@ and cross-task handoffs are `agent-state/handoffs/`.
     via `GET /settings/claude-cli-health`, and a `MembershipStatusCard` banner in the UI. Verified on Kali: signed in, **max**.
   • **Dev script** `pnpm check:auth` (`scripts/check-claude-cli-auth.mjs`) — read-only; dumps store + entry name per OS
     to confirm/fix the `CREDENTIAL_SERVICE` constant. **TODO on Mac/Windows:** run it to verify the real entry name
-    (the 'Claude Code-credentials' name is a best-effort guess). Also unresolved: claude-cli inherits the cwd `CLAUDE.md`.
+    (the 'Claude Code-credentials' name is a best-effort guess).
+  • **cwd isolation DONE** (commit `5620586`): print mode auto-discovers CLAUDE.md from cwd+parents, so reasoning
+    calls from the repo leaked Creare's project context. Now spawns `claude` in an empty temp dir
+    (`tmpdir/creare-ai-sdk-claude-cli`). Proven: provider answers "NONE" from repo root (was "Creare — an agentic
+    DevOps platform…"). Spawn-mocked unit test added (tests **74/74**). (Can't use CLI "simple" mode — it forces
+    API-key auth, breaking membership.)
 - **Backlog wave (2026-06-10, Fable 5): DONE.** typecheck 23/23 · unit tests **73/73** · build clean · **E2E green**.
   • **Test coverage +28** (45→73): classifier rules + classification cache, correlator, sync-engine empty-fetch/txn
     guards, pm-command-center dashboard assembly + agent-activity (complete() mocked), observability edge cases.
