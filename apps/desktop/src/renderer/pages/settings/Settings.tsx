@@ -394,6 +394,8 @@ function AddSourceForm({
     data: resources,
     isLoading: resourcesLoading,
     isError: resourcesError,
+    error: resourcesErr,
+    refetch: refetchResources,
   } = useQuery<ResourceOption[]>({
     queryKey: ['connection-resources', connectionId],
     queryFn: () => api.get(`/connections/${connectionId}/resources`),
@@ -526,10 +528,35 @@ function AddSourceForm({
             </div>
 
             {pickerUnavailable && (
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" aria-hidden="true" />
-                Couldn&rsquo;t load from the provider — enter manually.
-              </p>
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-2 text-xs">
+                <p className="flex items-start gap-1.5 text-amber-300">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  {resourcesError ? (
+                    <span>
+                      Couldn&rsquo;t load from {SOURCE_LABELS[connection.source]}:{' '}
+                      <span className="break-all font-mono text-amber-200">
+                        {resourcesErr instanceof Error ? resourcesErr.message : 'request failed'}
+                      </span>
+                      . If this is an auth error, fix the token on the{' '}
+                      <NavLink to="/connections" className="font-medium text-primary hover:underline">
+                        Connections
+                      </NavLink>{' '}
+                      page, or enter the scope manually below.
+                    </span>
+                  ) : (
+                    <span>No resources found for this account — enter the scope manually below.</span>
+                  )}
+                </p>
+                {resourcesError && (
+                  <button
+                    type="button"
+                    onClick={() => void refetchResources()}
+                    className="mt-1.5 rounded text-xs font-medium text-primary hover:underline focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
             )}
 
             {manualMode ? (
