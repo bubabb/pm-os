@@ -10,7 +10,28 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
-- **RESUME HERE (2026-06-11, NEWEST):** **Phase 2/3/4 connector write layer + conflict resolution DONE on `main`.**
+- **RESUME HERE (2026-06-11, NEWEST):** **Card-lifecycle on buttons + whole-project production deepreview + hardening
+  + packaging path DONE on `main`.** Gate GREEN: typecheck 23/23 · unit **240/240** · lint 12/12 · desktop real `tsc -b`.
+  • **Every action on a button:** New card / Edit title / Close / Comment on mirrored boards push to GitHub/Jira/Notion
+    (outbox enqueueItemCreate/Update/Close/Comment; create links the remote id on push success). Renderer↔backend
+    wiring verified 100% matched (no dead buttons/routes).
+  • **8-reviewer production deepreview** (commit `f424fa9` fixes, `2e32414` packaging). FIXED: Electron lifecycle
+    (single-instance lock, macOS close→reopen no longer wedges the backend, boot try/catch→error dialog); SQLite
+    `busy_timeout`+integrity_check+resourcesPath migrations; **credential-delete FK trap** (was a 500 making it
+    undeletable → transactional cascade) + **cross-project IDOR** on credential-delete & conflict-resolve; pull/status
+    filter tombstoned mirrors; create_item pending count; Tools/Observability/PMCommandCenter silent-failure → toasts/
+    QueryError/Retry; **retention prune** (events 90d / applied-mutations 14d / resolved-conflicts 30d / read-notifs 30d).
+  • **Packaging:** `electron-builder.yml` (AppImage/deb/dmg/nsis, asarUnpack native, migrations via extraResources) +
+    `pnpm package`/`package:dir`; electron-vite now BUNDLES `@creare/*` into the main bundle (was unpackable symlinks),
+    better-sqlite3 stays external. Built bundle boots (Fastify+migrations verified).
+  • **REMAINING for true 100%-shippable (honest):** (1) **run `electron-builder` on a real per-OS machine** (network+
+    signing) to produce+launch a signed installer — UNVERIFIABLE in this sandbox; (2) **live-verify the whole app in a
+    real GUI** (Electron won't launch headless here) — esp. real GitHub/Jira/Notion two-way round-trips (all connector
+    tests are mocked-fetch); (3) **security posture disclosure** — master/JWT key is raw base64 in `keys.json` (0600)
+    beside the ciphertext DB: stable + atomic + loud-on-rekey, but NOT "encrypted at rest" in a keyring sense (deliberate
+    local-first trade-off — document, don't oversell); (4) deferred P2s: agent EXECUTION runtime still unbuilt, mirrors
+    don't auto-pull (manual only), SSE doesn't re-auth on token expiry, renderer hardcodes :4321, classifier/digest
+    event-log gaps, a11y tablist roles, native confirm() dialogs. Full findings in the 8 session logs `docs/sessions/session-2026-06-11-*`.
   Full gate GREEN: typecheck 23/23 · unit **227/227** · lint 12/12 (desktop typecheck is now a REAL `tsc -b`).
   • **Generic mirror engine** — BaseConnector `listRemoteBoards`/`fetchBoardSnapshot`; mirror-sync builds the
     connector by source (no hardcoded GitHub). **Conflict resolution** shipped: `mirror/conflicts.ts`
