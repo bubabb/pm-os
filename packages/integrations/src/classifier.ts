@@ -1,4 +1,4 @@
-import { complete } from '@creare/ai-sdk'
+import { complete, extractJson } from '@creare/ai-sdk'
 import type { ModelProvider } from '@creare/ai-sdk'
 import { getDb, externalEventCache } from '@creare/database'
 import { eq } from 'drizzle-orm'
@@ -98,12 +98,14 @@ async function classifyWithLLM(
       apiKey,
     )
 
-    const parsed = JSON.parse(response.content) as {
+    // Models often wrap "JSON only" output in a ```json fence (the claude-cli /
+    // membership model does) — extractJson tolerates fences + stray prose.
+    const parsed = extractJson<{
       bucket: ActionBucket
       urgency: number
       riskType: string | null
       suggestedAction: string
-    }
+    }>(response.content)
 
     return {
       bucket: parsed.bucket === 'agent' ? 'agent' : 'human',

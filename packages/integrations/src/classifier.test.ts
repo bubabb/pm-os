@@ -4,6 +4,7 @@ import { getDb, externalEventCache } from '@creare/database'
 import { generateId } from '@creare/shared'
 import { eq } from 'drizzle-orm'
 import { classifyItems } from './index'
+import type * as AiSdk from '@creare/ai-sdk'
 import type { NormalizedEntity } from './types'
 
 // Mock the AI SDK so no test ever reaches the network. The rule engine and the
@@ -19,7 +20,12 @@ const llm = vi.hoisted(() => ({
     provider: 'anthropic' as const,
   })),
 }))
-vi.mock('@creare/ai-sdk', () => ({ complete: llm.complete }))
+// Override only `complete`; keep the real helpers (extractJson) so the classifier's
+// JSON parsing is exercised for real, including the ```json fence case below.
+vi.mock('@creare/ai-sdk', async (importActual) => ({
+  ...(await importActual<typeof AiSdk>()),
+  complete: llm.complete,
+}))
 
 let projectId: string
 let credentialId: string
@@ -161,6 +167,19 @@ describe('integrations — classifier caching and LLM fallback', () => {
     const row = seedCacheRow(ambiguous())
     const [item] = await classify([row])
     expect(item).toMatchObject({ bucket: 'human', urgency: 3, suggestedAction: 'Review manually' })
+  })
+
+  it('parses ```json-fenced LLM output (the claude-cli/membership model wraps JSON)', async () => {
+    // Real failure caught in testing: the membership model returns fenced JSON, which
+    // a bare JSON.parse rejected → every item silently fell back to human/3.
+    llm.complete.mockResolvedValueOnce({
+      content: '```json\n{"bucket":"agent","urgency":1,"riskType":null,"suggestedAction":"Auto-label"}\n```',
+      inputTokens: 10, outputTokens: 5, costCents: 0, durationMs: 50,
+      model: 'claude-haiku-4-5-20251001', provider: 'claude-cli' as const,
+    })
+    const [item] = await classify([seedCacheRow(ambiguous())])
+    // Fence stripped + parsed — NOT the failure fallback (human/3/Review manually).
+    expect(item).toMatchObject({ bucket: 'agent', urgency: 1, suggestedAction: 'Auto-label' })
   })
 
   it('skips rows with malformed payloads instead of throwing', async () => {
