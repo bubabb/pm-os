@@ -103,9 +103,36 @@
   pkg); prints a clear "run pnpm --filter @creare/ai-sdk build" hint if dist is missing.
 - Verified on Linux: shows file store FOUND (sub=max) + status ok.
 
+## Part 6 — cwd isolation (commit 5620586)
+- Print mode auto-discovers CLAUDE.md from cwd+parents → reasoning calls from the repo absorbed
+  Creare's project context (non-deterministic by launch dir, wrong behavior, extra tokens).
+- Fix: spawn `claude` in a dedicated EMPTY temp dir (`tmpdir/creare-ai-sdk-claude-cli`) whose
+  parents have no CLAUDE.md. Can't use the CLI "simple" mode (it forces API-key auth, breaks membership).
+- Proven: provider answers "NONE" from repo root (was "Creare — an agentic DevOps platform…").
+- Added a spawn-mocked unit test asserting the isolated cwd. Tests 74/74.
+
+## Part 7 — testing spin (commits 3f1c4f0 fix, e7037a2 test+chore)
+- **REAL BUG found + fixed:** the claude-cli/membership model wraps "JSON only" output in a ```json
+  fence → classifier's bare `JSON.parse` threw → every ambiguous item silently fell back to human/3.
+  Fix: new `extractJson()` in `ai-sdk/src/index.ts` (strips ```json/``` fences + recovers a {…}/[…]
+  span from prose); `classifier.ts` uses it. Verified live against the membership model.
+- New E2E `apps/desktop/e2e/membership.spec.ts` — real app → Connections → live "Signed in" badge
+  (renderer → Fastify `/settings/claude-cli-health` → checkClaudeCli → real credential store) +
+  claude-cli "(membership)" reasoning models.
+- Cleared 12 pre-existing eslint `no-unused-vars` errors (config ignores `_`-prefixed vars/destructures;
+  dropped stale imports; `get`→`_get`). Lint green for the first time.
+- **Full gate GREEN:** lint clean · typecheck clean · unit **81/81** · E2E **2/2**.
+- Tests added: +6 extractJson, +1 classifier fenced case, +1 E2E.
+
+## E2E gotcha (important for next agent)
+- Run **`pnpm e2e`** (from `apps/desktop`, with DISPLAY set) — NOT `playwright test` directly.
+  `pnpm test` swaps better-sqlite3 to the **Node** ABI; Electron/E2E needs the **Electron** ABI,
+  which `pnpm e2e`'s `pree2e` hook rebuilds. Running `playwright test` right after `pnpm test` fails
+  to boot the app. (Tree is currently on the Electron ABI; `pnpm test` auto-swaps back.)
+
 ## Next Session Should Start With
-- Decide on cwd/context isolation for `claude-cli` (the CLI loads the cwd `CLAUDE.md`) so
-  reporting/eval calls aren't polluted by whatever directory the Electron main process runs in.
-- Optional: prune the now-effectively-optional API-key UI cards, or keep as override path.
-- On the Mac and a Windows box: run `pnpm check:auth` and confirm `CREDENTIAL_SERVICE`
-  ('Claude Code-credentials') matches the real entry name; adjust the constant if not.
+- **Decide: merge `feat/claude-cli-membership-provider` → `main` locally** (`git merge`, no remote
+  to push to yet). 9 commits, all green. This is the main pending decision.
+- On a Mac and a Windows box: run `pnpm check:auth` and confirm `CREDENTIAL_SERVICE`
+  ('Claude Code-credentials') matches the real Keychain/Cred-Manager entry name; fix the constant if not.
+- Optional: prune the now-optional API-key UI cards (or keep as the keyed-provider override path).

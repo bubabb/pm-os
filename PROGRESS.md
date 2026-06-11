@@ -10,6 +10,11 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
+- **RESUME HERE (2026-06-11 EOD):** membership/claude-cli feature is COMPLETE + TESTED, all green, committed on
+  branch `feat/claude-cli-membership-provider` (9 commits, **uncommitted nothing — tree clean**). Repo has **no
+  GitHub remote**. Pending decision: **merge the branch → `main` locally** (`git checkout main && git merge
+  feat/claude-cli-membership-provider`). Then optionally verify `CREDENTIAL_SERVICE` on Mac/Windows via
+  `pnpm check:auth`. Session log: `docs/sessions/session-2026-06-11-claude-cli-provider.md` (parts 1–7).
 - **Membership testing spin (2026-06-11, Opus 4.8): DONE.** Full gate GREEN — lint clean · typecheck clean ·
     unit **81/81** · **E2E 2/2**. Commits `3f1c4f0` (fix) + `e7037a2` (test+chore) on the same feature branch.
   • **REAL BUG found + fixed:** the claude-cli/membership model wraps its "JSON only" output in a ```json fence,
