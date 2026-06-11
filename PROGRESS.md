@@ -10,7 +10,24 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
-- **RESUME HERE (2026-06-11, latest):** everything MERGED TO `main` (fast-forward; tree clean; `main` @ `da36a4c`).
+- **RESUME HERE (2026-06-11, latest):** big INTEGRATION REVISION landed on `main` (commits `14b1b3a` wave1, `8394a55`
+  wave2; tree clean). Driven by user feedback "tabs/data don't communicate, looks like a static app." Ran a Fable 5
+  3-reviewer deep review → executed in 2 waves of 5 parallel Fable 5 agents. Static gate GREEN (typecheck 23/23 ·
+  unit 81/81 · lint 12/12). **E2E COULD NOT RUN — tool sandbox kills Electron (exit 144); verify live in `pnpm dev`.**
+  Session log: `docs/sessions/session-2026-06-11-integration-revision.md`. Highlights:
+  • **Data now flows visibly:** auto-sync on source add; `POST /integrations/bulk` (multi-select repos/projects for
+    every connector — no schema change, per-row); GET list enriched w/ lastSyncedAt/syncStatus/syncError; GitHub
+    connector throws clear error on repo 404; dashboard 3 honest states (no sources / connected-but-unsynced / data)
+    via `integrations{connectedCount,syncedItemCount,lastSyncedAt}`; Settings sync-feedback loop (poll /status→toast)
+    + browsable "synced items" view; `syncAndRefresh` in dashboard store.
+  • **Tabs wired together:** Boards "+ Add task" per column (Kanban can hold cards now); Delegate honest copy + "View
+    in Agents" + invalidates tasks/timeline; Risk "Handle it"→real human task; ack/dismiss persist (localStorage);
+    notifications have REAL producers (delegate, source-bound) so the bell lights up + rows deep-link; AgentsPage
+    honest Start/Pause (no fake exec) + gate-resolve refreshes tasks; Observability/Intelligence honest empty states
+    + cross-links + a real "Run smoke suite" eval CTA.
+  • **Known:** user's repo `bubabb/theantidote` likely has no OPEN issues/PRs → legitimately syncs 0 items; UI now
+    says so. Token-encryption fragility (safeStorage key rotation orphaned a token; re-adding fixed it) — hardening offered+deferred.
+- **(prior) everything MERGED TO `main`** (fast-forward; was `main` @ `da36a4c`).
   No GitHub remote. Membership/claude-cli provider + the PM-UX overhaul are all on `main`, full gate GREEN
   (typecheck **23/23** · unit **81/81** · lint **12/12** · E2E **2/2**). `feat/claude-cli-membership-provider`
   branch can be deleted (fully merged). Optional next: verify `CREDENTIAL_SERVICE` on Mac/Windows (`pnpm check:auth`).
