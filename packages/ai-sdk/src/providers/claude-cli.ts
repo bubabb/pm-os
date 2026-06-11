@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
-import { homedir, platform } from 'node:os'
+import { mkdir, readFile } from 'node:fs/promises'
+import { homedir, platform, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { CompletionRequest, CompletionResponse } from '../types'
 
@@ -44,9 +44,25 @@ function renderPrompt(messages: CompletionRequest['messages']): string {
     .join('\n\n')
 }
 
-function runClaude(args: string[], stdin: string): Promise<string> {
+// Print mode auto-discovers project context — any CLAUDE.md in the cwd and its
+// parents, plus local .claude settings. For a reasoning call that should be driven
+// only by our prompt + system prompt, that context leaks in (non-deterministic by
+// launch directory, wrong behavior, extra tokens). So we run the CLI in a dedicated
+// EMPTY temp directory whose parents have no CLAUDE.md. (We can't use the CLI's
+// "simple" mode to skip discovery — it also forces ANTHROPIC_API_KEY auth and
+// ignores the membership login, defeating the whole provider.)
+const isolatedCwd = join(tmpdir(), 'creare-ai-sdk-claude-cli')
+let isolatedCwdReady: Promise<string> | null = null
+function ensureIsolatedCwd(): Promise<string> {
+  if (!isolatedCwdReady) {
+    isolatedCwdReady = mkdir(isolatedCwd, { recursive: true }).then(() => isolatedCwd)
+  }
+  return isolatedCwdReady
+}
+
+function runClaude(args: string[], stdin: string, cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn('claude', args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn('claude', args, { stdio: ['pipe', 'pipe', 'pipe'], cwd })
     let stdout = ''
     let stderr = ''
 
@@ -85,7 +101,7 @@ export async function completeClaudeCli(
   }
 
   const startMs = Date.now()
-  const stdout = await runClaude(args, renderPrompt(request.messages))
+  const stdout = await runClaude(args, renderPrompt(request.messages), await ensureIsolatedCwd())
   const durationMs = Date.now() - startMs
 
   let parsed: ClaudeCliResult
