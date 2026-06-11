@@ -1,6 +1,6 @@
 import { getDb, costRecords, events } from '@creare/database'
 import { generateId } from '@creare/shared'
-import { and, eq, gte, sum } from 'drizzle-orm'
+import { and, eq, gte } from 'drizzle-orm'
 import type { CostRecord, NewCostRecord } from '@creare/database'
 
 export async function recordCost(input: Omit<NewCostRecord, 'id' | 'createdAt' | 'recordedAt'>): Promise<CostRecord> {

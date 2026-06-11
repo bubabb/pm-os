@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge } from 'electron'
 
 // Expose a typed API to the renderer process
 // All Node.js/Electron APIs must be exposed here — renderer has no direct access

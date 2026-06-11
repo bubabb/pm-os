@@ -1,6 +1,5 @@
 import { getDb, externalEventCache } from '@creare/database'
 import { eq, and, isNull, like, or } from 'drizzle-orm'
-import { extractTicketIds } from './connectors/github'
 import type { ExternalEventCache } from '@creare/database'
 import type { IntegrationSource } from './types'
 

@@ -25,7 +25,7 @@ interface NotificationsState {
   onNewNotification: (n: Notification) => void
 }
 
-export const useNotificationsStore = create<NotificationsState>((set, get) => ({
+export const useNotificationsStore = create<NotificationsState>((set, _get) => ({
   items: [],
   unreadCount: 0,
   isOpen: false,

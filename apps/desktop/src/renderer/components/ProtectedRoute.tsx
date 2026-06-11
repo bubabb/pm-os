@@ -6,7 +6,6 @@ import { getToken } from '../lib/api'
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading, loadCurrentUser } = useAuthStore()
-  const { load: loadProjects } = useProjectStore()
   const navigate = useNavigate()
   const bootstrapped = useRef(false)
 

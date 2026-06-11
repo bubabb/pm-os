@@ -4,7 +4,7 @@ import { assertProjectAccess } from '../utils/project-access'
 import type { AuthenticatedRequest } from '../auth'
 import {
   listBoards, getBoard, createBoard, deleteBoard,
-  listColumns, getColumn, createColumn, updateColumn, deleteColumn,
+  listColumns, getColumn, updateColumn, deleteColumn,
   listSprints, getActiveSprint, getSprint, createSprint, updateSprint, startSprint, completeSprint,
   listBoardItems, getBoardItem, addBoardItem, moveBoardItem, removeBoardItem,
   listMilestones, getMilestone, createMilestone, updateMilestone, addMilestoneTask, listMilestoneTasks,
