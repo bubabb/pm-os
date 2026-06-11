@@ -65,6 +65,9 @@ function runClaude(args: string[], stdin: string, cwd: string): Promise<string> 
     const child = spawn('claude', args, { stdio: ['pipe', 'pipe', 'pipe'], cwd })
     let stdout = ''
     let stderr = ''
+    let settled = false
+    const fail = (err: Error) => { if (!settled) { settled = true; reject(err) } }
+    const done = (out: string) => { if (!settled) { settled = true; resolve(out) } }
 
     child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString()
@@ -73,22 +76,29 @@ function runClaude(args: string[], stdin: string, cwd: string): Promise<string> 
       stderr += chunk.toString()
     })
     child.on('error', (err) => {
-      reject(
-        new Error(
-          `Failed to spawn the 'claude' CLI — is Claude Code installed and on PATH? (${err.message})`,
-        ),
-      )
+      fail(new Error(
+        `Failed to spawn the 'claude' CLI — is Claude Code installed and on PATH? (${err.message})`,
+      ))
     })
     child.on('close', (code) => {
       if (code !== 0) {
-        reject(new Error(`claude CLI exited with code ${code}: ${stderr.trim() || stdout.trim()}`))
+        fail(new Error(`claude CLI exited with code ${code}: ${stderr.trim() || stdout.trim()}`))
         return
       }
-      resolve(stdout)
+      done(stdout)
     })
 
-    child.stdin.write(stdin)
-    child.stdin.end()
+    // The stdin pipe can emit EPIPE if the child exits before/while we write to it.
+    // Without this listener that 'error' is unhandled and crashes the whole host
+    // process (Electron main). Swallow it here — the child 'error'/'close' handlers
+    // above carry the real outcome. Guard the write/end the same way.
+    child.stdin.on('error', () => { /* handled via child 'error'/'close' */ })
+    try {
+      child.stdin.write(stdin)
+      child.stdin.end()
+    } catch {
+      // The pipe was already torn down; the outcome surfaces via 'error'/'close'.
+    }
   })
 }
 
