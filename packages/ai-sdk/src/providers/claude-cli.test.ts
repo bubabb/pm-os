@@ -17,11 +17,13 @@ function fakeChild(stdout: string, code = 0) {
   const child = new EventEmitter() as EventEmitter & {
     stdout: EventEmitter
     stderr: EventEmitter
-    stdin: { write: (d: string) => void; end: () => void }
+    stdin: EventEmitter & { write: (d: string) => void; end: () => void }
   }
   child.stdout = new EventEmitter()
   child.stderr = new EventEmitter()
-  child.stdin = { write: vi.fn(), end: vi.fn() }
+  // Real child stdin is a Writable stream (an EventEmitter) — the provider attaches
+  // an 'error' listener to it, so the mock must be one too.
+  child.stdin = Object.assign(new EventEmitter(), { write: vi.fn(), end: vi.fn() })
   setImmediate(() => {
     child.stdout.emit('data', Buffer.from(stdout))
     child.emit('close', code)
