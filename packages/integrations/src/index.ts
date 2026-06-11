@@ -27,6 +27,18 @@ export type {
   RemoteBoardOption,
 } from './types'
 
+// ── Bidirectional mirror (GitHub Projects v2, Phase 1) ───────────────────────
+// Pull/import surface + durable push outbox. The desktop routes layer resolves
+// plaintext tokens via the secrets layer and passes them in — this package
+// never decrypts anything.
+export { createMirror, pullMirror, getMirrorStatus } from './mirror/mirror-sync'
+export type { MirrorStatus } from './mirror/mirror-sync'
+export { enqueueMutation, enqueueBoardItemMove, drainMutationQueue } from './mirror/outbox'
+export type { DrainResult } from './mirror/outbox'
+// Exposed for the mirrors remote-board picker (listRemoteBoards) — Phase 1
+// mirrors are GitHub-only, so the routes layer builds this connector directly.
+export { GitHubConnector } from './connectors/github'
+
 // Lists the resources (repos/projects/spaces/databases/folders) the given
 // connection token can access — powers the UI resource picker. The connector
 // classes stay internal to this package; this helper is the public surface.

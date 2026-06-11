@@ -3,6 +3,7 @@ import { join } from 'path'
 import { runMigrations } from '@creare/database'
 import { startServer, stopServer } from './server'
 import { startSyncScheduler, stopSyncScheduler } from './scheduler/sync-scheduler'
+import { startPushWorker, stopPushWorker } from './sync/push-worker'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -31,6 +32,7 @@ app.whenReady().then(async () => {
   runMigrations() // bring a fresh ~/.creare/creare.db up to date before serving
   await startServer()
   startSyncScheduler()
+  startPushWorker()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -38,6 +40,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', async () => {
+  stopPushWorker()
   await stopSyncScheduler()
   await stopServer()
   if (process.platform !== 'darwin') app.quit()

@@ -3,11 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   LayoutGrid, Plus, Loader2, Flag, Milestone as MilestoneIcon,
-  ChevronDown, Trash2, Play, CheckCircle2, Calendar, Search,
+  ChevronDown, Trash2, Play, CheckCircle2, Calendar, Search, Github,
 } from 'lucide-react'
 import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
 import { TimelineTab } from './TimelineTab'
+import { ImportRemoteBoardDialog } from './ImportRemoteBoardDialog'
+import { MirrorStatusChip } from './MirrorStatusChip'
 import { Badge, BADGE_VARIANT_CLASSES, type BadgeVariant } from '../../components/ui/Badge'
 import { QueryError } from '../../components/ui/QueryError'
 import { Field } from '../../components/ui/Field'
@@ -180,6 +182,7 @@ function BoardsTab({ projectId }: { projectId: string }) {
   const qc = useQueryClient()
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [newName, setNewName] = useState('')
   const [newType, setNewType] = useState<BoardType>('kanban')
   const [actionError, setActionError] = useState<string | null>(null)
@@ -309,6 +312,14 @@ function BoardsTab({ projectId }: { projectId: string }) {
           ))}
         </div>
         <button
+          onClick={() => setShowImport(true)}
+          aria-label="Import a board from GitHub"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <Github className="h-4 w-4" aria-hidden="true" />
+          Import from GitHub
+        </button>
+        <button
           onClick={() => setShowCreate((s) => !s)}
           className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
@@ -316,6 +327,13 @@ function BoardsTab({ projectId }: { projectId: string }) {
           New board
         </button>
       </div>
+
+      <ImportRemoteBoardDialog
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        projectId={projectId}
+        onImported={(boardId) => setSelectedBoardId(boardId)}
+      />
 
       {showCreate && (
         <form
@@ -366,6 +384,11 @@ function BoardsTab({ projectId }: { projectId: string }) {
         />
       ) : activeBoardId ? (
         <>
+          {/* Mirror status (self-hides for non-mirrored boards). Sync-status polls
+              every 30s; pulls are manual via "Pull now" — no auto-pull on board
+              activation, to avoid surprise mutations/conflicts mid-drag. */}
+          <MirrorStatusChip projectId={projectId} boardId={activeBoardId} />
+
           {(colsLoading || itemsLoading) ? <Spinner /> : (
             <div className="overflow-x-auto">
               <div className="flex gap-3" style={{ minWidth: `${sortedColumns.length * 220}px` }}>

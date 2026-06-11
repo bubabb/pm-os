@@ -9,6 +9,8 @@ import {
   listBoardItems, getBoardItem, addBoardItem, moveBoardItem, removeBoardItem,
   listMilestones, getMilestone, createMilestone, updateMilestone, addMilestoneTask, listMilestoneTasks,
 } from '@creare/boards'
+import { enqueueBoardItemMove } from '@creare/integrations'
+import { kickPushWorker } from '../sync/push-worker'
 import type { Board, Sprint, Milestone } from '@creare/boards'
 
 interface ProjectParams   { id: string }
@@ -256,6 +258,12 @@ export async function boardsRoutes(app: FastifyInstance): Promise<void> {
       if (!columnInBoard(request.body.columnId, request.params.boardId)) return reply.code(422).send({ error: 'Column does not belong to this board' })
       const item = moveBoardItem(request.params.itemId, request.body.columnId, request.body.sprintId)
       if (!item) return reply.code(404).send({ error: 'Item not found' })
+      // Fire-and-forget mirror push: if the item is mirrored, durably enqueue a
+      // move op and nudge the push worker. Never blocks or fails the response —
+      // local boards (opId null) push nothing.
+      enqueueBoardItemMove(request.params.itemId, request.body.columnId)
+        .then((opId) => { if (opId) kickPushWorker() })
+        .catch((e) => console.error('[creare] enqueue move failed:', e))
       return item
     },
   )

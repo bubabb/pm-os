@@ -14,6 +14,7 @@ import { globalSettingsRoutes } from './routes/global-settings'
 import { reportingRoutes } from './routes/reporting'
 import { orchestrationRoutes } from './routes/orchestration'
 import { boardsRoutes } from './routes/boards'
+import { mirrorsRoutes } from './routes/mirrors'
 import { observabilityRoutes } from './routes/observability'
 import { toolsRoutes } from './routes/tools'
 import { evalRoutes } from './routes/eval'
@@ -74,6 +75,7 @@ export async function startServer(): Promise<void> {
   await app.register(reportingRoutes)
   await app.register(orchestrationRoutes)
   await app.register(boardsRoutes)
+  await app.register(mirrorsRoutes)
   await app.register(observabilityRoutes)
   await app.register(toolsRoutes)
   await app.register(evalRoutes)
