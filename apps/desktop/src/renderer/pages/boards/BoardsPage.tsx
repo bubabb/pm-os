@@ -217,7 +217,7 @@ function BoardsTab({ projectId }: { projectId: string }) {
 
   const createBoard = useMutation({
     mutationFn: (body: { name: string; type: BoardType }) =>
-      api.post(`/projects/${projectId}/boards`, body),
+      api.post<Board>(`/projects/${projectId}/boards`, body),
     onSuccess: (board: Board) => {
       qc.invalidateQueries({ queryKey: ['boards', projectId] })
       setSelectedBoardId(board.id)
@@ -760,9 +760,9 @@ function SprintsTab({ projectId }: { projectId: string }) {
     if (!newName.trim()) return
     create.mutate({
       name: newName.trim(),
-      goal: newGoal || undefined,
-      startDate: newStart || undefined,
-      endDate: newEnd || undefined,
+      ...(newGoal ? { goal: newGoal } : {}),
+      ...(newStart ? { startDate: newStart } : {}),
+      ...(newEnd ? { endDate: newEnd } : {}),
     })
   }
 
@@ -970,8 +970,8 @@ function MilestonesTab({ projectId }: { projectId: string }) {
     if (!newTitle.trim()) return
     create.mutate({
       title: newTitle.trim(),
-      description: newDesc || undefined,
-      dueDate: newDue || undefined,
+      ...(newDesc ? { description: newDesc } : {}),
+      ...(newDue ? { dueDate: newDue } : {}),
     })
   }
 

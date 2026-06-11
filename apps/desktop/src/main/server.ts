@@ -1,4 +1,5 @@
 import Fastify from 'fastify'
+import type { FastifyRequest } from 'fastify'
 import cors from '@fastify/cors'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
@@ -23,10 +24,32 @@ import { checkClaudeCli } from '@creare/ai-sdk'
 
 const PORT = parseInt(process.env['CREARE_PORT'] ?? '4321', 10)
 
+// The SSE fallback authenticates via the query string (/events/stream?token=<JWT>),
+// so the logged URL must be scrubbed too — redacting the Authorization header alone
+// still leaks the full session token on every SSE connect in dev.
+function redactUrlToken(url: string): string {
+  return url.replace(/([?&]token=)[^&]*/g, '$1[REDACTED]')
+}
+
 const app = Fastify({
   logger:
     process.env['NODE_ENV'] === 'development'
-      ? { redact: ['req.headers.authorization', 'res.headers["set-cookie"]'] }
+      ? {
+          redact: ['req.headers.authorization', 'res.headers["set-cookie"]'],
+          serializers: {
+            // Mirrors Fastify's default request log shape, with the token query
+            // param stripped from the URL.
+            req(request: FastifyRequest) {
+              return {
+                method: request.method,
+                url: redactUrlToken(request.url),
+                hostname: request.hostname,
+                remoteAddress: request.ip,
+                remotePort: request.socket.remotePort ?? 0,
+              }
+            },
+          },
+        }
       : false,
 })
 

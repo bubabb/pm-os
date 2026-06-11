@@ -1,0 +1,2 @@
+DROP INDEX `remote_links_remote_unique_idx`;--> statement-breakpoint
+CREATE UNIQUE INDEX `remote_links_remote_unique_idx` ON `remote_links` (`credential_id`,`remote_type`,`remote_id`,`container_remote_id`);

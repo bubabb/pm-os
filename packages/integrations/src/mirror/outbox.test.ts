@@ -11,7 +11,7 @@ import {
 import { generateId } from '@creare/shared'
 import { and, eq } from 'drizzle-orm'
 import { UnsupportedMutationError } from '../connectors/base'
-import { enqueueMutation, enqueueBoardItemMove, drainMutationQueue } from './outbox'
+import { enqueueMutation, enqueueBoardItemMove, drainMutationQueue, recoverStaleInFlight } from './outbox'
 import type { IntegrationCredential } from '@creare/database'
 import type { MutationEnvelope, MutationOp } from '../types'
 
@@ -178,12 +178,111 @@ describe('outbox — enqueueBoardItemMove', () => {
     })
   })
 
-  it('throws when the item is mirrored but the target column has no link', async () => {
+  it('never throws: mirrored item + unlinked target column parks a failed op instead', async () => {
+    const itemLinkId = seedLink({
+      localType: 'board_item', localId: 'bi-1',
+      remoteType: 'pv2_item', remoteId: 'ITEM_bi-1',
+      containerRemoteId: 'PVT_board1', remoteVersion: 'v1',
+    })
+
+    const opId = await enqueueBoardItemMove('bi-1', 'col-unlinked')
+
+    // Divergence is tracked: a 'failed' row exists (so planReconcile keeps the
+    // item a CONFLICT) instead of an exception the route would swallow.
+    expect(opId).not.toBeNull()
+    const row = queueRow(opId!)
+    expect(row.status).toBe('failed')
+    expect(row.remoteLinkId).toBe(itemLinkId)
+    expect(row.baseVersion).toBe('v1')
+    expect(row.lastError).toContain('col-unlinked')
+    expect(row.lastError).toContain('no remote link')
+    expect(eventsOfType('integration.mutation.failed')).toHaveLength(1)
+
+    // A failed row is terminal — the drain never picks it up.
+    const counts = await drainMutationQueue(getCred)
+    expect(counts).toEqual({ applied: 0, conflicts: 0, failed: 0 })
+    expect(stub.applied).toHaveLength(0)
+  })
+
+  it('never throws: missing board link (no status FIELD id source) parks a failed op', async () => {
+    // Item + column links exist, but the board link is absent entirely.
     seedLink({
       localType: 'board_item', localId: 'bi-1',
-      remoteType: 'pv2_item', remoteId: 'ITEM_bi-1', containerRemoteId: 'PVT_board1',
+      remoteType: 'pv2_item', remoteId: 'ITEM_bi-1',
+      containerRemoteId: 'PVT_board1', remoteVersion: 'v1',
     })
-    await expect(enqueueBoardItemMove('bi-1', 'col-unlinked')).rejects.toThrow(/no remote link/)
+    seedLink({
+      localType: 'board_column', localId: 'col-done',
+      remoteType: 'pv2_status_option', remoteId: 'OPT_DONE', containerRemoteId: 'PVT_board1',
+    })
+
+    const opId = await enqueueBoardItemMove('bi-1', 'col-done')
+
+    expect(opId).not.toBeNull()
+    const row = queueRow(opId!)
+    expect(row.status).toBe('failed')
+    expect(row.lastError).toContain('status FIELD')
+  })
+
+  it('never throws: board link without containerRemoteId (null statusField) parks a failed op', async () => {
+    seedLink({
+      localType: 'board', localId: 'board-1',
+      remoteType: 'pv2_project', remoteId: 'PVT_board1',
+      containerRemoteId: null, // project has no Status field
+    })
+    seedLink({
+      localType: 'board_item', localId: 'bi-1',
+      remoteType: 'pv2_item', remoteId: 'ITEM_bi-1',
+      containerRemoteId: 'PVT_board1', remoteVersion: 'v1',
+    })
+    seedLink({
+      localType: 'board_column', localId: 'col-done',
+      remoteType: 'pv2_status_option', remoteId: 'OPT_DONE', containerRemoteId: 'PVT_board1',
+    })
+
+    const opId = await enqueueBoardItemMove('bi-1', 'col-done')
+
+    expect(opId).not.toBeNull()
+    const row = queueRow(opId!)
+    expect(row.status).toBe('failed')
+    expect(row.lastError).toContain('missing containerRemoteId')
+  })
+})
+
+describe('outbox — recoverStaleInFlight', () => {
+  it('resets in_flight ops to pending (crash recovery) and leaves other statuses alone', async () => {
+    const linkId = seedLink({
+      localType: 'board_item', localId: 'bi-1',
+      remoteType: 'pv2_item', remoteId: 'ITEM_bi-1', remoteVersion: 'v1',
+    })
+    const opIds: Record<string, string> = {}
+    for (const status of ['in_flight', 'in_flight', 'pending', 'failed', 'applied', 'conflicted'] as const) {
+      const opId = generateId()
+      getDb().insert(mutationQueue).values({
+        id: generateId(),
+        opId,
+        projectId,
+        credentialId,
+        source: 'github',
+        remoteLinkId: linkId,
+        kind: 'move_item',
+        payload: '{}',
+        baseVersion: 'v1',
+        status,
+        attempts: 1,
+      }).run()
+      opIds[opId] = status
+    }
+
+    expect(await recoverStaleInFlight()).toBe(2)
+
+    for (const [opId, seededStatus] of Object.entries(opIds)) {
+      const expected = seededStatus === 'in_flight' ? 'pending' : seededStatus
+      expect(queueRow(opId).status).toBe(expected)
+    }
+
+    // Idempotent: nothing left to recover.
+    expect(await recoverStaleInFlight()).toBe(0)
   })
 })
 

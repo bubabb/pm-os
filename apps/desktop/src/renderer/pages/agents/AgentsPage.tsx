@@ -432,7 +432,7 @@ function TasksTab({ projectId }: { projectId: string }) {
 
       {showCreate && (
         <form
-          onSubmit={(e) => { e.preventDefault(); if (newTitle.trim()) create.mutate({ title: newTitle.trim(), description: newDesc || undefined, type: newType, priority: newPriority, startDate: newStart || undefined, dueDate: newDue || undefined }) }}
+          onSubmit={(e) => { e.preventDefault(); if (newTitle.trim()) create.mutate({ title: newTitle.trim(), type: newType, priority: newPriority, ...(newDesc ? { description: newDesc } : {}), ...(newStart ? { startDate: newStart } : {}), ...(newDue ? { dueDate: newDue } : {}) }) }}
           className="rounded-lg border border-border bg-card p-4 space-y-3"
         >
           <h3 className="text-sm font-medium text-foreground">Create task</h3>

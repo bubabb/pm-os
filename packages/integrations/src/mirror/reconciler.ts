@@ -9,10 +9,10 @@
 // Three-way merge inputs per item:
 //   base   = link.lastSyncedHash   (hash of the last state both sides agreed on)
 //   remote = item.contentHash      (hash of the snapshot item, computed by the connector)
-//   local  = signaled by a pending/in_flight mutation targeting the item's link
+//   local  = signaled by an UNRESOLVED mutation targeting the item's link
 //
-// Scope note (deliberate): local divergence is detected ONLY via pending ops.
-// A pending or in-flight mutation on a link is the signal that local moved off
+// Scope note (deliberate): local divergence is detected ONLY via outstanding
+// ops. An unresolved mutation on a link is the signal that local moved off
 // base; deeper local-vs-base diffing requires reading local rows and therefore
 // lives in the impure caller, not in this pure function.
 //
@@ -27,16 +27,20 @@ import type { MirrorBoardSnapshot, MirrorColumnSnapshot, MirrorItemSnapshot } fr
 export const PV2_ITEM_REMOTE_TYPE = 'pv2_item'
 export const PV2_STATUS_OPTION_REMOTE_TYPE = 'pv2_status_option'
 
-// Mutation statuses that mean "local has an unsynced change" — anything else
-// (applied/failed/conflicted/cancelled) no longer represents local divergence.
-const ACTIVE_OP_STATUSES: ReadonlySet<string> = new Set(['pending', 'in_flight'])
+// Mutation statuses that mean "local has an unsynced change". pending/in_flight
+// are waiting to be pushed; failed and conflicted ops ALSO represent local
+// divergence — the local edit never landed remotely, so a remote-wins update
+// would silently revert it. Only applied/cancelled ops stop counting.
+// Exported so impure callers (mirror-sync's pull query) stay in lockstep.
+export const UNRESOLVED_OP_STATUSES = ['pending', 'in_flight', 'failed', 'conflicted'] as const
+const ACTIVE_OP_STATUSES: ReadonlySet<string> = new Set(UNRESOLVED_OP_STATUSES)
 
 export interface ReconcilePlan {
-  /** Remote item with no link → create locally. */
+  /** Remote item with no LIVE link (none at all, or only a tombstone) → create/resurrect locally. */
   newItems: MirrorItemSnapshot[]
   /** Remote changed, no local divergence signal → safe to apply remote→local. */
   remoteUpdates: Array<{ link: RemoteLink; item: MirrorItemSnapshot }>
-  /** Remote changed AND a pending/in_flight op targets the link → both sides moved. */
+  /** Remote changed AND an unresolved op targets the link → both sides moved. */
   conflicts: Array<{ link: RemoteLink; item: MirrorItemSnapshot; pendingOpId: string | null }>
   /** Linked item missing from the snapshot or archived remotely → archive local + tombstone link. */
   remoteDeletes: RemoteLink[]
@@ -73,8 +77,17 @@ export function planReconcile(
   const itemLinks = new Map<string, RemoteLink>()
   const columnLinks = new Map<string, RemoteLink>()
   for (const link of links) {
-    if (link.remoteType === PV2_ITEM_REMOTE_TYPE) itemLinks.set(link.remoteId, link)
-    else if (link.remoteType === PV2_STATUS_OPTION_REMOTE_TYPE) columnLinks.set(link.remoteId, link)
+    if (link.remoteType === PV2_ITEM_REMOTE_TYPE) {
+      // Tombstoned item links are deliberately NOT indexed as live. An item
+      // that is alive in the snapshot but only matches a tombstone (remotely
+      // un-archived, or deleted locally while still present remotely) must be
+      // treated as MISSING so it lands in newItems and the boards resurrect
+      // path revives it — indexing the tombstone would make the hash
+      // comparison skip it forever.
+      if (link.deletedAt === null) itemLinks.set(link.remoteId, link)
+    } else if (link.remoteType === PV2_STATUS_OPTION_REMOTE_TYPE) {
+      columnLinks.set(link.remoteId, link)
+    }
   }
 
   // --- Index active ops by the link they target ------------------------------

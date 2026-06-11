@@ -148,24 +148,36 @@ describe('planReconcile', () => {
     expect(plan.remoteUpdates).toEqual([])
   })
 
-  it('in_flight op also blocks the update; resolved statuses do not', () => {
+  it('every unresolved status (in_flight/failed/conflicted) blocks the update', () => {
     const item = makeItem({ remoteId: 'it-1', contentHash: 'h-remote' })
     const link = makeLink({ remoteId: 'it-1', lastSyncedHash: 'h-base' })
 
-    const inFlight = planReconcile(
-      makeSnapshot({ items: [item] }),
-      [link],
-      [makeOp({ remoteLinkId: link.id, opId: 'op-2', status: 'in_flight' })],
-    )
-    expect(inFlight.conflicts.map((c) => c.pendingOpId)).toEqual(['op-2'])
+    // A FAILED push still means local diverged from base — a remote-wins
+    // update would silently revert the local change. Same for conflicted.
+    for (const status of ['in_flight', 'failed', 'conflicted'] as const) {
+      const plan = planReconcile(
+        makeSnapshot({ items: [item] }),
+        [link],
+        [makeOp({ remoteLinkId: link.id, opId: `op-${status}`, status })],
+      )
+      expect(plan.conflicts.map((c) => c.pendingOpId)).toEqual([`op-${status}`])
+      expect(plan.remoteUpdates).toEqual([])
+    }
+  })
 
-    const applied = planReconcile(
-      makeSnapshot({ items: [item] }),
-      [link],
-      [makeOp({ remoteLinkId: link.id, opId: 'op-3', status: 'applied' })],
-    )
-    expect(applied.conflicts).toEqual([])
-    expect(applied.remoteUpdates).toEqual([{ link, item }])
+  it('resolved statuses (applied/cancelled) do not block the update', () => {
+    const item = makeItem({ remoteId: 'it-1', contentHash: 'h-remote' })
+    const link = makeLink({ remoteId: 'it-1', lastSyncedHash: 'h-base' })
+
+    for (const status of ['applied', 'cancelled'] as const) {
+      const plan = planReconcile(
+        makeSnapshot({ items: [item] }),
+        [link],
+        [makeOp({ remoteLinkId: link.id, opId: `op-${status}`, status })],
+      )
+      expect(plan.conflicts).toEqual([])
+      expect(plan.remoteUpdates).toEqual([{ link, item }])
+    }
   })
 
   it('pending op without a matching changed item causes no conflict', () => {
@@ -205,6 +217,19 @@ describe('planReconcile', () => {
     const plan = planReconcile(makeSnapshot({ items: [archivedNoLink] }), [tombstoned], [])
 
     expect(plan).toEqual(emptyPlan)
+  })
+
+  it('item alive in the snapshot whose only link is tombstoned → newItems (resurrect)', () => {
+    // Remotely un-archived (or deleted locally while still present remotely):
+    // the tombstone must not shadow the item — even when the hashes match.
+    const item = makeItem({ remoteId: 'it-1', contentHash: 'h-base' })
+    const tombstoned = makeLink({ remoteId: 'it-1', lastSyncedHash: 'h-base', deletedAt: T })
+    const plan = planReconcile(makeSnapshot({ items: [item] }), [tombstoned], [])
+
+    expect(plan.newItems).toEqual([item]) // boards resurrect path revives the link
+    expect(plan.remoteUpdates).toEqual([])
+    expect(plan.conflicts).toEqual([])
+    expect(plan.remoteDeletes).toEqual([]) // never re-tombstoned — sweep stays idempotent
   })
 
   it('new column with no link → columnChanges.added', () => {

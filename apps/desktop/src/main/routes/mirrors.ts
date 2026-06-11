@@ -3,13 +3,14 @@ import { requireAuth } from '../auth'
 import { assertProjectAccess } from '../utils/project-access'
 import {
   storeIntegrationCredential,
+  deleteIntegrationCredential,
   getIntegrationToken,
   withMergedConnectionMetadata,
   getConnection,
   getConnectionToken,
 } from '../secrets'
 import { getDb, integrationCredentials, remoteLinks, events } from '@creare/database'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import { generateId } from '@creare/shared'
 import { GitHubConnector, createMirror, pullMirror, getMirrorStatus } from '@creare/integrations'
 import type { ConnectorConfig } from '@creare/integrations'
@@ -66,31 +67,61 @@ export async function mirrorsRoutes(app: FastifyInstance): Promise<void> {
       }
       const { connectionId, remoteId, label } = request.body
 
+      // Duplicate-import guard: if this project already mirrors this remote
+      // board (a live board-level remote link to the same ProjectV2), refuse
+      // instead of creating a second credential + board for the same source.
+      const [existingLink] = await getDb()
+        .select()
+        .from(remoteLinks)
+        .where(and(
+          eq(remoteLinks.projectId, request.params.id),
+          eq(remoteLinks.localType, 'board'),
+          eq(remoteLinks.remoteId, remoteId),
+          isNull(remoteLinks.deletedAt),
+        ))
+        .limit(1)
+      if (existingLink !== undefined) {
+        return reply.code(409).send({
+          error: 'This GitHub Project is already imported to this project',
+          boardId: existingLink.localId,
+        })
+      }
+
+      let credential
       try {
-        const credential = await storeIntegrationCredential({
+        credential = await storeIntegrationCredential({
           projectId: request.params.id,
           source: 'github',
           connectionId,
           label,
           metadata: { projectV2Id: remoteId },
         })
-        getDb().insert(events).values({
-          id: generateId(),
-          type: 'integration.credential.created',
-          domain: 'integrations',
-          projectId: request.params.id,
-          actorType: 'user',
-          actorId: user.id,
-          resourceType: 'integration_credential',
-          resourceId: credential.id,
-          payload: JSON.stringify({ source: credential.source, label: credential.label }),
-        }).catch((err) => console.error('[creare] Event log write failed:', err))
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        return reply.code(502).send({ error: message })
+      }
+      getDb().insert(events).values({
+        id: generateId(),
+        type: 'integration.credential.created',
+        domain: 'integrations',
+        projectId: request.params.id,
+        actorType: 'user',
+        actorId: user.id,
+        resourceType: 'integration_credential',
+        resourceId: credential.id,
+        payload: JSON.stringify({ source: credential.source, label: credential.label }),
+      }).catch((err) => console.error('[creare] Event log write failed:', err))
 
+      try {
         const merged = await withMergedConnectionMetadata(credential)
         const token = await getIntegrationToken(credential.id)
         const { boardId } = await createMirror(merged, token, remoteId)
         return { boardId }
       } catch (err) {
+        // Import failed AFTER the credential row was created — remove it so a
+        // retry starts clean instead of accumulating orphaned credentials.
+        await deleteIntegrationCredential(credential.id)
+          .catch((cleanupErr) => console.error('[creare] Orphaned credential cleanup failed:', cleanupErr))
         const message = err instanceof Error ? err.message : String(err)
         return reply.code(502).send({ error: message })
       }

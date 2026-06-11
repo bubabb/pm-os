@@ -57,6 +57,13 @@
       "when": 1781210733264,
       "tag": "0007_early_grey_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1781214156543,
+      "tag": "0008_keen_naoko",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 import {
   getDb, boards, boardColumns, sprints, boardItems, milestones, milestoneTasks, tasks, events, remoteLinks,
 } from '@creare/database'
-import { eq, and, asc, ne, desc, getTableColumns } from 'drizzle-orm'
+import { eq, and, asc, ne, desc, getTableColumns, inArray, isNull } from 'drizzle-orm'
 import { generateId } from '@creare/shared'
 import type { InferSelectModel } from 'drizzle-orm'
 
@@ -64,12 +64,28 @@ export function createBoard(projectId: string, params: CreateBoardParams, actorI
 export function deleteBoard(id: string, actorId?: string): void {
   const board = getBoard(id)
   if (!board) return
+  const now = new Date().toISOString()
+  // Capture dependent ids BEFORE deleting so their remote links can be tombstoned.
+  const columnIds = listColumns(id).map((c) => c.id)
+  const itemIds = getDb().select().from(boardItems).where(eq(boardItems.boardId, id)).all().map((i) => i.id)
   // Cascade-delete dependent rows (SQLite FK enforcement is not assumed to be enabled).
   getDb().transaction(() => {
     getDb().delete(boardItems).where(eq(boardItems.boardId, id)).run()
     getDb().delete(boardColumns).where(eq(boardColumns.boardId, id)).run()
     getDb().delete(sprints).where(eq(sprints.boardId, id)).run()
     getDb().delete(boards).where(eq(boards.id, id)).run()
+    // Tombstone the board's remote link AND its column/item links — a live link
+    // would make the next mirror pull resolve into the deleted local rows.
+    getDb().update(remoteLinks).set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(remoteLinks.localType, 'board'), eq(remoteLinks.localId, id), isNull(remoteLinks.deletedAt))).run()
+    if (columnIds.length > 0) {
+      getDb().update(remoteLinks).set({ deletedAt: now, updatedAt: now })
+        .where(and(eq(remoteLinks.localType, 'board_column'), inArray(remoteLinks.localId, columnIds), isNull(remoteLinks.deletedAt))).run()
+    }
+    if (itemIds.length > 0) {
+      getDb().update(remoteLinks).set({ deletedAt: now, updatedAt: now })
+        .where(and(eq(remoteLinks.localType, 'board_item'), inArray(remoteLinks.localId, itemIds), isNull(remoteLinks.deletedAt))).run()
+    }
   })
   _logEvent(board.projectId, 'board.deleted', 'boards', actorId ? 'user' : 'system', actorId ?? null, 'board', id, {})
 }
@@ -136,7 +152,14 @@ export function updateColumn(
 
 export function deleteColumn(id: string): void {
   const col = getColumn(id)
-  getDb().delete(boardColumns).where(eq(boardColumns.id, id)).run()
+  const now = new Date().toISOString()
+  getDb().transaction(() => {
+    getDb().delete(boardColumns).where(eq(boardColumns.id, id)).run()
+    // Tombstone any remote link so the next mirror pull recreates the column
+    // instead of mapping items into the deleted column id.
+    getDb().update(remoteLinks).set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(remoteLinks.localType, 'board_column'), eq(remoteLinks.localId, id), isNull(remoteLinks.deletedAt))).run()
+  })
   if (col) {
     const board = getBoard(col.boardId)
     if (board) _logEvent(board.projectId, 'column.deleted', 'boards', 'system', null, 'column', id, { boardId: col.boardId })
@@ -315,7 +338,14 @@ export function moveBoardItem(
 
 export function removeBoardItem(itemId: string): void {
   const item = getBoardItem(itemId)
-  getDb().delete(boardItems).where(eq(boardItems.id, itemId)).run()
+  const now = new Date().toISOString()
+  getDb().transaction(() => {
+    getDb().delete(boardItems).where(eq(boardItems.id, itemId)).run()
+    // Tombstone any remote link — a live link would make the next mirror pull
+    // write into the deleted board_item id (or never re-pull the item).
+    getDb().update(remoteLinks).set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(remoteLinks.localType, 'board_item'), eq(remoteLinks.localId, itemId), isNull(remoteLinks.deletedAt))).run()
+  })
   if (item) {
     const board = getBoard(item.boardId)
     if (board) _logEvent(board.projectId, 'item.removed', 'boards', 'system', null, 'item', itemId, { boardId: item.boardId })
@@ -445,19 +475,27 @@ export interface MirrorApply {
   deleteRemoteIds: string[] // item remoteIds removed/archived remotely → remove locally
 }
 
+// `containerRemoteId` scopes the match to one remote container (the ProjectV2
+// node id for column/item links). It is REQUIRED for board_column and
+// board_item lookups: GitHub's default status-option ids (e.g. Todo) are
+// identical across projects, so an unscoped match under a credential that
+// mirrors several projects would cross-wire a column onto the wrong board.
 function _findRemoteLink(
   credentialId: string,
   localType: RemoteLink['localType'],
   remoteType: string,
   remoteId: string,
+  containerRemoteId?: string,
 ): RemoteLink | null {
+  const conditions = [
+    eq(remoteLinks.credentialId, credentialId),
+    eq(remoteLinks.localType, localType),
+    eq(remoteLinks.remoteType, remoteType),
+    eq(remoteLinks.remoteId, remoteId),
+  ]
+  if (containerRemoteId !== undefined) conditions.push(eq(remoteLinks.containerRemoteId, containerRemoteId))
   const [link] = getDb().select().from(remoteLinks)
-    .where(and(
-      eq(remoteLinks.credentialId, credentialId),
-      eq(remoteLinks.localType, localType),
-      eq(remoteLinks.remoteType, remoteType),
-      eq(remoteLinks.remoteId, remoteId),
-    ))
+    .where(and(...conditions))
     .limit(1).all()
   return link ?? null
 }
@@ -522,7 +560,7 @@ export function applyMirrorSnapshot(apply: MirrorApply): { boardId: string } {
     // Ensure a local column (+ remote link) exists for every desired column.
     const columnIdByRemoteId = new Map<string, string>()
     for (const col of apply.columns) {
-      const link = _findRemoteLink(apply.credentialId, 'board_column', 'pv2_status_option', col.remoteId)
+      const link = _findRemoteLink(apply.credentialId, 'board_column', 'pv2_status_option', col.remoteId, apply.board.remoteId)
       if (!link) {
         const created = createColumn(localBoardId, { name: col.name, position: col.position, isTerminal: col.isTerminal })
         db.insert(remoteLinks).values({
@@ -544,7 +582,24 @@ export function applyMirrorSnapshot(apply: MirrorApply): { boardId: string } {
         columnIdByRemoteId.set(col.remoteId, created.id)
       } else {
         const existing = getColumn(link.localId)
-        if (existing && (existing.name !== col.name || existing.position !== col.position || existing.isTerminal !== col.isTerminal)) {
+        if (!existing) {
+          // The link points at a column that no longer exists locally (e.g.
+          // deleted via deleteColumn, which tombstones the link). RECREATE the
+          // column and repoint the link — items must never be mapped into a
+          // dead column id.
+          const recreated = createColumn(localBoardId, { name: col.name, position: col.position, isTerminal: col.isTerminal })
+          db.update(remoteLinks).set({
+            localId: recreated.id,
+            lastSyncedHash: col.syncHash,
+            remoteVersion: apply.board.version,
+            lastPulledAt: now,
+            deletedAt: null,
+            updatedAt: now,
+          }).where(eq(remoteLinks.id, link.id)).run()
+          columnIdByRemoteId.set(col.remoteId, recreated.id)
+          continue
+        }
+        if (existing.name !== col.name || existing.position !== col.position || existing.isTerminal !== col.isTerminal) {
           updateColumn(existing.id, { name: col.name, position: col.position, isTerminal: col.isTerminal })
         }
         // Always record the latest remote state hash on the link.
@@ -573,7 +628,7 @@ export function applyMirrorSnapshot(apply: MirrorApply): { boardId: string } {
 
     // ── Items (upsert) ─────────────────────────────────────────────────────
     for (const item of apply.upsertItems) {
-      const link = _findRemoteLink(apply.credentialId, 'board_item', 'pv2_item', item.remoteId)
+      const link = _findRemoteLink(apply.credentialId, 'board_item', 'pv2_item', item.remoteId, apply.board.remoteId)
       const targetColumnId = resolveColumnId(item.columnRemoteId)
       const taskStatus = item.state === 'closed' ? 'completed' : 'pending'
 
@@ -589,6 +644,13 @@ export function applyMirrorSnapshot(apply: MirrorApply): { boardId: string } {
           createdAt: now,
           updatedAt: now,
         }).run()
+        // Append-only event log: mirrored task writes are state changes too.
+        _logEvent(apply.projectId, 'task.created', 'boards', 'system', null, 'task', taskId, {
+          title: item.title,
+          status: taskStatus,
+          source: apply.source,
+          remoteId: item.remoteId,
+        })
         const boardItem = addBoardItem(localBoardId, targetColumnId, taskId)
         if (!link) {
           db.insert(remoteLinks).values({
@@ -635,6 +697,16 @@ export function applyMirrorSnapshot(apply: MirrorApply): { boardId: string } {
           const [task] = db.select().from(tasks).where(eq(tasks.id, boardItem.taskId)).limit(1).all()
           if (task && (task.title !== item.title || task.status !== taskStatus)) {
             db.update(tasks).set({ title: item.title, status: taskStatus, updatedAt: now }).where(eq(tasks.id, task.id)).run()
+            const changed: string[] = []
+            if (task.title !== item.title) changed.push('title')
+            if (task.status !== taskStatus) changed.push('status')
+            _logEvent(apply.projectId, 'task.updated', 'boards', 'system', null, 'task', task.id, {
+              changed,
+              from: { title: task.title, status: task.status },
+              to: { title: item.title, status: taskStatus },
+              source: apply.source,
+              remoteId: item.remoteId,
+            })
           }
         }
         db.update(remoteLinks).set({
@@ -650,10 +722,17 @@ export function applyMirrorSnapshot(apply: MirrorApply): { boardId: string } {
     // ── Deletes ────────────────────────────────────────────────────────────
     // Remove the board_item, keep the task (history), tombstone the link.
     for (const remoteId of apply.deleteRemoteIds) {
-      const link = _findRemoteLink(apply.credentialId, 'board_item', 'pv2_item', remoteId)
+      const link = _findRemoteLink(apply.credentialId, 'board_item', 'pv2_item', remoteId, apply.board.remoteId)
       if (!link || link.deletedAt !== null) continue
+      const removed = getBoardItem(link.localId)
       db.delete(boardItems).where(eq(boardItems.id, link.localId)).run()
       db.update(remoteLinks).set({ deletedAt: now, updatedAt: now }).where(eq(remoteLinks.id, link.id)).run()
+      _logEvent(apply.projectId, 'board.item.removed', 'boards', 'system', null, 'item', link.localId, {
+        boardItemId: link.localId,
+        ...(removed ? { taskId: removed.taskId, columnId: removed.columnId } : {}),
+        source: apply.source,
+        remoteId,
+      })
     }
 
     if (!isImport) {

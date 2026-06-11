@@ -258,12 +258,13 @@ export async function boardsRoutes(app: FastifyInstance): Promise<void> {
       if (!columnInBoard(request.body.columnId, request.params.boardId)) return reply.code(422).send({ error: 'Column does not belong to this board' })
       const item = moveBoardItem(request.params.itemId, request.body.columnId, request.body.sprintId)
       if (!item) return reply.code(404).send({ error: 'Item not found' })
-      // Fire-and-forget mirror push: if the item is mirrored, durably enqueue a
-      // move op and nudge the push worker. Never blocks or fails the response —
-      // local boards (opId null) push nothing.
-      enqueueBoardItemMove(request.params.itemId, request.body.columnId)
-        .then((opId) => { if (opId) kickPushWorker() })
-        .catch((e) => console.error('[creare] enqueue move failed:', e))
+      // Mirror push: AWAIT the enqueue so a tracked op row exists before we
+      // respond — otherwise a pull racing this move could silently revert it.
+      // enqueueBoardItemMove never throws: it returns an opId (a row exists,
+      // even on mirror-integrity failure) or null for plain local boards,
+      // which push nothing. The nudge stays fire-and-forget.
+      const opId = await enqueueBoardItemMove(request.params.itemId, request.body.columnId)
+      if (opId !== null) kickPushWorker()
       return item
     },
   )

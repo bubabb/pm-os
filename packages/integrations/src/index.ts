@@ -33,7 +33,7 @@ export type {
 // never decrypts anything.
 export { createMirror, pullMirror, getMirrorStatus } from './mirror/mirror-sync'
 export type { MirrorStatus } from './mirror/mirror-sync'
-export { enqueueMutation, enqueueBoardItemMove, drainMutationQueue } from './mirror/outbox'
+export { enqueueMutation, enqueueBoardItemMove, drainMutationQueue, recoverStaleInFlight } from './mirror/outbox'
 export type { DrainResult } from './mirror/outbox'
 // Exposed for the mirrors remote-board picker (listRemoteBoards) — Phase 1
 // mirrors are GitHub-only, so the routes layer builds this connector directly.

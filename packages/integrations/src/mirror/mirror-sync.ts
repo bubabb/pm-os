@@ -27,11 +27,19 @@ import { applyMirrorSnapshot } from '@creare/boards'
 import type { MirrorApply, MirrorApplyColumn, MirrorApplyItem } from '@creare/boards'
 import type { IntegrationCredential, RemoteLink } from '@creare/database'
 import { GitHubProjectsClient } from '../connectors/github-projects'
-import { planReconcile, columnSyncHash, PV2_ITEM_REMOTE_TYPE, PV2_STATUS_OPTION_REMOTE_TYPE } from './reconciler'
+import {
+  planReconcile,
+  columnSyncHash,
+  UNRESOLVED_OP_STATUSES,
+  PV2_ITEM_REMOTE_TYPE,
+  PV2_STATUS_OPTION_REMOTE_TYPE,
+} from './reconciler'
 import type { IntegrationSource, MirrorBoardSnapshot, MirrorColumnSnapshot, MirrorItemSnapshot } from '../types'
 
-// Mutation statuses that count as "waiting to be pushed" — must stay in sync
-// with the reconciler's ACTIVE_OP_STATUSES.
+// Mutation statuses that count as "waiting to be pushed" — the chip's
+// pendingPushes number. Failed pushes are surfaced separately (failedPushes);
+// the pull-side divergence signal uses the reconciler's UNRESOLVED_OP_STATUSES
+// (which additionally includes failed/conflicted).
 const ACTIVE_PUSH_STATUSES = ['pending', 'in_flight'] as const
 
 export interface MirrorStatus {
@@ -41,6 +49,7 @@ export interface MirrorStatus {
   lastPulledAt: string | null
   pendingPushes: number
   openConflicts: number
+  failedPushes: number
 }
 
 // ── Snapshot → MirrorApply mapping ──────────────────────────────────────────
@@ -170,8 +179,9 @@ export async function createMirror(
  * Pull the latest remote state into an existing mirrored board.
  * Three-way reconciliation via planReconcile: new items and safe remote
  * updates are applied; remote deletes are applied; conflicts (remote changed
- * AND a pending/in-flight push targets the same link) are SKIPPED and counted
- * — push-side policy decides their fate, the pull never clobbers local intent.
+ * AND an unresolved push op targets the same link) are SKIPPED locally and
+ * PERSISTED as open sync_conflicts rows — push-side policy or the user decides
+ * their fate, the pull never clobbers local intent.
  */
 export async function pullMirror(
   credential: IntegrationCredential,
@@ -215,12 +225,14 @@ export async function pullMirror(
       ))
 
     // Outstanding local pushes — the local-divergence signal for the planner.
+    // UNRESOLVED includes failed/conflicted: a push that FAILED still means
+    // local moved off base, and a remote-wins update would silently revert it.
     const pendingOps = await db
       .select()
       .from(mutationQueue)
       .where(and(
         eq(mutationQueue.credentialId, credentialId),
-        inArray(mutationQueue.status, [...ACTIVE_PUSH_STATUSES]),
+        inArray(mutationQueue.status, [...UNRESOLVED_OP_STATUSES]),
       ))
 
     const snapshot = await new GitHubProjectsClient(token).fetchProjectSnapshot(projectV2Id)
@@ -253,6 +265,42 @@ export async function pullMirror(
     }
 
     applyMirrorSnapshot(apply)
+
+    // Persist pull-side conflicts so they outlive this pull and make
+    // getMirrorStatus.openConflicts real — at most one OPEN row per link
+    // (repeated pulls of the same divergence must not pile up duplicates).
+    // mutationId stays null: this is a pull-detected conflict, not a push
+    // probe; the blocking op (if any) is recorded in localSnapshot.
+    for (const conflict of plan.conflicts) {
+      const [open] = await db
+        .select({ id: syncConflicts.id })
+        .from(syncConflicts)
+        .where(and(
+          eq(syncConflicts.remoteLinkId, conflict.link.id),
+          isNull(syncConflicts.resolvedAt),
+        ))
+        .limit(1)
+      if (open !== undefined) continue
+      await db.insert(syncConflicts).values({
+        id: generateId(),
+        projectId,
+        remoteLinkId: conflict.link.id,
+        mutationId: null,
+        // Best-available three-way record: the link's last-agreed state as
+        // base, the local identity + blocking op as local, the fresh snapshot
+        // item verbatim as remote.
+        baseSnapshot: JSON.stringify({
+          lastSyncedHash: conflict.link.lastSyncedHash,
+          remoteVersion: conflict.link.remoteVersion,
+        }),
+        localSnapshot: JSON.stringify({
+          localType: conflict.link.localType,
+          localId: conflict.link.localId,
+          pendingOpId: conflict.pendingOpId,
+        }),
+        remoteSnapshot: JSON.stringify(conflict.item),
+      })
+    }
 
     // Stamp lastPulledAt on every link this pull touched (the board link
     // always counts — the pull observed the board even when nothing changed).
@@ -322,6 +370,7 @@ export async function getMirrorStatus(boardId: string): Promise<MirrorStatus> {
       lastPulledAt: null,
       pendingPushes: 0,
       openConflicts: 0,
+      failedPushes: 0,
     }
   }
 
@@ -346,6 +395,20 @@ export async function getMirrorStatus(boardId: string): Promise<MirrorStatus> {
       inArray(mutationQueue.status, [...ACTIVE_PUSH_STATUSES]),
     ))
 
+  // Failed pushes: terminal 'failed' mutations on this board's item links —
+  // local changes that never landed remotely (enqueue-time resolution failures
+  // and drains that exhausted their retries). Shown by the chip.
+  const [failedRow] = await db
+    .select({ value: count() })
+    .from(mutationQueue)
+    .innerJoin(remoteLinks, eq(mutationQueue.remoteLinkId, remoteLinks.id))
+    .where(and(
+      eq(remoteLinks.credentialId, boardLink.credentialId),
+      eq(remoteLinks.remoteType, PV2_ITEM_REMOTE_TYPE),
+      eq(remoteLinks.containerRemoteId, boardLink.remoteId),
+      eq(mutationQueue.status, 'failed'),
+    ))
+
   // Open conflicts: unresolved sync_conflicts rows on any of this board's links.
   const [conflictRow] = await db
     .select({ value: count() })
@@ -364,5 +427,6 @@ export async function getMirrorStatus(boardId: string): Promise<MirrorStatus> {
     lastPulledAt: boardLink.lastPulledAt,
     pendingPushes: pushRow?.value ?? 0,
     openConflicts: conflictRow?.value ?? 0,
+    failedPushes: failedRow?.value ?? 0,
   }
 }

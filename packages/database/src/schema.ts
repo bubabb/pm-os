@@ -539,8 +539,11 @@ export const remoteLinks = sqliteTable('remote_links', {
 }, (table) => ({
   // A local entity maps to at most one remote entity
   uniqueLocal:      uniqueIndex('remote_links_local_unique_idx').on(table.localType, table.localId),
-  // A remote entity maps to at most one local entity per credential
-  uniqueRemote:     uniqueIndex('remote_links_remote_unique_idx').on(table.credentialId, table.remoteType, table.remoteId),
+  // A remote entity maps to at most one local entity per credential AND remote
+  // container — GitHub's default status-option ids (Todo/In Progress/Done) are
+  // identical across ProjectV2 projects, so one credential mirroring several
+  // projects legitimately holds the same option remoteId once per project.
+  uniqueRemote:     uniqueIndex('remote_links_remote_unique_idx').on(table.credentialId, table.remoteType, table.remoteId, table.containerRemoteId),
   projectSourceIdx: index('remote_links_project_source_idx').on(table.projectId, table.source),
 }))
 

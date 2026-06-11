@@ -4,7 +4,7 @@ import { getDb } from '@creare/database'
 import { users } from '@creare/database'
 import { generateId } from '@creare/shared'
 import { eq } from 'drizzle-orm'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import type { User } from '@creare/database'
@@ -42,7 +42,13 @@ export function readKeysFile(): KeysFile {
 
 export function writeKeysFile(patch: Partial<KeysFile>): void {
   const existing = readKeysFile()
-  writeFileSync(KEYS_FILE, JSON.stringify({ ...existing, ...patch }, null, 2), { mode: 0o600 })
+  // Atomic write: temp file + rename. A crash mid-write can never leave a truncated
+  // keys.json — readKeysFile would treat that as corrupt, return {}, and the next boot
+  // would silently mint a fresh master key, orphaning every encrypted secret (the exact
+  // failure the stable-key scheme exists to prevent).
+  const tmpFile = `${KEYS_FILE}.tmp`
+  writeFileSync(tmpFile, JSON.stringify({ ...existing, ...patch }, null, 2), { mode: 0o600 })
+  renameSync(tmpFile, KEYS_FILE)
 }
 
 export function getJwtSecret(): Uint8Array {
@@ -75,6 +81,14 @@ export function getJwtSecret(): Uint8Array {
   }
 
   // 3. No recoverable secret — generate ONCE and persist raw (stable forever after).
+  //    If a secret existed before (raw or legacy blob) but couldn't be recovered, this
+  //    is a rotation: every outstanding session token becomes invalid. Say so loudly
+  //    rather than silently signing users out.
+  if (keys.jwtSecretRaw || keys.jwtSecretBlob) {
+    console.error(
+      '[creare] WARNING: generating a new JWT secret because the existing one could not be recovered — all existing sessions are invalidated and users must sign in again',
+    )
+  }
   const bytes = new Uint8Array(32)
   globalThis.crypto.getRandomValues(bytes)
   const raw = Buffer.from(bytes).toString('hex')

@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { seedWorkspace, seedTask, seedCredential, destroyTestDb } from '@creare/database/testing'
-import { getDb, remoteLinks, tasks } from '@creare/database'
+import { getDb, remoteLinks, tasks, events } from '@creare/database'
 import { eq, and } from 'drizzle-orm'
 import {
   createBoard, listColumns, getColumn, updateColumn,
   createSprint, startSprint, getActiveSprint,
-  addBoardItem, listBoardItems,
-  applyMirrorSnapshot, getBoard,
+  addBoardItem, listBoardItems, removeBoardItem, moveBoardItem,
+  applyMirrorSnapshot, getBoard, deleteBoard, deleteColumn,
 } from './index'
 import type { MirrorApply } from './index'
 
@@ -190,5 +190,164 @@ describe('applyMirrorSnapshot', () => {
     const cols = listColumns(boardId)
     expect(cols.map((c) => c.name)).toEqual(['Todo', 'Done', 'Review'])
     expect(allLinks().filter((l) => l.localType === 'board_column')).toHaveLength(3)
+  })
+
+  // ── Event-log coverage for mirrored task writes (append-only rule) ─────────
+
+  function eventsOfType(type: string) {
+    return getDb().select().from(events)
+      .where(and(eq(events.projectId, projectId), eq(events.type, type)))
+      .all()
+  }
+
+  it('emits task.created for every mirrored task it creates', () => {
+    applyMirrorSnapshot(makeApply())
+    const created = eventsOfType('task.created')
+    expect(created).toHaveLength(2)
+    expect(created.every((e) => e.actorType === 'system' && e.domain === 'boards')).toBe(true)
+    const payloads = created.map((e) => JSON.parse(e.payload ?? '{}') as { title: string; remoteId: string })
+    expect(payloads.map((p) => p.title).sort()).toEqual(['Fix login', 'Ship docs'])
+  })
+
+  it('emits task.updated when a mirrored task title/status changes', () => {
+    const { boardId } = applyMirrorSnapshot(makeApply())
+    const changedSnap = makeApply({ boardId })
+    changedSnap.upsertItems[0]!.title = 'Fix login (renamed)'
+    changedSnap.upsertItems[0]!.state = 'closed'
+    changedSnap.upsertItems[0]!.contentHash = 'c1b'
+    applyMirrorSnapshot(changedSnap)
+
+    const updated = eventsOfType('task.updated')
+    expect(updated).toHaveLength(1)
+    const payload = JSON.parse(updated[0]!.payload ?? '{}') as { changed: string[]; remoteId: string }
+    expect(payload.changed.sort()).toEqual(['status', 'title'])
+    expect(payload.remoteId).toBe('itm-1')
+    // unchanged items emit nothing
+    applyMirrorSnapshot(makeApply({ boardId }))
+  })
+
+  it('emits a per-item board.item.removed when a mirrored item is deleted', () => {
+    const { boardId } = applyMirrorSnapshot(makeApply())
+    applyMirrorSnapshot(makeApply({
+      boardId,
+      upsertItems: [makeApply().upsertItems[1]!],
+      deleteRemoteIds: ['itm-1'],
+    }))
+
+    const removed = eventsOfType('board.item.removed')
+    expect(removed).toHaveLength(1)
+    const payload = JSON.parse(removed[0]!.payload ?? '{}') as { remoteId: string; boardItemId: string }
+    expect(payload.remoteId).toBe('itm-1')
+    expect(removed[0]!.resourceId).toBe(payload.boardItemId)
+  })
+
+  // ── Local deletes tombstone their remote links ─────────────────────────────
+
+  it('removeBoardItem tombstones the item remote link', () => {
+    const { boardId } = applyMirrorSnapshot(makeApply())
+    const fix = listBoardItems(boardId).find((i) => i.taskTitle === 'Fix login')!
+    expect(itemLink('itm-1')?.deletedAt).toBeNull()
+
+    removeBoardItem(fix.id)
+    expect(itemLink('itm-1')?.deletedAt).not.toBeNull()
+  })
+
+  it('deleteColumn tombstones the column remote link', () => {
+    const { boardId } = applyMirrorSnapshot(makeApply())
+    const done = listColumns(boardId).find((c) => c.name === 'Done')! // empty — FK allows deletion
+    deleteColumn(done.id)
+    const colLink = allLinks().find((l) => l.localType === 'board_column' && l.remoteId === 'opt-done')
+    expect(colLink?.deletedAt).not.toBeNull()
+  })
+
+  it('deleteBoard tombstones the board link and all of its column/item links', () => {
+    const { boardId } = applyMirrorSnapshot(makeApply())
+    deleteBoard(boardId)
+    const links = allLinks()
+    expect(links).toHaveLength(5) // links are kept (identity for late echoes), never hard-deleted
+    expect(links.every((l) => l.deletedAt !== null)).toBe(true)
+  })
+
+  // ── containerRemoteId scoping (one credential, several remote projects) ────
+
+  it('does not cross-wire columns when one credential mirrors two projects with identical option ids', () => {
+    const { boardId: boardA } = applyMirrorSnapshot(makeApply())
+
+    // Second ProjectV2 under the SAME credential — GitHub default status-option
+    // ids ('opt-todo'/'opt-done' here) are identical across projects.
+    const { boardId: boardB } = applyMirrorSnapshot(makeApply({
+      board: { remoteId: 'PVT_2', title: 'Roadmap B', url: null, version: 'v1', statusFieldRemoteId: 'FIELD_STATUS_B' },
+      upsertItems: [
+        { remoteId: 'itm-b1', title: 'B work', url: null, columnRemoteId: 'opt-todo', state: 'open', version: 'iv1', contentHash: 'cb1' },
+      ],
+    }))
+
+    expect(boardB).not.toBe(boardA)
+    const colsA = listColumns(boardA)
+    const colsB = listColumns(boardB)
+    // Board B got its OWN columns — not wired into board A's
+    expect(colsB.map((c) => c.name)).toEqual(['Todo', 'Done'])
+    expect(colsA.map((c) => c.id)).not.toContain(colsB[0]!.id)
+
+    // B's item landed on B's board, in B's Todo column
+    const itemsB = listBoardItems(boardB)
+    expect(itemsB).toHaveLength(1)
+    expect(itemsB[0]!.columnId).toBe(colsB.find((c) => c.name === 'Todo')!.id)
+    // and board A is untouched
+    expect(listBoardItems(boardA)).toHaveLength(2)
+
+    // Each board's column links are scoped by its own ProjectV2 id
+    const todoLinks = allLinks().filter((l) => l.localType === 'board_column' && l.remoteId === 'opt-todo')
+    expect(todoLinks.map((l) => l.containerRemoteId).sort()).toEqual(['PVT_1', 'PVT_2'])
+
+    // A re-sync of board A still resolves A's own columns (no cross-wire on update either)
+    applyMirrorSnapshot(makeApply({ boardId: boardA }))
+    expect(listColumns(boardA).map((c) => c.id).sort()).toEqual(colsA.map((c) => c.id).sort())
+  })
+
+  // ── Column-miss safety ─────────────────────────────────────────────────────
+
+  it('recreates a locally deleted mirrored column on the next pull instead of using a dead id', () => {
+    const { boardId } = applyMirrorSnapshot(makeApply())
+    const cols0 = listColumns(boardId)
+    const oldTodo = cols0.find((c) => c.name === 'Todo')!
+    const done = cols0.find((c) => c.name === 'Done')!
+    // Empty the column locally (FK blocks deleting a column that holds items), then delete it.
+    for (const item of listBoardItems(boardId)) moveBoardItem(item.id, done.id)
+    deleteColumn(oldTodo.id)
+
+    applyMirrorSnapshot(makeApply({ boardId }))
+
+    const cols = listColumns(boardId)
+    expect(cols.map((c) => c.name)).toEqual(['Todo', 'Done'])
+    const newTodo = cols.find((c) => c.name === 'Todo')!
+    expect(newTodo.id).not.toBe(oldTodo.id)
+
+    // No item points at a nonexistent column, and Todo items live in the recreated column
+    const items = listBoardItems(boardId)
+    expect(items).toHaveLength(2)
+    for (const item of items) expect(getColumn(item.columnId)).not.toBeNull()
+    expect(items.find((i) => i.taskTitle === 'Fix login')!.columnId).toBe(newTodo.id)
+
+    // the column link was repointed and resurrected, not duplicated
+    const todoLinks = allLinks().filter((l) => l.localType === 'board_column' && l.remoteId === 'opt-todo')
+    expect(todoLinks).toHaveLength(1)
+    expect(todoLinks[0]!.localId).toBe(newTodo.id)
+    expect(todoLinks[0]!.deletedAt).toBeNull()
+  })
+
+  it('re-pulls a locally removed mirrored item (tombstoned link is resurrected)', () => {
+    const { boardId } = applyMirrorSnapshot(makeApply())
+    const fix = listBoardItems(boardId).find((i) => i.taskTitle === 'Fix login')!
+    removeBoardItem(fix.id)
+    expect(listBoardItems(boardId)).toHaveLength(1)
+
+    applyMirrorSnapshot(makeApply({ boardId }))
+
+    const items = listBoardItems(boardId)
+    expect(items).toHaveLength(2)
+    const link = itemLink('itm-1')
+    expect(link?.deletedAt).toBeNull()
+    expect(link?.localId).not.toBe(fix.id)
   })
 })

@@ -42,7 +42,7 @@ import { NotionConnector } from '../connectors/notion'
 import { OneDriveConnector } from '../connectors/onedrive'
 import { GitHubNotFoundError, GitHubScopeError } from '../connectors/github-projects'
 import type { BaseConnector } from '../connectors/base'
-import type { IntegrationCredential, MutationQueueRow } from '@creare/database'
+import type { IntegrationCredential, MutationQueueRow, RemoteLink } from '@creare/database'
 import type {
   ConnectorConfig,
   IntegrationSource,
@@ -161,93 +161,163 @@ export async function enqueueMutation(
  * mirrored (has a live remote_links row), resolve the remote ids and enqueue a
  * move_item op; if not, return null — plain local boards push nothing.
  *
- * Throws when the board IS mirrored but the target column is not, or when the
- * link rows violate the containerRemoteId conventions documented above — those
- * are mirror-integrity errors that must surface at enqueue time, not be parked
- * in the queue to fail on every drain.
+ * NEVER throws. The route fire-and-forgets this call, so a thrown error would
+ * leave NO op row and the local move would be silently reverted by the next
+ * remote-wins pull. When the item IS mirrored but a required remote ref cannot
+ * be resolved (unmirrored target column, missing board link, or a link
+ * violating the containerRemoteId conventions above), a mutation_queue row is
+ * still inserted with status 'failed' and a clear lastError: the row records
+ * local divergence — the pull reconciler keeps the item a CONFLICT instead of
+ * reverting it — and surfaces via getMirrorStatus.failedPushes.
  */
 export async function enqueueBoardItemMove(
   boardItemId: string,
   toColumnId: string,
 ): Promise<string | null> {
+  try {
+    const db = getDb()
+
+    const itemLink = db
+      .select()
+      .from(remoteLinks)
+      .where(and(
+        eq(remoteLinks.localType, 'board_item'),
+        eq(remoteLinks.localId, boardItemId),
+        isNull(remoteLinks.deletedAt),
+      ))
+      .get()
+    if (itemLink === undefined) return null // board not mirrored — nothing to push
+
+    // From here on the item IS mirrored: every unresolved ref is parked as a
+    // failed op instead of thrown — divergence must be tracked, never lost.
+    const columnLink = db
+      .select()
+      .from(remoteLinks)
+      .where(and(
+        eq(remoteLinks.localType, 'board_column'),
+        eq(remoteLinks.localId, toColumnId),
+        isNull(remoteLinks.deletedAt),
+      ))
+      .get()
+    if (columnLink === undefined) {
+      return await enqueueFailedBoardItemMove(itemLink, boardItemId, toColumnId,
+        `target column ${toColumnId} has no remote link`)
+    }
+    if (itemLink.containerRemoteId === null) {
+      return await enqueueFailedBoardItemMove(itemLink, boardItemId, toColumnId,
+        `item link ${itemLink.id} is missing containerRemoteId (expected the ProjectV2 node id)`)
+    }
+
+    // The Status FIELD id lives on the BOARD link (containerRemoteId — see the
+    // convention block above). The item link's containerRemoteId is the ProjectV2
+    // node id, which identifies the board link's remoteId.
+    const boardLink = db
+      .select()
+      .from(remoteLinks)
+      .where(and(
+        eq(remoteLinks.credentialId, itemLink.credentialId),
+        eq(remoteLinks.localType, 'board'),
+        eq(remoteLinks.remoteId, itemLink.containerRemoteId),
+        isNull(remoteLinks.deletedAt),
+      ))
+      .get()
+    if (boardLink === undefined) {
+      return await enqueueFailedBoardItemMove(itemLink, boardItemId, toColumnId,
+        `no board link found for ProjectV2 ${itemLink.containerRemoteId} (item link ${itemLink.id}) — cannot resolve the status FIELD id`)
+    }
+    if (boardLink.containerRemoteId === null) {
+      return await enqueueFailedBoardItemMove(itemLink, boardItemId, toColumnId,
+        `board link ${boardLink.id} is missing containerRemoteId (expected the status FIELD remote id — see outbox.ts convention)`)
+    }
+
+    const op: MutationOp = {
+      kind: 'move_item',
+      ref: {
+        remoteType: itemLink.remoteType,
+        remoteId: itemLink.remoteId,
+        containerId: itemLink.containerRemoteId,
+      },
+      toStatusRemoteId: columnLink.remoteId,
+      statusFieldRemoteId: boardLink.containerRemoteId,
+    }
+
+    return await enqueueMutation(
+      {
+        credentialId: itemLink.credentialId,
+        projectId: itemLink.projectId,
+        source: itemLink.source as IntegrationSource,
+        baseVersion: itemLink.remoteVersion,
+        op,
+      },
+      itemLink.id,
+    )
+  } catch {
+    // Last-resort guard (e.g. the DB write itself failed) — never throw out of
+    // the enqueue path. null = "nothing was recorded", matching reality.
+    return null
+  }
+}
+
+// Park a board-item move that cannot be delivered as a 'failed' mutation_queue
+// row. The row is terminal (the drain only picks up 'pending') but it (a) marks
+// the link as locally diverged so planReconcile reports a CONFLICT instead of
+// letting a remote-wins update revert the move, and (b) is counted by
+// getMirrorStatus.failedPushes so the chip surfaces it.
+async function enqueueFailedBoardItemMove(
+  itemLink: RemoteLink,
+  boardItemId: string,
+  toColumnId: string,
+  reason: string,
+): Promise<string> {
   const db = getDb()
+  const opId = generateId()
+  const lastError = `enqueueBoardItemMove: board_item ${boardItemId} is mirrored but ${reason}`
 
-  const itemLink = db
-    .select()
-    .from(remoteLinks)
-    .where(and(
-      eq(remoteLinks.localType, 'board_item'),
-      eq(remoteLinks.localId, boardItemId),
-      isNull(remoteLinks.deletedAt),
-    ))
-    .get()
-  if (itemLink === undefined) return null // board not mirrored — nothing to push
-
-  const columnLink = db
-    .select()
-    .from(remoteLinks)
-    .where(and(
-      eq(remoteLinks.localType, 'board_column'),
-      eq(remoteLinks.localId, toColumnId),
-      isNull(remoteLinks.deletedAt),
-    ))
-    .get()
-  if (columnLink === undefined) {
-    throw new Error(
-      `enqueueBoardItemMove: board_item ${boardItemId} is mirrored but target column ${toColumnId} has no remote link`,
-    )
-  }
-  if (itemLink.containerRemoteId === null) {
-    throw new Error(
-      `enqueueBoardItemMove: item link ${itemLink.id} is missing containerRemoteId (expected the ProjectV2 node id)`,
-    )
-  }
-
-  // The Status FIELD id lives on the BOARD link (containerRemoteId — see the
-  // convention block above). The item link's containerRemoteId is the ProjectV2
-  // node id, which identifies the board link's remoteId.
-  const boardLink = db
-    .select()
-    .from(remoteLinks)
-    .where(and(
-      eq(remoteLinks.credentialId, itemLink.credentialId),
-      eq(remoteLinks.localType, 'board'),
-      eq(remoteLinks.remoteId, itemLink.containerRemoteId),
-      isNull(remoteLinks.deletedAt),
-    ))
-    .get()
-  if (boardLink === undefined) {
-    throw new Error(
-      `enqueueBoardItemMove: no board link found for ProjectV2 ${itemLink.containerRemoteId} (item link ${itemLink.id}) — cannot resolve the status FIELD id`,
-    )
-  }
-  if (boardLink.containerRemoteId === null) {
-    throw new Error(
-      `enqueueBoardItemMove: board link ${boardLink.id} is missing containerRemoteId (expected the status FIELD remote id — see outbox.ts convention)`,
-    )
-  }
-
-  const op: MutationOp = {
+  await db.insert(mutationQueue).values({
+    id: generateId(),
+    opId,
+    projectId: itemLink.projectId,
+    credentialId: itemLink.credentialId,
+    source: itemLink.source,
+    remoteLinkId: itemLink.id,
     kind: 'move_item',
-    ref: {
-      remoteType: itemLink.remoteType,
-      remoteId: itemLink.remoteId,
-      containerId: itemLink.containerRemoteId,
-    },
-    toStatusRemoteId: columnLink.remoteId,
-    statusFieldRemoteId: boardLink.containerRemoteId,
-  }
+    // NOT a deliverable MutationOp — records the local intent for diagnostics
+    // and the conflict UI. The row never reaches a connector ('failed' rows
+    // are excluded from the drain query).
+    payload: JSON.stringify({ kind: 'move_item', boardItemId, toColumnId }),
+    baseVersion: itemLink.remoteVersion,
+    status: 'failed',
+    attempts: 0,
+    lastError,
+  })
 
-  return enqueueMutation(
-    {
-      credentialId: itemLink.credentialId,
-      projectId: itemLink.projectId,
-      source: itemLink.source as IntegrationSource,
-      baseVersion: itemLink.remoteVersion,
-      op,
-    },
-    itemLink.id,
-  )
+  emitMutationEvent('integration.mutation.failed', itemLink.projectId, opId, {
+    credentialId: itemLink.credentialId,
+    source: itemLink.source,
+    kind: 'move_item',
+    remoteLinkId: itemLink.id,
+    attempts: 0,
+    error: lastError,
+  })
+
+  return opId
+}
+
+/**
+ * Crash recovery: reset every 'in_flight' op back to 'pending'. in_flight is
+ * only ever a transient claim held inside a live processOp call — a row still
+ * carrying it at boot means a previous session died mid-push, and nothing
+ * would ever pick the op up again (the drain only selects 'pending'). The push
+ * worker calls this once at startup, BEFORE the first drain. Returns the
+ * number of recovered ops.
+ */
+export async function recoverStaleInFlight(): Promise<number> {
+  const result = getDb()
+    .update(mutationQueue)
+    .set({ status: 'pending', updatedAt: new Date().toISOString() })
+    .where(eq(mutationQueue.status, 'in_flight'))
+    .run()
+  return result.changes
 }
 
 // ── Drain ────────────────────────────────────────────────────────────────────

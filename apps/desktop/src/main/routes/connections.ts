@@ -40,7 +40,11 @@ export async function connectionsRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAuth },
     async (request: FastifyRequest<{ Body: CreateConnectionBody }>) => {
       const { source, label, token, metadata, expiresAt } = request.body
-      const connection = await storeConnection({ source, label, token, metadata, expiresAt })
+      const connection = await storeConnection({
+        source, label, token,
+        ...(metadata !== undefined ? { metadata } : {}),
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
+      })
       // Return without sensitive fields
       const { encryptedToken: _, iv: __, ...safe } = connection
       return safe

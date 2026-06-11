@@ -1,8 +1,8 @@
 # Boards — Interface Contract
 ---
 status: active
-version: 1.0
-last-updated: 2026-06-02
+version: 1.1
+last-updated: 2026-06-11
 ---
 
 ## Schema Types Consumed
@@ -25,8 +25,11 @@ All events use `domain: 'boards'`.
 | Event Type | Trigger | Payload |
 |---|---|---|
 | `board.item.moved` | Item moved to new column | `{ boardItemId, fromColumnId, toColumnId, taskId }` |
+| `board.item.removed` | Mirrored item deleted remotely → removed locally (per item, actorType `system`) | `{ boardItemId, taskId, columnId, source, remoteId }` |
 | `board.mirror.created` | Board created from a remote snapshot import | `{ source, remoteId, name }` |
 | `board.mirror.synced` | Remote snapshot re-applied to an existing board | `{ source, remoteId, upserted, deleted }` |
+| `task.created` | `applyMirrorSnapshot` creates the backing task for a mirrored item (actorType `system`) | `{ title, status, source, remoteId }` |
+| `task.updated` | `applyMirrorSnapshot` changes a mirrored task's title/status (actorType `system`) | `{ changed, from: { title, status }, to: { title, status }, source, remoteId }` |
 | `sprint.started` | Sprint moved to active | `{ sprintId, boardId, startDate }` |
 | `sprint.completed` | Sprint completed | `{ sprintId, velocity, completedAt }` |
 | `milestone.status_changed` | Milestone status updated | `{ milestoneId, from, to }` |
@@ -67,12 +70,24 @@ interface MirrorApply {
   credentialId: string
   source: string
   boardId: string | null          // null = CREATE the board (initial import)
-  board: { remoteId: string; title: string; url: string | null; version: string }
+  board: { remoteId: string; title: string; url: string | null; version: string; statusFieldRemoteId: string | null }
   columns: MirrorApplyColumn[]    // full desired column set (ordered by position)
   upsertItems: MirrorApplyItem[]  // create-or-update these items
   deleteRemoteIds: string[]       // remote item ids removed remotely → board_item removed, task kept, link tombstoned (deletedAt)
 }
 ```
+
+### Remote-link guarantees (mirror correctness)
+- Column/item link lookups are **scoped by `containerRemoteId`** (the ProjectV2 node
+  id = `board.remoteId`) — one credential mirroring several projects never resolves
+  another board's links, even when remote ids collide (GitHub's default status-option
+  ids are identical across projects).
+- **Local deletes tombstone their links**: `removeBoardItem`, `deleteColumn`, and
+  `deleteBoard` (board + its column/item links) set `remote_links.deletedAt` so the
+  next pull recreates the entity instead of writing into a deleted local id.
+- **Column-miss safety**: if a column link points at a column that no longer exists
+  locally, `applyMirrorSnapshot` recreates the column and repoints the link — items
+  are never placed into a nonexistent `columnId`.
 
 ## Dependencies
 - `@creare/database` — read/write boards, board_columns, board_items, sprints, milestones, milestone_tasks, events; `applyMirrorSnapshot` additionally writes **tasks** (backing task per mirrored item) and **remote_links** (identity map, localType `board` / `board_column` / `board_item`)

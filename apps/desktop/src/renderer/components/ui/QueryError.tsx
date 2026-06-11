@@ -4,7 +4,9 @@ import { AlertCircle, RefreshCw } from 'lucide-react'
 export function QueryError({
   message, onRetry,
 }: {
-  message?: string
+  // Allow `undefined` explicitly: callers pass `err instanceof Error ? err.message : undefined`,
+  // which exactOptionalPropertyTypes rejects against a bare `message?: string`.
+  message?: string | undefined
   onRetry: () => void
 }) {
   return (

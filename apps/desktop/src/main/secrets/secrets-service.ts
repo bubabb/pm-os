@@ -1,15 +1,35 @@
 import { safeStorage } from 'electron'
-import { getDb, secrets } from '@creare/database'
+import { getDb, secrets, connections, globalSettings } from '@creare/database'
 import { generateId } from '@creare/shared'
 import { eq, and } from 'drizzle-orm'
 import { readKeysFile, writeKeysFile } from '../auth/auth-service'
 import type { Secret } from '@creare/database'
 
 // AES-256-GCM via Web Crypto (Node.js ≥15, globalThis.crypto).
-// Master key is persisted encrypted in ~/.creare/keys.json via safeStorage.
-// On first boot a new key is generated and written to disk.
+// Master key is a stable raw 32-byte key stored base64 in ~/.creare/keys.json
+// (mode 0600) — see the KeysFile comments in auth-service.ts for the rationale
+// (stability over at-rest secrecy; the prior safeStorage-wrapped scheme silently
+// destroyed data on any OS-keyring hiccup). On first boot a new key is generated
+// and written to disk; it never rotates after that.
 
 let _masterKey: CryptoKey | null = null
+
+// True when any row encrypted under the master key already exists. Used to detect —
+// and loudly report — the data-loss case where a new key is generated while old
+// ciphertext is still in the DB (those rows can never be decrypted again).
+function encryptedDataExists(): boolean {
+  try {
+    const db = getDb()
+    return (
+      db.select({ id: secrets.id }).from(secrets).limit(1).all().length > 0 ||
+      db.select({ id: connections.id }).from(connections).limit(1).all().length > 0 ||
+      db.select({ id: globalSettings.id }).from(globalSettings).limit(1).all().length > 0
+    )
+  } catch {
+    // DB not initialized / migrated yet — treat as "no encrypted data".
+    return false
+  }
+}
 
 // Load the stable master-key bytes, or create them once. The key NEVER rotates once
 // written: a transient OS-keyring failure can no longer regenerate it and orphan every
@@ -41,6 +61,14 @@ function loadOrCreateMasterKeyBytes(): Uint8Array {
   }
 
   // 3. No recoverable key — generate ONCE and persist raw (stable forever after).
+  //    If ciphertext already exists in the DB, generating a new key orphans it — that
+  //    must be loud, never silent (we still generate so the app boots; the alternative
+  //    is bricking startup over data that is already unrecoverable).
+  if (encryptedDataExists()) {
+    console.error(
+      '[creare] WARNING: generating a new master key while encrypted data exists — previously stored tokens/keys can no longer be decrypted and must be re-entered',
+    )
+  }
   const bytes = new Uint8Array(32)
   globalThis.crypto.getRandomValues(bytes)
   writeKeysFile({ masterKeyRaw: Buffer.from(bytes).toString('base64') })
@@ -49,8 +77,14 @@ function loadOrCreateMasterKeyBytes(): Uint8Array {
 
 async function getMasterKey(): Promise<CryptoKey> {
   if (_masterKey) return _masterKey
+  // Copy into a fresh ArrayBuffer-backed Uint8Array so the key data types as a plain
+  // BufferSource (the source bytes are Uint8Array<ArrayBufferLike>, which TS won't
+  // accept directly for importKey under newer lib typings).
+  const raw = loadOrCreateMasterKeyBytes()
+  const keyData = new Uint8Array(raw.length)
+  keyData.set(raw)
   _masterKey = await globalThis.crypto.subtle.importKey(
-    'raw', loadOrCreateMasterKeyBytes(), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'],
+    'raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'],
   )
   return _masterKey
 }
