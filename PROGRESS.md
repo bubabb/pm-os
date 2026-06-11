@@ -10,11 +10,32 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
-- **RESUME HERE (2026-06-11 EOD):** membership/claude-cli feature is COMPLETE + TESTED, all green, committed on
-  branch `feat/claude-cli-membership-provider` (9 commits, **uncommitted nothing — tree clean**). Repo has **no
-  GitHub remote**. Pending decision: **merge the branch → `main` locally** (`git checkout main && git merge
-  feat/claude-cli-membership-provider`). Then optionally verify `CREDENTIAL_SERVICE` on Mac/Windows via
-  `pnpm check:auth`. Session log: `docs/sessions/session-2026-06-11-claude-cli-provider.md` (parts 1–7).
+- **RESUME HERE (2026-06-11, latest):** everything MERGED TO `main` (fast-forward; tree clean; `main` @ `da36a4c`).
+  No GitHub remote. Membership/claude-cli provider + the PM-UX overhaul are all on `main`, full gate GREEN
+  (typecheck **23/23** · unit **81/81** · lint **12/12** · E2E **2/2**). `feat/claude-cli-membership-provider`
+  branch can be deleted (fully merged). Optional next: verify `CREDENTIAL_SERVICE` on Mac/Windows (`pnpm check:auth`).
+- **PM-UX overhaul + connections resource picker (2026-06-11, Fable 5 via 8 parallel subagents): DONE, on `main`.**
+  Session log: `docs/sessions/session-2026-06-11-pm-ux-overhaul.md`. Grounded Fable 5 deepreview (20 findings) →
+  executed P0→P2 in two disjoint-file waves. Commits `7a2449d`/`5d1c0b4`/`8f592fb`/`da36a4c`.
+  • **Connections fix (the ask):** every connector now has `listResources()` + `GET /connections/:id/resources`;
+    Settings→Sources shows a **searchable resource picker** (GitHub repos via `affiliation=owner,collaborator,
+    organization_member` = public/private/**invited**; Jira projects, Confluence spaces, Notion DBs, OneDrive
+    folders), with manual-entry fallback on 502/empty. (Decision: keep PAT, not OAuth — local-first, no server to
+    hold a client secret. Picker generalizes to all/future connectors.)
+  • **Project lifecycle real:** `?archived=1` listing + `POST /projects/:id/restore` (archive→**restore now works**),
+    hardened/validated create+PATCH, and **template scaffolding actually runs** (ai-tool→board+workspace,
+    agent-pipeline→workspace+3-task DAG, blank→none; best-effort).
+  • **Top-1% renderer:** in-house (no new deps) shared UI — `Dialog` (a11y focus-trap), `Toast` (`toast.*` +
+    `ToastViewport` in App.tsx), `CommandPalette` (Cmd/Ctrl+K), `EmptyState`/`NoProject`, `Spinner`, `lib/format`.
+    `ProjectList` rebuilt (guarded create, avatars/favorites/filter, loading/error, Archived+Restore). `AppShell`
+    **in-place project switcher** popover (no nav away) + palette + breadcrumb + collapsed tooltips + Settings in nav.
+    `Settings` editable rename + the resource picker. `BoardsPage` native HTML5 **Kanban drag-and-drop** (optimistic,
+    dropdown kept as a11y fallback). Project color/emoji/favorites are client-side (localStorage) — no schema change.
+  • **E2E gotcha:** kill stray `out/main/index.js`/preview procs before E2E — a leftover holding port 4321 makes the
+    app fail to boot (`EADDRINUSE :4321`), which looks like a code break but isn't.
+- **(superseded) RESUME HERE (2026-06-11 EOD):** membership/claude-cli feature COMPLETE + TESTED on
+  `feat/claude-cli-membership-provider` (9 commits) — now merged to `main` (see above).
+  Session log: `docs/sessions/session-2026-06-11-claude-cli-provider.md` (parts 1–7).
 - **Membership testing spin (2026-06-11, Opus 4.8): DONE.** Full gate GREEN — lint clean · typecheck clean ·
     unit **81/81** · **E2E 2/2**. Commits `3f1c4f0` (fix) + `e7037a2` (test+chore) on the same feature branch.
   • **REAL BUG found + fixed:** the claude-cli/membership model wraps its "JSON only" output in a ```json fence,
