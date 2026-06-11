@@ -28,7 +28,17 @@ export async function getGlobalSetting(key: string): Promise<string | null> {
     .where(eq(globalSettings.key, key))
     .limit(1)
   if (!setting) return null
-  return decryptSecretAsync(setting.encryptedValue, setting.iv)
+  try {
+    return await decryptSecretAsync(setting.encryptedValue, setting.iv)
+  } catch (err) {
+    // A value encrypted under a previous master key (e.g. after an OS-keyring
+    // hiccup rotated the key) can no longer be decrypted. Treat it as "not set"
+    // and degrade to defaults instead of throwing — a single orphaned setting
+    // must never 500 the whole dashboard. Re-saving the setting re-encrypts it
+    // under the current key.
+    console.warn(`[creare] global setting "${key}" could not be decrypted (stale key?) — treating as unset:`, err instanceof Error ? err.message : err)
+    return null
+  }
 }
 
 export async function listGlobalSettingKeys(): Promise<string[]> {
