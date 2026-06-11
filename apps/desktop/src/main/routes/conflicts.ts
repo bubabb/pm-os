@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
 import { assertProjectAccess } from '../utils/project-access'
 import { getIntegrationToken, withMergedConnectionMetadata } from '../secrets'
-import { getDb, integrationCredentials } from '@creare/database'
+import { getDb, integrationCredentials, syncConflicts } from '@creare/database'
 import { eq } from 'drizzle-orm'
 import { listOpenConflicts, resolveConflict } from '@creare/integrations'
 import type { ConflictResolution } from '@creare/integrations'
@@ -76,6 +76,17 @@ export async function conflictsRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({
           error: `resolution must be one of: ${RESOLUTIONS.join(', ')}`,
         })
+      }
+
+      // IDOR guard: the conflict must belong to the project in the URL — a
+      // conflictId from another project is indistinguishable from a missing one.
+      const [conflict] = await getDb()
+        .select({ id: syncConflicts.id, projectId: syncConflicts.projectId })
+        .from(syncConflicts)
+        .where(eq(syncConflicts.id, request.params.conflictId))
+        .limit(1)
+      if (conflict === undefined || conflict.projectId !== request.params.id) {
+        return reply.code(404).send({ error: 'Not found' })
       }
 
       try {

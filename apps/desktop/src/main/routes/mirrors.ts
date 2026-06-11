@@ -153,10 +153,12 @@ export async function mirrorsRoutes(app: FastifyInstance): Promise<void> {
         .where(and(
           eq(remoteLinks.localType, 'board'),
           eq(remoteLinks.localId, request.params.boardId),
+          isNull(remoteLinks.deletedAt),
         ))
         .limit(1)
-      // Link must exist AND belong to the project in the URL — a plain local
-      // board (or another project's board) is simply not mirrored here.
+      // Link must exist, be LIVE (deleteBoard tombstones it — pulling through
+      // a tombstone would write into a deleted boardId), AND belong to the
+      // project in the URL — otherwise the board is simply not mirrored here.
       if (boardLink === undefined || boardLink.projectId !== request.params.id) {
         return reply.code(404).send({ error: 'Board is not mirrored' })
       }

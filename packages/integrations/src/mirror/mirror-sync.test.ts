@@ -235,6 +235,58 @@ describe('mirror-sync — getMirrorStatus', () => {
     expect(status.openConflicts).toBe(1)
   })
 
+  it('counts pending create_item ops (remoteLinkId null) for this board in pendingPushes', async () => {
+    const { boardId, itemLink } = await importBoard(makeItem({ remoteId: 'IT_1', contentHash: 'h1' }))
+
+    seedQueueRow({ remoteLinkId: itemLink.id, status: 'pending' }) // attributed via its link
+    // A freshly-created card: no remote link yet — the op JSON carries the
+    // board's container ref instead (outbox.enqueueItemCreate shape).
+    const insertCreateOp = (containerRemoteId: string, status: string): void => {
+      getDb().insert(mutationQueue).values({
+        id: generateId(),
+        opId: generateId(),
+        projectId,
+        credentialId,
+        source: 'github',
+        remoteLinkId: null,
+        kind: 'create_item',
+        payload: JSON.stringify({
+          kind: 'create_item',
+          container: { remoteType: 'pv2_project', remoteId: containerRemoteId },
+          title: 'New card',
+          localBoardItemId: generateId(),
+        }),
+        baseVersion: null,
+        status,
+        attempts: 0,
+      }).run()
+    }
+    insertCreateOp('PVT_board1', 'pending')      // this board → counted
+    insertCreateOp('PVT_board1', 'in_flight')    // this board → counted
+    insertCreateOp('PVT_board1', 'applied')      // resolved → not counted
+    insertCreateOp('PVT_other', 'pending')       // another board → not counted
+
+    const status = await getMirrorStatus(boardId)
+    expect(status.pendingPushes).toBe(3) // 1 linked move + 2 active creates
+  })
+
+  it('treats a tombstoned board link as not mirrored (status unlinked, pull refused)', async () => {
+    const { boardId } = await importBoard(makeItem({ remoteId: 'IT_1', contentHash: 'h1' }))
+
+    // deleteBoard tombstones the board link — a pull must not resurrect it.
+    getDb().update(remoteLinks)
+      .set({ deletedAt: new Date().toISOString() })
+      .where(and(eq(remoteLinks.localType, 'board'), eq(remoteLinks.localId, boardId)))
+      .run()
+
+    const status = await getMirrorStatus(boardId)
+    expect(status.linked).toBe(false)
+    expect(status.pendingPushes).toBe(0)
+
+    await expect(pullMirror(getCredentialRow(), 'tok', boardId))
+      .rejects.toThrow(/no live remote link/)
+  })
+
   it('openConflicts reflects conflicts persisted by pullMirror', async () => {
     const { boardId, itemLink } = await importBoard(makeItem({ remoteId: 'IT_1', contentHash: 'h1' }))
 

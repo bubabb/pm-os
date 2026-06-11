@@ -7,6 +7,7 @@ import { useProjectStore } from '../../store/projects'
 import { useDashboardStore } from '../../store/dashboard'
 import { api } from '../../lib/api'
 import { toast } from '../../components/ui/Toast'
+import { QueryError } from '../../components/ui/QueryError'
 import { ContextStrip, formatRelativeTime } from './ContextStrip'
 import { DoNowPanel } from './DoNowPanel'
 import { DelegatePanel } from './DelegatePanel'
@@ -103,8 +104,10 @@ export default function PMCommandCenter() {
 
   if (error && !data) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-destructive">{error}</p>
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="w-full max-w-md">
+          <QueryError message={error} onRetry={() => void load(currentProject.id)} />
+        </div>
       </div>
     )
   }

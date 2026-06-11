@@ -1,6 +1,14 @@
-import { getDb, integrationCredentials } from '@creare/database'
+import {
+  getDb,
+  integrationCredentials,
+  integrationSyncState,
+  externalEventCache,
+  remoteLinks,
+  mutationQueue,
+  syncConflicts,
+} from '@creare/database'
 import { generateId } from '@creare/shared'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, inArray } from 'drizzle-orm'
 import { decryptSecretAsync } from './secrets-service'
 import { getConnection } from './connections-service'
 import type { IntegrationCredential } from '@creare/database'
@@ -108,9 +116,43 @@ export async function listIntegrationCredentials(
   return rows
 }
 
+// Hard-deletes a source binding AND every row that references it. With
+// foreign_keys=ON and ON DELETE NO ACTION on the referencing tables, a bare
+// DELETE on a mirrored credential throws an FK violation and the row becomes
+// permanently undeletable — so this is one transaction, children first:
+// sync_conflicts (via the credential's links + mutations) → mutation_queue →
+// remote_links → sync state / event cache → the credential itself. Hard
+// delete is correct: the user is removing the source, tombstones included.
 export async function deleteIntegrationCredential(credentialId: string): Promise<void> {
   const db = getDb()
-  await db.delete(integrationCredentials).where(eq(integrationCredentials.id, credentialId))
+  db.transaction((tx) => {
+    // Conflicts reference remote_links (NOT NULL) and optionally the probing
+    // mutation — both must go before their parents.
+    const linkIds = tx
+      .select({ id: remoteLinks.id })
+      .from(remoteLinks)
+      .where(eq(remoteLinks.credentialId, credentialId))
+      .all()
+      .map((row) => row.id)
+    if (linkIds.length > 0) {
+      tx.delete(syncConflicts).where(inArray(syncConflicts.remoteLinkId, linkIds)).run()
+    }
+    const mutationIds = tx
+      .select({ id: mutationQueue.id })
+      .from(mutationQueue)
+      .where(eq(mutationQueue.credentialId, credentialId))
+      .all()
+      .map((row) => row.id)
+    if (mutationIds.length > 0) {
+      tx.delete(syncConflicts).where(inArray(syncConflicts.mutationId, mutationIds)).run()
+    }
+
+    tx.delete(mutationQueue).where(eq(mutationQueue.credentialId, credentialId)).run()
+    tx.delete(remoteLinks).where(eq(remoteLinks.credentialId, credentialId)).run()
+    tx.delete(integrationSyncState).where(eq(integrationSyncState.credentialId, credentialId)).run()
+    tx.delete(externalEventCache).where(eq(externalEventCache.credentialId, credentialId)).run()
+    tx.delete(integrationCredentials).where(eq(integrationCredentials.id, credentialId)).run()
+  })
 }
 
 export function isTokenExpired(credential: Pick<IntegrationCredential, 'expiresAt'>): boolean {

@@ -239,13 +239,19 @@ export async function pullMirror(
   const db = getDb()
   const { id: credentialId, projectId, source } = credential
 
+  // Live link only: deleteBoard tombstones the board link (deletedAt set) —
+  // pulling through a tombstone would write into a deleted boardId.
   const [boardLink] = await db
     .select()
     .from(remoteLinks)
-    .where(and(eq(remoteLinks.localType, 'board'), eq(remoteLinks.localId, boardId)))
+    .where(and(
+      eq(remoteLinks.localType, 'board'),
+      eq(remoteLinks.localId, boardId),
+      isNull(remoteLinks.deletedAt),
+    ))
     .limit(1)
   if (boardLink === undefined) {
-    throw new Error(`pullMirror: board ${boardId} has no remote link — not a mirrored board`)
+    throw new Error(`pullMirror: board ${boardId} has no live remote link — not a mirrored board`)
   }
   const projectV2Id = boardLink.remoteId
 
@@ -404,10 +410,15 @@ export async function pullMirror(
 export async function getMirrorStatus(boardId: string): Promise<MirrorStatus> {
   const db = getDb()
 
+  // Live link only — a tombstoned board link (deleted mirror) reports unlinked.
   const [boardLink] = await db
     .select()
     .from(remoteLinks)
-    .where(and(eq(remoteLinks.localType, 'board'), eq(remoteLinks.localId, boardId)))
+    .where(and(
+      eq(remoteLinks.localType, 'board'),
+      eq(remoteLinks.localId, boardId),
+      isNull(remoteLinks.deletedAt),
+    ))
     .limit(1)
 
   if (boardLink === undefined) {
@@ -430,8 +441,6 @@ export async function getMirrorStatus(boardId: string): Promise<MirrorStatus> {
   const source = (credentialRow?.source ?? boardLink.source) as IntegrationSource
 
   // Pending pushes: active mutations whose link is an item on this board.
-  // (Creates with remoteLinkId = null cannot be attributed to a board yet and
-  // are excluded — Phase 1 only enqueues moves, which always carry a link.)
   const [pushRow] = await db
     .select({ value: count() })
     .from(mutationQueue)
@@ -442,6 +451,31 @@ export async function getMirrorStatus(boardId: string): Promise<MirrorStatus> {
       eq(remoteLinks.containerRemoteId, boardLink.remoteId),
       inArray(mutationQueue.status, [...ACTIVE_PUSH_STATUSES]),
     ))
+
+  // create_item ops carry remoteLinkId = null (the link does not exist until
+  // the push succeeds), so the join above can never see them — without this a
+  // freshly-created card's pending push is invisible on the chip. The op JSON
+  // carries the BOARD's container ref (outbox.enqueueItemCreate), which
+  // attributes the op to this board.
+  const createRows = await db
+    .select({ payload: mutationQueue.payload })
+    .from(mutationQueue)
+    .where(and(
+      eq(mutationQueue.credentialId, boardLink.credentialId),
+      eq(mutationQueue.kind, 'create_item'),
+      inArray(mutationQueue.status, [...ACTIVE_PUSH_STATUSES]),
+    ))
+  const createPending = createRows.filter((row) => {
+    try {
+      const op: unknown = JSON.parse(row.payload)
+      if (typeof op !== 'object' || op === null) return false
+      const container = (op as Record<string, unknown>)['container']
+      if (typeof container !== 'object' || container === null) return false
+      return (container as Record<string, unknown>)['remoteId'] === boardLink.remoteId
+    } catch {
+      return false
+    }
+  }).length
 
   // Failed pushes: terminal 'failed' mutations on this board's item links —
   // local changes that never landed remotely (enqueue-time resolution failures
@@ -473,7 +507,7 @@ export async function getMirrorStatus(boardId: string): Promise<MirrorStatus> {
     source,
     remoteUrl: boardLink.remoteUrl,
     lastPulledAt: boardLink.lastPulledAt,
-    pendingPushes: pushRow?.value ?? 0,
+    pendingPushes: (pushRow?.value ?? 0) + createPending,
     openConflicts: conflictRow?.value ?? 0,
     failedPushes: failedRow?.value ?? 0,
   }

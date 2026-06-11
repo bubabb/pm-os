@@ -7,6 +7,7 @@ import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
 import { Badge, type BadgeVariant } from '../../components/ui/Badge'
 import { QueryError } from '../../components/ui/QueryError'
+import { toast } from '../../components/ui/Toast'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -109,6 +110,7 @@ function Registry({ projectId }: { projectId: string }) {
       setNewName('')
       setNewDescription('')
     },
+    onError: (e: Error) => toast.error(`Failed to create tool: ${e.message}`),
   })
 
   const activeToolId = selectedToolId ?? tools[0]?.id ?? null
@@ -208,17 +210,33 @@ function ToolDetail({ projectId, toolId }: { projectId: string; toolId: string }
 
   const base = `/projects/${projectId}/tools/${toolId}`
 
-  const { data: versions = [], isLoading: versionsLoading } = useQuery<ToolVersion[]>({
+  const {
+    data: versions = [],
+    isLoading: versionsLoading,
+    isError: versionsError,
+    error: versionsErrorObj,
+    refetch: refetchVersions,
+  } = useQuery<ToolVersion[]>({
     queryKey: ['tool-versions', toolId],
     queryFn: () => api.get(`${base}/versions`),
   })
 
-  const { data: active = null } = useQuery<ToolDeployment | null>({
+  const {
+    data: active = null,
+    isError: activeError,
+    error: activeErrorObj,
+    refetch: refetchActive,
+  } = useQuery<ToolDeployment | null>({
     queryKey: ['tool-active-deployment', toolId],
     queryFn: () => api.get<{ deployment: ToolDeployment | null }>(`${base}/deployments/active`).then((r) => r.deployment),
   })
 
-  const { data: deployments = [] } = useQuery<ToolDeployment[]>({
+  const {
+    data: deployments = [],
+    isError: deploymentsError,
+    error: deploymentsErrorObj,
+    refetch: refetchDeployments,
+  } = useQuery<ToolDeployment[]>({
     queryKey: ['tool-deployments', toolId],
     queryFn: () => api.get(`${base}/deployments`),
   })
@@ -233,11 +251,13 @@ function ToolDetail({ projectId, toolId }: { projectId: string; toolId: string }
   const deploy = useMutation({
     mutationFn: (versionId: string) => api.post<ToolDeployment>(`${base}/deploy`, { versionId }),
     onSuccess: invalidate,
+    onError: (e: Error) => toast.error(`Deploy failed: ${e.message}`),
   })
 
   const rollback = useMutation({
     mutationFn: () => api.post<ToolDeployment>(`${base}/rollback`, {}),
     onSuccess: invalidate,
+    onError: (e: Error) => toast.error(`Rollback failed: ${e.message}`),
   })
 
   const activeVersionId = active?.toolVersionId ?? null
@@ -246,22 +266,29 @@ function ToolDetail({ projectId, toolId }: { projectId: string; toolId: string }
   return (
     <div className="space-y-6">
       {/* Active deployment banner + rollback */}
-      <div className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
-        <div className="flex items-center gap-2 text-sm">
-          <Rocket className="h-4 w-4 text-emerald-400" aria-hidden="true" />
-          {active
-            ? <span className="text-foreground">Active version: <span className="font-medium">{versionLabel(versions, active.toolVersionId)}</span></span>
-            : <span className="text-muted-foreground">No version deployed yet.</span>}
+      {activeError ? (
+        <QueryError
+          message={activeErrorObj instanceof Error ? activeErrorObj.message : undefined}
+          onRetry={() => refetchActive()}
+        />
+      ) : (
+        <div className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
+          <div className="flex items-center gap-2 text-sm">
+            <Rocket className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+            {active
+              ? <span className="text-foreground">Active version: <span className="font-medium">{versionLabel(versions, active.toolVersionId)}</span></span>
+              : <span className="text-muted-foreground">No version deployed yet.</span>}
+          </div>
+          <button
+            onClick={() => rollback.mutate()}
+            disabled={!canRollback || rollback.isPending}
+            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:border-primary/40 disabled:opacity-40"
+            title={canRollback ? 'Roll back to previous version' : 'Nothing to roll back to'}
+          >
+            <Undo2 className="h-3.5 w-3.5" /> {rollback.isPending ? 'Rolling back…' : 'Rollback'}
+          </button>
         </div>
-        <button
-          onClick={() => rollback.mutate()}
-          disabled={!canRollback || rollback.isPending}
-          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:border-primary/40 disabled:opacity-40"
-          title={canRollback ? 'Roll back to previous version' : 'Nothing to roll back to'}
-        >
-          <Undo2 className="h-3.5 w-3.5" /> {rollback.isPending ? 'Rolling back…' : 'Rollback'}
-        </button>
-      </div>
+      )}
 
       {/* Versions */}
       <section>
@@ -285,7 +312,12 @@ function ToolDetail({ projectId, toolId }: { projectId: string; toolId: string }
           />
         )}
 
-        {versionsLoading ? <Spinner /> : versions.length === 0 ? (
+        {versionsLoading ? <Spinner /> : versionsError ? (
+          <QueryError
+            message={versionsErrorObj instanceof Error ? versionsErrorObj.message : undefined}
+            onRetry={() => refetchVersions()}
+          />
+        ) : versions.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground">
             No versions published yet.
           </p>
@@ -328,7 +360,12 @@ function ToolDetail({ projectId, toolId }: { projectId: string; toolId: string }
         <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground">
           <History className="h-4 w-4 opacity-70" /> Deployment history
         </h2>
-        {deployments.length === 0 ? (
+        {deploymentsError ? (
+          <QueryError
+            message={deploymentsErrorObj instanceof Error ? deploymentsErrorObj.message : undefined}
+            onRetry={() => refetchDeployments()}
+          />
+        ) : deployments.length === 0 ? (
           <p className="text-xs text-muted-foreground">No deployments yet.</p>
         ) : (
           <ul className="space-y-1">

@@ -9,6 +9,7 @@ import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
 import { Badge, type BadgeVariant } from '../../components/ui/Badge'
 import { EmptyState } from '../../components/ui/EmptyState'
+import { QueryError } from '../../components/ui/QueryError'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -147,7 +148,7 @@ function TracesTab({ projectId, onShowEventLog }: { projectId: string; onShowEve
   const [filter, setFilter] = useState<TraceStatus | 'all'>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
 
-  const { data: allTraces = [], isLoading } = useQuery<Trace[]>({
+  const { data: allTraces = [], isLoading, isError, error, refetch } = useQuery<Trace[]>({
     queryKey: ['traces', projectId],
     queryFn: () => api.get(`/projects/${projectId}/traces`),
     refetchInterval: 10_000,
@@ -162,6 +163,14 @@ function TracesTab({ projectId, onShowEventLog }: { projectId: string; onShowEve
   const displayed = filter === 'all' ? allTraces : allTraces.filter((t) => t.status === filter)
 
   if (isLoading) return <Spinner />
+  if (isError) {
+    return (
+      <QueryError
+        message={error instanceof Error ? error.message : undefined}
+        onRetry={() => refetch()}
+      />
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -316,7 +325,7 @@ function EventLogTab({ projectId }: { projectId: string }) {
   const navigate = useNavigate()
   const [domainFilter, setDomainFilter] = useState('')
 
-  const { data: evtLog = [], isLoading } = useQuery<EventLogEntry[]>({
+  const { data: evtLog = [], isLoading, isError, error, refetch } = useQuery<EventLogEntry[]>({
     queryKey: ['event-log', projectId, domainFilter],
     queryFn: () =>
       api.get(`/projects/${projectId}/event-log?limit=200${domainFilter ? `&domain=${domainFilter}` : ''}`),
@@ -326,6 +335,14 @@ function EventLogTab({ projectId }: { projectId: string }) {
   const domains = [...new Set(evtLog.map((e) => e.domain))].sort()
 
   if (isLoading) return <Spinner />
+  if (isError) {
+    return (
+      <QueryError
+        message={error instanceof Error ? error.message : undefined}
+        onRetry={() => refetch()}
+      />
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -408,13 +425,21 @@ function EventLogTab({ projectId }: { projectId: string }) {
 // ── Audit Log Tab ─────────────────────────────────────────────────────────────
 
 function AuditLogTab({ projectId, onShowEventLog }: { projectId: string; onShowEventLog: () => void }) {
-  const { data: auditEntries = [], isLoading } = useQuery<AuditEntry[]>({
+  const { data: auditEntries = [], isLoading, isError, error, refetch } = useQuery<AuditEntry[]>({
     queryKey: ['audit-log', projectId],
     queryFn: () => api.get(`/projects/${projectId}/audit-log?limit=200`),
     refetchInterval: 30_000,
   })
 
   if (isLoading) return <Spinner />
+  if (isError) {
+    return (
+      <QueryError
+        message={error instanceof Error ? error.message : undefined}
+        onRetry={() => refetch()}
+      />
+    )
+  }
 
   return (
     <div className="space-y-4">

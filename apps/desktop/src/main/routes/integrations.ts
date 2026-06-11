@@ -203,8 +203,18 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
       if (!await assertProjectAccess(request.params.id, user.id)) {
         return reply.code(404).send({ error: 'Not found' })
       }
-      await deleteIntegrationCredential(request.params.credentialId)
       const db = getDb()
+      // IDOR guard: the credential must belong to the project in the URL — a
+      // credentialId from another project is indistinguishable from a missing one.
+      const [credential] = await db
+        .select({ id: integrationCredentials.id, projectId: integrationCredentials.projectId })
+        .from(integrationCredentials)
+        .where(eq(integrationCredentials.id, request.params.credentialId))
+        .limit(1)
+      if (credential === undefined || credential.projectId !== request.params.id) {
+        return reply.code(404).send({ error: 'Not found' })
+      }
+      await deleteIntegrationCredential(credential.id)
       db.insert(events).values({
         id: generateId(),
         type: 'integration.credential.deleted',

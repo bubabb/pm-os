@@ -4,19 +4,49 @@ import { eq, isNull } from 'drizzle-orm'
 import { generateId } from '@creare/shared'
 import { triggerSync } from '@creare/integrations'
 import { getIntegrationToken, isTokenExpired, withMergedConnectionMetadata } from '../secrets'
+import { pruneOldRecords } from '../maintenance/prune'
 
 // Background sync scheduler — runs in the Electron main process. On a fixed
 // interval it triggers an integration sync for every non-archived project that
 // has credentials. Per-credential started/completed/failed events are emitted by
 // the sync engine itself; here we emit one system-level event per cycle.
 //
-// Tuning: CREARE_SYNC_INTERVAL_MS (default 15 min). Set to 0 to disable.
+// It also owns the daily retention prune (maintenance/prune.ts): once shortly
+// after startup, then every 24 h — independent of the sync cycle, and it still
+// runs when sync is disabled.
+//
+// Tuning: CREARE_SYNC_INTERVAL_MS (default 15 min). Set to 0 to disable sync.
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000
+const PRUNE_STARTUP_DELAY_MS = 60 * 1000
+const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 let timer: ReturnType<typeof setInterval> | null = null
 let cycleRunning = false
 let cyclePromise: Promise<void> | null = null
+let pruneStartupTimer: ReturnType<typeof setTimeout> | null = null
+let pruneTimer: ReturnType<typeof setInterval> | null = null
+
+// Run the retention prune without ever letting an error escape into the
+// scheduler's timer callbacks. pruneOldRecords logs the deleted counts itself.
+function runPruneSafely(): void {
+  try {
+    pruneOldRecords()
+  } catch (err) {
+    console.error('[creare] Retention prune failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+function startPruneSchedule(): void {
+  if (pruneStartupTimer || pruneTimer) return
+  // First prune after a short delay so app boot isn't competing with deletes,
+  // then daily thereafter.
+  pruneStartupTimer = setTimeout(() => {
+    pruneStartupTimer = null
+    runPruneSafely()
+    pruneTimer = setInterval(runPruneSafely, PRUNE_INTERVAL_MS)
+  }, PRUNE_STARTUP_DELAY_MS)
+}
 
 function intervalMs(): number {
   const raw = process.env['CREARE_SYNC_INTERVAL_MS']
@@ -110,6 +140,8 @@ export async function runSyncCycle(): Promise<void> {
 
 export function startSyncScheduler(): void {
   if (timer) return
+  // Retention prune runs regardless of whether the sync interval is disabled.
+  startPruneSchedule()
   const ms = intervalMs()
   if (ms <= 0) {
     console.log('[creare] Background sync scheduler disabled (CREARE_SYNC_INTERVAL_MS=0)')
@@ -128,6 +160,14 @@ export async function stopSyncScheduler(): Promise<void> {
   if (timer) {
     clearInterval(timer)
     timer = null
+  }
+  if (pruneStartupTimer) {
+    clearTimeout(pruneStartupTimer)
+    pruneStartupTimer = null
+  }
+  if (pruneTimer) {
+    clearInterval(pruneTimer)
+    pruneTimer = null
   }
   // Wait for an in-flight cycle to finish so teardown (e.g. stopServer) doesn't race
   // a sync that is mid-flight against the DB / network.

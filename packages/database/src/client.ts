@@ -19,6 +19,15 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
     const sqlite = new Database(dbPath)
     sqlite.pragma('journal_mode = WAL')  // better concurrent read performance
     sqlite.pragma('foreign_keys = ON')   // enforce FK constraints
+    sqlite.pragma('busy_timeout = 5000') // retry on write contention instead of throwing immediately
+    // Startup integrity check — warn loudly on corruption but don't crash; the
+    // app stays up so the problem can be surfaced to the user.
+    const res = sqlite.pragma('integrity_check', { simple: true })
+    if (res !== 'ok') {
+      console.error(
+        `[database] SQLITE INTEGRITY CHECK FAILED for ${dbPath}: ${String(res)} — the database may be corrupted`,
+      )
+    }
     _db = drizzle(sqlite, { schema })
   }
   return _db
@@ -39,9 +48,20 @@ export function resetDb(): void {
 // fresh install gets a fully-migrated database with no manual `db:migrate` step.
 // Idempotent — a no-op when the DB is already up to date.
 // Migrations ship next to the built package (dist/migrations, copied by `build`);
-// falls back to the source folder when running uncompiled.
+// falls back to the source folder when running uncompiled. In a packaged Electron
+// app (asar) __dirname resolves inside the archive, so also probe the unpacked
+// resources directory (migrations shipped via extraResources).
 export function runMigrations(): void {
   const candidates = [join(__dirname, 'migrations'), join(__dirname, '..', 'src', 'migrations')]
+  // process.resourcesPath only exists inside Electron — typed as optional so this
+  // package still typechecks (and works) under plain Node.
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+  if (resourcesPath) {
+    candidates.push(
+      join(resourcesPath, 'migrations'),
+      join(resourcesPath, 'app.asar.unpacked', 'migrations'),
+    )
+  }
   const migrationsFolder = candidates.find((p) => existsSync(p))
   if (!migrationsFolder) {
     throw new Error(`migrations folder not found (looked in: ${candidates.join(', ')})`)
