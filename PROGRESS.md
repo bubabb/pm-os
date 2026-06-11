@@ -10,7 +10,7 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
-- **Membership/claude-cli provider (2026-06-11, Opus 4.8): DONE.** typecheck clean · tests **73/73** · build clean.
+- **Membership/claude-cli provider (2026-06-11, Opus 4.8): DONE.** typecheck clean · tests **74/74** · build clean.
   **Committed locally** on branch `feat/claude-cli-membership-provider` (commit `4d5c223`); NOT merged to `main`,
   NOT pushed (no GitHub remote yet). Session log: `docs/sessions/session-2026-06-11-claude-cli-provider.md`.
   • **New `claude-cli` provider** in `ai-sdk` — uses the Claude **membership** (local CLI login), NOT an API key.
