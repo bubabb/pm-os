@@ -2,13 +2,16 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  FolderOpen, Plug, Plus, Trash2, Loader2, RefreshCw, CheckCircle2,
+  AlertTriangle, FolderOpen, Pencil, Plug, Plus, Trash2, Loader2, RefreshCw,
+  CheckCircle2, Search,
 } from 'lucide-react'
 import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
 import { Badge, SOURCE_LABELS } from '../../components/ui/Badge'
 import { QueryError } from '../../components/ui/QueryError'
 import { Field } from '../../components/ui/Field'
+import { Spinner } from '../../components/ui/Spinner'
+import { toast } from '../../components/ui/Toast'
 
 type Tab = 'sources' | 'project'
 
@@ -40,6 +43,15 @@ interface ProjectSource {
   createdAt: string
 }
 
+/** A pickable per-project resource from `GET /connections/:id/resources`. */
+interface ResourceOption {
+  id: string
+  label: string
+  sublabel?: string
+  /** Exact per-project scope to persist (e.g. github → { owner, repo }). */
+  metadata: Record<string, string>
+}
+
 // ── Source config ─────────────────────────────────────────────────────────────
 
 interface ScopeField {
@@ -49,7 +61,7 @@ interface ScopeField {
   placeholder?: string
 }
 
-/** Per-project resource scope fields for each source. */
+/** Per-project resource scope fields for each source (manual-entry fallback). */
 const SCOPE_FIELDS: Record<ConnectionSource, ScopeField[]> = {
   github: [
     { key: 'owner', label: 'Owner', required: true, placeholder: 'Owner (e.g. my-org)' },
@@ -96,7 +108,7 @@ function scopeSummary(source: ConnectionSource, metadata: Record<string, string>
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function Settings() {
-  const { currentProject, archiveProject } = useProjectStore()
+  const { currentProject, archiveProject, renameProject } = useProjectStore()
   const [tab, setTab] = useState<Tab>('sources')
 
   if (!currentProject) {
@@ -136,7 +148,13 @@ export default function Settings() {
       </div>
 
       {tab === 'sources' && <SourcesTab projectId={currentProject.id} />}
-      {tab === 'project' && <ProjectTab project={currentProject} onArchive={archiveProject} />}
+      {tab === 'project' && (
+        <ProjectTab
+          project={currentProject}
+          onArchive={archiveProject}
+          onRename={renameProject}
+        />
+      )}
     </div>
   )
 }
@@ -171,8 +189,12 @@ function SourcesTab({ projectId }: { projectId: string }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sources', projectId] })
       setListError(null)
+      toast.success('Source removed')
     },
-    onError: (e: Error) => setListError(e.message),
+    onError: (e: Error) => {
+      setListError(e.message)
+      toast.error(e.message)
+    },
   })
 
   async function handleSync(source: ProjectSource) {
@@ -181,7 +203,9 @@ function SourcesTab({ projectId }: { projectId: string }) {
     try {
       await api.post(`/projects/${projectId}/integrations/sync`, { source: source.source })
     } catch (e) {
-      setListError(e instanceof Error ? e.message : 'Sync failed')
+      const msg = e instanceof Error ? e.message : 'Sync failed'
+      setListError(msg)
+      toast.error(msg)
     } finally {
       setSyncingSource(null)
       qc.invalidateQueries({ queryKey: ['sources', projectId] })
@@ -344,6 +368,9 @@ function SourceCard({
 
 // ── Add source form ───────────────────────────────────────────────────────────
 
+const INPUT_CLASS =
+  'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary'
+
 function AddSourceForm({
   projectId, connections, onDone,
 }: {
@@ -356,9 +383,36 @@ function AddSourceForm({
   const [values, setValues] = useState<Record<string, string>>({})
   const [label, setLabel] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
+  const [manualOverride, setManualOverride] = useState(false)
+  const [picked, setPicked] = useState<ResourceOption | null>(null)
+  const [filter, setFilter] = useState('')
 
   const connection = connections.find((c) => c.id === connectionId) ?? null
   const scopeFields = connection ? SCOPE_FIELDS[connection.source] : []
+
+  const {
+    data: resources,
+    isLoading: resourcesLoading,
+    isError: resourcesError,
+  } = useQuery<ResourceOption[]>({
+    queryKey: ['connection-resources', connectionId],
+    queryFn: () => api.get(`/connections/${connectionId}/resources`),
+    enabled: connectionId !== '',
+    retry: false,
+  })
+
+  /** Picker has usable options. */
+  const pickerAvailable = !resourcesLoading && !resourcesError && (resources?.length ?? 0) > 0
+  /** Upstream failed (502) or returned nothing — fall back to manual entry. */
+  const pickerUnavailable = !resourcesLoading && (resourcesError || (resources?.length ?? 0) === 0)
+  const manualMode = manualOverride || pickerUnavailable
+
+  const query = filter.trim().toLowerCase()
+  const filteredResources = (resources ?? []).filter((r) =>
+    query === '' ||
+    r.label.toLowerCase().includes(query) ||
+    (r.sublabel?.toLowerCase().includes(query) ?? false),
+  )
 
   const add = useMutation({
     mutationFn: (body: { source: ConnectionSource; connectionId: string; label: string; metadata: Record<string, string> }) =>
@@ -367,15 +421,25 @@ function AddSourceForm({
       qc.invalidateQueries({ queryKey: ['sources', projectId] })
       setValues({})
       setLabel('')
+      setPicked(null)
+      setFilter('')
+      setManualOverride(false)
       setFormError(null)
+      toast.success('Source added')
       onDone()
     },
-    onError: (e: Error) => setFormError(e.message),
+    onError: (e: Error) => {
+      setFormError(e.message)
+      toast.error(e.message)
+    },
   })
 
   function handleConnectionChange(nextId: string) {
     setConnectionId(nextId)
     setValues({})
+    setPicked(null)
+    setFilter('')
+    setManualOverride(false)
     setFormError(null)
   }
 
@@ -385,23 +449,39 @@ function AddSourceForm({
       setFormError('Pick a connected account.')
       return
     }
-    const missing = scopeFields.filter((f) => f.required && !(values[f.key] ?? '').trim())
-    if (missing.length > 0) {
-      setFormError(`${missing.map((f) => f.label).join(', ')} ${missing.length > 1 ? 'are' : 'is'} required.`)
-      return
+
+    let metadata: Record<string, string>
+    if (!manualMode) {
+      if (!picked) {
+        setFormError('Pick a resource from the list, or enter it manually.')
+        return
+      }
+      metadata = picked.metadata
+    } else {
+      const missing = scopeFields.filter((f) => f.required && !(values[f.key] ?? '').trim())
+      if (missing.length > 0) {
+        setFormError(`${missing.map((f) => f.label).join(', ')} ${missing.length > 1 ? 'are' : 'is'} required.`)
+        return
+      }
+      metadata = {}
+      for (const field of scopeFields) {
+        const v = (values[field.key] ?? '').trim()
+        if (v) metadata[field.key] = v
+      }
     }
-    const metadata: Record<string, string> = {}
-    for (const field of scopeFields) {
-      const v = (values[field.key] ?? '').trim()
-      if (v) metadata[field.key] = v
-    }
+
+    const defaultLabel = !manualMode && picked ? picked.label : connection.label
     add.mutate({
       source: connection.source,
       connectionId: connection.id,
-      label: label.trim() || connection.label,
+      label: label.trim() || defaultLabel,
       metadata,
     })
   }
+
+  const pickedScope = connection && picked
+    ? scopeSummary(connection.source, picked.metadata) ?? picked.label
+    : null
 
   return (
     <form onSubmit={handleSubmit} className="mb-3 space-y-3 rounded-lg border border-border p-4">
@@ -411,7 +491,7 @@ function AddSourceForm({
           id="source-connection"
           value={connectionId}
           onChange={(e) => handleConnectionChange(e.target.value)}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary"
+          className={INPUT_CLASS}
         >
           {connections.map((c) => (
             <option key={c.id} value={c.id}>
@@ -421,28 +501,125 @@ function AddSourceForm({
         </select>
       </Field>
 
-      {/* Scope fields for the chosen connection's source */}
-      {scopeFields.map((field) => (
-        <Field key={field.key} id={`source-${field.key}`} label={field.label}>
-          <input
-            id={`source-${field.key}`}
-            type="text"
-            placeholder={field.placeholder ?? field.label}
-            value={values[field.key] ?? ''}
-            onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary"
-          />
-        </Field>
-      ))}
+      {/* Resource scope: provider-backed picker with manual fallback */}
+      {connection && (
+        resourcesLoading ? (
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Spinner inline size="sm" />
+            Loading available resources…
+          </p>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                {manualMode ? 'Resource scope (manual entry)' : `Pick a ${SOURCE_LABELS[connection.source]} resource`}
+              </span>
+              {pickerAvailable && (
+                <button
+                  type="button"
+                  onClick={() => { setManualOverride((m) => !m); setFormError(null) }}
+                  className="rounded text-xs font-medium text-primary hover:underline focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  {manualMode ? 'Choose from list' : 'Enter manually'}
+                </button>
+              )}
+            </div>
+
+            {pickerUnavailable && (
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" aria-hidden="true" />
+                Couldn&rsquo;t load from the provider — enter manually.
+              </p>
+            )}
+
+            {manualMode ? (
+              scopeFields.map((field) => (
+                <Field key={field.key} id={`source-${field.key}`} label={field.label}>
+                  <input
+                    id={`source-${field.key}`}
+                    type="text"
+                    placeholder={field.placeholder ?? field.label}
+                    value={values[field.key] ?? ''}
+                    onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+                    className={INPUT_CLASS}
+                  />
+                </Field>
+              ))
+            ) : (
+              <>
+                <div className="relative">
+                  <Search
+                    className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <input
+                    type="text"
+                    aria-label="Filter resources"
+                    placeholder="Filter resources…"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                    className={`${INPUT_CLASS} pl-8`}
+                  />
+                </div>
+                <ul
+                  role="listbox"
+                  aria-label="Available resources"
+                  className="max-h-48 divide-y divide-border overflow-y-auto rounded-lg border border-border"
+                >
+                  {filteredResources.length === 0 ? (
+                    <li className="px-3 py-2 text-xs text-muted-foreground">
+                      No resources match &ldquo;{filter}&rdquo;.
+                    </li>
+                  ) : (
+                    filteredResources.map((r) => (
+                      <li key={r.id}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={picked?.id === r.id}
+                          onClick={() => { setPicked(r); setFormError(null) }}
+                          className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary ${
+                            picked?.id === r.id
+                              ? 'bg-accent text-foreground'
+                              : 'text-foreground hover:bg-accent/50'
+                          }`}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate">{r.label}</span>
+                            {r.sublabel && (
+                              <span className="block truncate text-xs text-muted-foreground">{r.sublabel}</span>
+                            )}
+                          </span>
+                          {picked?.id === r.id && (
+                            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden="true" />
+                          )}
+                        </button>
+                      </li>
+                    ))
+                  )}
+                </ul>
+                {pickedScope && (
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    Scope:
+                    <span className="rounded bg-accent px-1.5 py-0.5 font-mono text-xs text-foreground">
+                      {pickedScope}
+                    </span>
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )
+      )}
 
       <Field id="source-label" label="Label">
         <input
           id="source-label"
           type="text"
-          placeholder={`Optional, defaults to "${connection?.label ?? 'account label'}"`}
+          placeholder={`Optional, defaults to "${(!manualMode && picked ? picked.label : connection?.label) ?? 'account label'}"`}
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus:ring-2 focus:ring-primary"
+          className={INPUT_CLASS}
         />
       </Field>
 
@@ -465,12 +642,48 @@ function AddSourceForm({
 interface ProjectTabProps {
   project: { id: string; name: string; description: string | null; createdAt: string }
   onArchive: (id: string) => Promise<void>
+  onRename: (id: string, patch: { name?: string; description?: string }) => Promise<unknown>
 }
 
-function ProjectTab({ project, onArchive }: ProjectTabProps) {
+function ProjectTab({ project, onArchive, onRename }: ProjectTabProps) {
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(project.name)
+  const [description, setDescription] = useState(project.description ?? '')
+  const [saving, setSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+
   const [confirming, setConfirming] = useState(false)
   const [archiving, setArchiving] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
+
+  function startEditing() {
+    setName(project.name)
+    setDescription(project.description ?? '')
+    setEditError(null)
+    setEditing(true)
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault()
+    const trimmedName = name.trim()
+    if (!trimmedName) {
+      setEditError('Name is required.')
+      return
+    }
+    setSaving(true)
+    setEditError(null)
+    try {
+      await onRename(project.id, { name: trimmedName, description: description.trim() })
+      toast.success('Project updated')
+      setEditing(false)
+    } catch (e2) {
+      const msg = e2 instanceof Error ? e2.message : 'Update failed'
+      setEditError(msg)
+      toast.error(msg)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   async function handleArchive() {
     setArchiving(true)
@@ -478,8 +691,11 @@ function ProjectTab({ project, onArchive }: ProjectTabProps) {
     try {
       await onArchive(project.id)
       setConfirming(false)
+      toast.success('Project archived')
     } catch (e) {
-      setArchiveError(e instanceof Error ? e.message : 'Archive failed')
+      const msg = e instanceof Error ? e.message : 'Archive failed'
+      setArchiveError(msg)
+      toast.error(msg)
     } finally {
       setArchiving(false)
     }
@@ -489,13 +705,75 @@ function ProjectTab({ project, onArchive }: ProjectTabProps) {
     <div className="space-y-6">
       {/* Project info */}
       <section>
-        <h2 className="mb-3 text-sm font-medium text-foreground">Project info</h2>
-        <div className="divide-y divide-border rounded-lg border border-border">
-          <Row label="Name" value={project.name} />
-          <Row label="Description" value={project.description ?? '—'} />
-          <Row label="Created" value={formatDate(project.createdAt)} />
-          <Row label="Project ID" value={project.id} mono />
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-foreground">Project info</h2>
+          {!editing && (
+            <button
+              onClick={startEditing}
+              aria-label="Edit project name and description"
+              className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              <Pencil className="h-3 w-3" aria-hidden="true" />
+              Edit
+            </button>
+          )}
         </div>
+
+        {editing ? (
+          <form
+            onSubmit={handleSave}
+            className="space-y-3 rounded-lg border border-border p-4"
+          >
+            <Field id="project-name" label="Name">
+              <input
+                id="project-name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Project name"
+                className={INPUT_CLASS}
+              />
+            </Field>
+            <Field id="project-description" label="Description">
+              <textarea
+                id="project-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="What is this project about? (optional)"
+                rows={3}
+                className={`${INPUT_CLASS} resize-y`}
+              />
+            </Field>
+
+            {editError && <p className="text-xs text-destructive">{editError}</p>}
+
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={saving}
+                className="flex items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              >
+                {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Save changes
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEditing(false); setEditError(null) }}
+                disabled={saving}
+                className="rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="divide-y divide-border rounded-lg border border-border">
+            <Row label="Name" value={project.name} />
+            <Row label="Description" value={project.description ?? '—'} />
+            <Row label="Created" value={formatDate(project.createdAt)} />
+            <Row label="Project ID" value={project.id} mono />
+          </div>
+        )}
       </section>
 
       {/* Danger zone */}
@@ -549,14 +827,6 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
     <div className="flex items-center px-4 py-3">
       <span className="w-32 shrink-0 text-xs text-muted-foreground">{label}</span>
       <span className={`text-sm text-foreground ${mono ? 'font-mono text-xs' : ''}`}>{value}</span>
-    </div>
-  )
-}
-
-function Spinner() {
-  return (
-    <div className="flex h-32 items-center justify-center">
-      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
     </div>
   )
 }

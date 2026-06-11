@@ -10,6 +10,7 @@ import { TimelineTab } from './TimelineTab'
 import { Badge, BADGE_VARIANT_CLASSES, type BadgeVariant } from '../../components/ui/Badge'
 import { QueryError } from '../../components/ui/QueryError'
 import { Field } from '../../components/ui/Field'
+import { toast } from '../../components/ui/Toast'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -158,6 +159,10 @@ function BoardsTab({ projectId }: { projectId: string }) {
   const [newName, setNewName] = useState('')
   const [newType, setNewType] = useState<BoardType>('kanban')
   const [actionError, setActionError] = useState<string | null>(null)
+  // Native HTML5 drag-and-drop state. State ref doubles as a fallback for
+  // environments where dataTransfer reads are restricted before drop.
+  const [draggingItemId, setDraggingItemId] = useState<string | null>(null)
+  const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null)
 
   const {
     data: boardList = [], isLoading: boardsLoading,
@@ -208,11 +213,23 @@ function BoardsTab({ projectId }: { projectId: string }) {
   const moveItem = useMutation({
     mutationFn: ({ itemId, columnId }: { itemId: string; columnId: string }) =>
       api.patch(`/projects/${projectId}/boards/${activeBoardId}/items/${itemId}`, { columnId }),
+    onMutate: async ({ itemId, columnId }: { itemId: string; columnId: string }) => {
+      // Optimistic update: jump the card to its new column immediately.
+      await qc.cancelQueries({ queryKey: ['board-items', activeBoardId] })
+      qc.setQueryData<BoardItem[]>(['board-items', activeBoardId], (old) =>
+        old?.map((i) => (i.id === itemId ? { ...i, columnId } : i)),
+      )
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['board-items', activeBoardId] })
       setActionError(null)
     },
-    onError: (e: Error) => setActionError(e.message),
+    onError: (e: Error) => {
+      // Roll back the optimistic move by refetching the server state.
+      qc.invalidateQueries({ queryKey: ['board-items', activeBoardId] })
+      toast.error(`Failed to move item: ${e.message}`)
+      setActionError(e.message)
+    },
   })
 
   const removeItem = useMutation({
@@ -231,6 +248,18 @@ function BoardsTab({ projectId }: { projectId: string }) {
   }
 
   const sortedColumns = [...columns].sort((a, b) => a.position - b.position)
+
+  function handleColumnDrop(e: React.DragEvent<HTMLDivElement>, columnId: string) {
+    e.preventDefault()
+    setDragOverColumnId(null)
+    const transferred = e.dataTransfer.getData('text/plain')
+    const itemId = transferred !== '' ? transferred : draggingItemId
+    setDraggingItemId(null)
+    if (!itemId) return
+    const dragged = items.find((i) => i.id === itemId)
+    if (!dragged || dragged.columnId === columnId) return
+    moveItem.mutate({ itemId, columnId })
+  }
 
   return (
     <div className="space-y-4">
@@ -317,8 +346,26 @@ function BoardsTab({ projectId }: { projectId: string }) {
                 {sortedColumns.map((col) => {
                   const colItems = items.filter((i) => i.columnId === col.id)
                   const overWip = col.wipLimit !== null && colItems.length > col.wipLimit
+                  const isDropTarget = dragOverColumnId === col.id
                   return (
-                    <div key={col.id} className="flex w-52 shrink-0 flex-col rounded-lg border border-border bg-muted/30">
+                    <div
+                      key={col.id}
+                      onDragOver={(e) => {
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                        if (dragOverColumnId !== col.id) setDragOverColumnId(col.id)
+                      }}
+                      onDragLeave={(e) => {
+                        // Ignore dragLeave fired by moving over child elements.
+                        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                          setDragOverColumnId((id) => (id === col.id ? null : id))
+                        }
+                      }}
+                      onDrop={(e) => handleColumnDrop(e, col.id)}
+                      className={`flex w-52 shrink-0 flex-col rounded-lg border border-border bg-muted/30 transition-shadow ${
+                        isDropTarget ? 'ring-2 ring-primary/50' : ''
+                      }`}
+                    >
                       <div className={`flex items-center justify-between rounded-t-lg px-3 py-2 ${col.isTerminal ? 'bg-emerald-500/10 border-b border-emerald-500/30' : 'bg-card border-b border-border'}`}>
                         <span className="text-xs font-semibold text-foreground">{col.name}</span>
                         <div className="flex items-center gap-1">
@@ -339,6 +386,12 @@ function BoardsTab({ projectId }: { projectId: string }) {
                               onMove={(colId) => moveItem.mutate({ itemId: item.id, columnId: colId })}
                               onRemove={() => removeItem.mutate(item.id)}
                               moving={moveItem.isPending}
+                              dragging={draggingItemId === item.id}
+                              onDragStart={() => setDraggingItemId(item.id)}
+                              onDragEnd={() => {
+                                setDraggingItemId(null)
+                                setDragOverColumnId(null)
+                              }}
                             />
                           ))
                         )}
@@ -370,18 +423,32 @@ function BoardsTab({ projectId }: { projectId: string }) {
 // ── Kanban Card ───────────────────────────────────────────────────────────────
 
 function KanbanCard({
-  item, columns, onMove, onRemove, moving,
+  item, columns, onMove, onRemove, moving, dragging, onDragStart, onDragEnd,
 }: {
   item: BoardItem
   columns: BoardColumn[]
   onMove: (colId: string) => void
   onRemove: () => void
   moving: boolean
+  dragging: boolean
+  onDragStart: () => void
+  onDragEnd: () => void
 }) {
   const [showMenu, setShowMenu] = useState(false)
 
   return (
-    <div className="relative rounded-md border border-border bg-card p-2 shadow-sm">
+    <div
+      draggable
+      onDragStart={(e: React.DragEvent<HTMLDivElement>) => {
+        e.dataTransfer.setData('text/plain', item.id)
+        e.dataTransfer.effectAllowed = 'move'
+        onDragStart()
+      }}
+      onDragEnd={onDragEnd}
+      className={`relative cursor-grab rounded-md border border-border bg-card p-2 shadow-sm active:cursor-grabbing ${
+        dragging ? 'opacity-50 ring-1 ring-primary/50' : ''
+      }`}
+    >
       <p className="text-xs font-medium text-foreground leading-snug">
         {item.taskTitle ?? item.taskId.slice(0, 8)}
       </p>
