@@ -1,5 +1,5 @@
 import { BaseConnector, UnsupportedMutationError } from './base'
-import { GitHubProjectsClient } from './github-projects'
+import { GitHubNotFoundError, GitHubProjectsClient } from './github-projects'
 import type {
   ConnectorCapabilities,
   FetchResult,
@@ -36,28 +36,123 @@ export class GitHubConnector extends BaseConnector {
     return { owner: meta?.owner ?? '', repo: meta?.repo ?? '' }
   }
 
-  // ── Write surface (bidirectional-sync.md §3.2) — Phase 1: card moves only ──
+  // ── Write surface (bidirectional-sync.md §3.2) — Phase 2: item lifecycle ──
+  // Phase 2 semantics, kept honest:
+  //   create_item  → DraftIssue on the board (promotion to a real issue is later)
+  //   update_item  → draft title/body only; issue/PR-backed edits = unsupported (REST PATCH is later)
+  //   close_item   → ARCHIVES the board item; a backing issue/PR stays open on GitHub
+  //   reopen_item  → unarchives the board item
+  //   comment      → issue/PR-backed items only (REST); drafts have no comment thread
+  //   archive_item → not advertised: close_item already archives, so it would be a duplicate
 
   override get capabilities(): ConnectorCapabilities {
-    return { write: ['move_item'] as MutationKind[] }
+    return {
+      write: [
+        'create_item', 'update_item', 'move_item',
+        'comment', 'close_item', 'reopen_item',
+      ] as MutationKind[],
+    }
   }
 
   override async applyMutation(envelope: MutationEnvelope): Promise<MutationResult> {
     const { op } = envelope
-    if (op.kind !== 'move_item') {
-      throw new UnsupportedMutationError(this.source, op.kind)
-    }
-    if (!op.ref.containerId || !op.statusFieldRemoteId) {
-      throw new Error(`move_item op ${envelope.opId} is missing containerId or statusFieldRemoteId`)
-    }
     const client = new GitHubProjectsClient(this.config.token)
-    const { updatedAt } = await client.moveItem(
-      op.ref.containerId,
-      op.ref.remoteId,
-      op.statusFieldRemoteId,
-      op.toStatusRemoteId,
-    )
-    return { ref: op.ref, remoteVersion: updatedAt, raw: { updatedAt } }
+
+    switch (op.kind) {
+      // Phase 1 write — set the Status single-select (= move the card)
+      case 'move_item': {
+        if (!op.ref.containerId || !op.statusFieldRemoteId) {
+          throw new Error(`move_item op ${envelope.opId} is missing containerId or statusFieldRemoteId`)
+        }
+        const { updatedAt } = await client.moveItem(
+          op.ref.containerId,
+          op.ref.remoteId,
+          op.statusFieldRemoteId,
+          op.toStatusRemoteId,
+        )
+        return { ref: op.ref, remoteVersion: updatedAt, raw: { updatedAt } }
+      }
+
+      case 'create_item': {
+        // op.itemType is accepted but ignored — Phase 2 always creates a draft
+        const { itemId, updatedAt } = await client.addDraftIssue(op.container.remoteId, op.title, op.body)
+        return {
+          ref: { remoteType: 'pv2_item', remoteId: itemId, containerId: op.container.remoteId },
+          remoteVersion: updatedAt,
+          raw: { updatedAt, draft: true },
+        }
+      }
+
+      case 'update_item': {
+        if (op.patch.title === undefined && op.patch.body === undefined) {
+          throw new Error(`update_item op ${envelope.opId} has no supported fields — Phase 2 updates title/body only`)
+        }
+        const content = await client.fetchItemContent(op.ref.remoteId)
+        if (!content) {
+          throw new GitHubNotFoundError(`ProjectV2 item ${op.ref.remoteId} not found or its content is not visible`)
+        }
+        if (content.type !== 'DraftIssue') {
+          // Issue/PR-backed title/body edits go through REST PATCH in a later phase
+          throw new UnsupportedMutationError(this.source, op.kind)
+        }
+        const patch: { title?: string; body?: string } = {}
+        if (op.patch.title !== undefined) patch.title = op.patch.title
+        if (op.patch.body !== undefined) patch.body = op.patch.body
+        const { updatedAt } = await client.updateDraftIssue(content.contentId, patch)
+        return { ref: op.ref, remoteVersion: updatedAt, raw: { updatedAt } }
+      }
+
+      case 'close_item': {
+        // Archive the board item; closing a backing issue via REST is a later step
+        if (!op.ref.containerId) {
+          throw new Error(`close_item op ${envelope.opId} is missing containerId`)
+        }
+        const { updatedAt } = await client.archiveItem(op.ref.containerId, op.ref.remoteId)
+        return { ref: op.ref, remoteVersion: updatedAt, raw: { updatedAt, archived: true } }
+      }
+
+      case 'reopen_item': {
+        if (!op.ref.containerId) {
+          throw new Error(`reopen_item op ${envelope.opId} is missing containerId`)
+        }
+        const { updatedAt } = await client.unarchiveItem(op.ref.containerId, op.ref.remoteId)
+        return { ref: op.ref, remoteVersion: updatedAt, raw: { updatedAt, archived: false } }
+      }
+
+      case 'comment': {
+        const content = await client.fetchItemContent(op.ref.remoteId)
+        if (!content) {
+          throw new GitHubNotFoundError(`ProjectV2 item ${op.ref.remoteId} not found or its content is not visible`)
+        }
+        if (content.type === 'DraftIssue') {
+          // Drafts have no comment thread — there is nothing to comment on
+          throw new UnsupportedMutationError(this.source, op.kind)
+        }
+        const res = await this.fetchWithRetry(
+          `${BASE}/repos/${content.owner}/${content.repo}/issues/${content.number}/comments`,
+          {
+            method: 'POST',
+            headers: { ...this.headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body: op.body }),
+          },
+        )
+        if (!res.ok) {
+          throw new Error(`GitHub comment on ${content.owner}/${content.repo}#${content.number} failed: HTTP ${res.status}`)
+        }
+        const comment = await res.json() as GhComment
+        const result: MutationResult = {
+          ref: op.ref,
+          remoteVersion: comment.created_at ?? null,
+          raw: { commentId: comment.id, createdAt: comment.created_at ?? null },
+        }
+        if (comment.html_url) result.remoteUrl = comment.html_url
+        return result
+      }
+
+      // archive_item (and any future kinds) — not part of this connector's surface
+      default:
+        throw new UnsupportedMutationError(this.source, op.kind)
+    }
   }
 
   override async fetchRemoteVersion(ref: RemoteRef): Promise<string | null> {
@@ -224,6 +319,12 @@ interface GhPr {
   requested_reviewers: unknown[]
   head: { ref: string }
   labels: { name: string }[]
+}
+
+interface GhComment {
+  id: number
+  html_url?: string
+  created_at?: string
 }
 
 interface GhIssue {

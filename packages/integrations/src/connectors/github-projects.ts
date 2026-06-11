@@ -294,7 +294,127 @@ export class GitHubProjectsClient {
     if (!item) throw new Error('GitHub GraphQL: updateProjectV2ItemFieldValue returned no item')
     return { updatedAt: item.updatedAt }
   }
+
+  // ── Phase 2 writes: item lifecycle (bidirectional-sync.md §3.3) ──────────
+
+  // create_item: add a DraftIssue card to the board. Promoting a draft to a
+  // real repository issue is a later phase.
+  async addDraftIssue(
+    projectV2Id: string,
+    title: string,
+    body?: string,
+  ): Promise<{ itemId: string; updatedAt: string }> {
+    const data = await this.graphql<AddDraftIssueData>(
+      `mutation AddDraftIssue($projectId: ID!, $title: String!, $body: String) {
+        addProjectV2DraftIssue(input: { projectId: $projectId, title: $title, body: $body }) {
+          projectItem { id updatedAt }
+        }
+      }`,
+      // undefined body is dropped by JSON.stringify → GraphQL "not provided"
+      { projectId: projectV2Id, title, body },
+    )
+    const item = data.addProjectV2DraftIssue?.projectItem
+    if (!item) throw new Error('GitHub GraphQL: addProjectV2DraftIssue returned no item')
+    return { itemId: item.id, updatedAt: item.updatedAt }
+  }
+
+  // update_item (draft path): edit a DraftIssue's title/body. Takes the
+  // DraftIssue CONTENT id (resolve it via fetchItemContent), not the item id.
+  async updateDraftIssue(
+    draftIssueId: string,
+    patch: { title?: string; body?: string },
+  ): Promise<{ updatedAt: string }> {
+    const data = await this.graphql<UpdateDraftIssueData>(
+      `mutation UpdateDraftIssue($draftIssueId: ID!, $title: String, $body: String) {
+        updateProjectV2DraftIssue(input: { draftIssueId: $draftIssueId, title: $title, body: $body }) {
+          draftIssue { id updatedAt }
+        }
+      }`,
+      // undefined fields are dropped by JSON.stringify → left unchanged remotely
+      { draftIssueId, title: patch.title, body: patch.body },
+    )
+    const draft = data.updateProjectV2DraftIssue?.draftIssue
+    if (!draft) throw new Error('GitHub GraphQL: updateProjectV2DraftIssue returned no draft issue')
+    return { updatedAt: draft.updatedAt }
+  }
+
+  // close_item: archive the board item (the card leaves the board but the
+  // backing issue/PR, if any, stays open on GitHub).
+  async archiveItem(projectV2Id: string, itemId: string): Promise<{ updatedAt: string }> {
+    const data = await this.graphql<ArchiveItemData>(
+      `mutation ArchiveItem($projectId: ID!, $itemId: ID!) {
+        archiveProjectV2Item(input: { projectId: $projectId, itemId: $itemId }) {
+          item { id updatedAt }
+        }
+      }`,
+      { projectId: projectV2Id, itemId },
+    )
+    const item = data.archiveProjectV2Item?.item
+    if (!item) throw new Error('GitHub GraphQL: archiveProjectV2Item returned no item')
+    return { updatedAt: item.updatedAt }
+  }
+
+  // reopen_item: restore an archived board item.
+  async unarchiveItem(projectV2Id: string, itemId: string): Promise<{ updatedAt: string }> {
+    const data = await this.graphql<UnarchiveItemData>(
+      `mutation UnarchiveItem($projectId: ID!, $itemId: ID!) {
+        unarchiveProjectV2Item(input: { projectId: $projectId, itemId: $itemId }) {
+          item { id updatedAt }
+        }
+      }`,
+      { projectId: projectV2Id, itemId },
+    )
+    const item = data.unarchiveProjectV2Item?.item
+    if (!item) throw new Error('GitHub GraphQL: unarchiveProjectV2Item returned no item')
+    return { updatedAt: item.updatedAt }
+  }
+
+  // Resolves what a ProjectV2 item is backed by — the dispatcher needs this to
+  // pick the draft GraphQL path vs. the issue/PR REST path (update_item,
+  // comment). null = item vanished, content invisible to this token, or a
+  // malformed response.
+  async fetchItemContent(itemId: string): Promise<ItemContentInfo | null> {
+    let data: ItemContentData
+    try {
+      data = await this.graphql<ItemContentData>(
+        `query ItemContent($itemId: ID!) {
+          node(id: $itemId) {
+            ... on ProjectV2Item {
+              content {
+                __typename
+                ... on DraftIssue { id }
+                ... on Issue { id number repository { nameWithOwner } }
+                ... on PullRequest { id number repository { nameWithOwner } }
+              }
+            }
+          }
+        }`,
+        { itemId },
+      )
+    } catch (err) {
+      if (err instanceof GitHubNotFoundError) return null
+      throw err
+    }
+
+    const content = data.node?.content
+    if (!content?.id) return null
+    if (content.__typename === 'DraftIssue') {
+      return { type: 'DraftIssue', contentId: content.id }
+    }
+    if (content.__typename === 'Issue' || content.__typename === 'PullRequest') {
+      const [owner, repo] = content.repository?.nameWithOwner?.split('/') ?? []
+      if (typeof content.number !== 'number' || !owner || !repo) return null
+      return { type: content.__typename, contentId: content.id, number: content.number, owner, repo }
+    }
+    return null
+  }
 }
+
+// What backs a ProjectV2 item. Issue/PR variants carry the REST coordinates
+// (owner/repo/number) needed for comment and (later) issue PATCH calls.
+export type ItemContentInfo =
+  | { type: 'DraftIssue'; contentId: string }
+  | { type: 'Issue' | 'PullRequest'; contentId: string; number: number; owner: string; repo: string }
 
 // ── Content normalization ───────────────────────────────────────────────────
 
@@ -394,4 +514,32 @@ interface ItemVersionData {
 
 interface MoveItemData {
   updateProjectV2ItemFieldValue: { projectV2Item: { id: string; updatedAt: string } | null } | null
+}
+
+interface AddDraftIssueData {
+  addProjectV2DraftIssue: { projectItem: { id: string; updatedAt: string } | null } | null
+}
+
+interface UpdateDraftIssueData {
+  updateProjectV2DraftIssue: { draftIssue: { id: string; updatedAt: string } | null } | null
+}
+
+interface ArchiveItemData {
+  archiveProjectV2Item: { item: { id: string; updatedAt: string } | null } | null
+}
+
+interface UnarchiveItemData {
+  unarchiveProjectV2Item: { item: { id: string; updatedAt: string } | null } | null
+}
+
+interface ItemContentData {
+  node: {
+    // Optional because a node id that is not a ProjectV2Item resolves to `{}`
+    content?: {
+      __typename: string
+      id?: string
+      number?: number
+      repository?: { nameWithOwner?: string } | null
+    } | null
+  } | null
 }

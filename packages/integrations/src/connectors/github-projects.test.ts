@@ -6,6 +6,9 @@ import {
   GitHubScopeError,
   GitHubNotFoundError,
 } from './github-projects'
+import { GitHubConnector } from './github'
+import { UnsupportedMutationError } from './base'
+import type { MutationEnvelope, MutationOp } from '../types'
 
 // All tests mock global fetch — no real network, ever.
 
@@ -317,5 +320,359 @@ describe('GitHubProjectsClient — fetchItemVersion', () => {
 
     fetchMock.mockResolvedValueOnce(dataResponse({ node: null }))
     await expect(client().fetchItemVersion('ITEM_GONE')).resolves.toBeNull()
+  })
+})
+
+// ── Phase 2 write mutations (item lifecycle) ────────────────────────────────
+
+describe('GitHubProjectsClient — addDraftIssue', () => {
+  it('sends addProjectV2DraftIssue with projectId/title/body and returns the new item id + updatedAt', async () => {
+    fetchMock.mockResolvedValueOnce(
+      dataResponse({
+        addProjectV2DraftIssue: { projectItem: { id: 'ITEM_NEW', updatedAt: '2026-06-11T13:00:00Z' } },
+      }),
+    )
+
+    const result = await client().addDraftIssue('PVT_1', 'New card', 'Card body')
+
+    expect(result).toEqual({ itemId: 'ITEM_NEW', updatedAt: '2026-06-11T13:00:00Z' })
+    const body = requestBody(0)
+    expect(body.query).toContain('addProjectV2DraftIssue')
+    expect(body.variables).toEqual({ projectId: 'PVT_1', title: 'New card', body: 'Card body' })
+  })
+
+  it('omits the body variable entirely when no body is given', async () => {
+    fetchMock.mockResolvedValueOnce(
+      dataResponse({
+        addProjectV2DraftIssue: { projectItem: { id: 'ITEM_NEW', updatedAt: '2026-06-11T13:00:00Z' } },
+      }),
+    )
+
+    await client().addDraftIssue('PVT_1', 'Title only')
+
+    // undefined is dropped by JSON.stringify → GraphQL sees "not provided"
+    expect(requestBody(0).variables).toEqual({ projectId: 'PVT_1', title: 'Title only' })
+  })
+
+  it('throws when the mutation returns no item', async () => {
+    fetchMock.mockResolvedValueOnce(dataResponse({ addProjectV2DraftIssue: { projectItem: null } }))
+    await expect(client().addDraftIssue('PVT_1', 'x')).rejects.toThrow(/returned no item/)
+  })
+})
+
+describe('GitHubProjectsClient — updateDraftIssue', () => {
+  it('sends updateProjectV2DraftIssue with only the provided patch fields and returns updatedAt', async () => {
+    fetchMock.mockResolvedValueOnce(
+      dataResponse({
+        updateProjectV2DraftIssue: { draftIssue: { id: 'DI_1', updatedAt: '2026-06-11T14:00:00Z' } },
+      }),
+    )
+
+    const result = await client().updateDraftIssue('DI_1', { title: 'Renamed' })
+
+    expect(result).toEqual({ updatedAt: '2026-06-11T14:00:00Z' })
+    const body = requestBody(0)
+    expect(body.query).toContain('updateProjectV2DraftIssue')
+    // body was not in the patch → variable absent, remote body untouched
+    expect(body.variables).toEqual({ draftIssueId: 'DI_1', title: 'Renamed' })
+  })
+
+  it('throws when the mutation returns no draft issue', async () => {
+    fetchMock.mockResolvedValueOnce(dataResponse({ updateProjectV2DraftIssue: { draftIssue: null } }))
+    await expect(client().updateDraftIssue('DI_1', { body: 'x' })).rejects.toThrow(/returned no draft issue/)
+  })
+})
+
+describe('GitHubProjectsClient — archiveItem / unarchiveItem', () => {
+  it('archiveItem sends archiveProjectV2Item with projectId/itemId and returns updatedAt', async () => {
+    fetchMock.mockResolvedValueOnce(
+      dataResponse({ archiveProjectV2Item: { item: { id: 'ITEM_1', updatedAt: '2026-06-11T15:00:00Z' } } }),
+    )
+
+    const result = await client().archiveItem('PVT_1', 'ITEM_1')
+
+    expect(result).toEqual({ updatedAt: '2026-06-11T15:00:00Z' })
+    const body = requestBody(0)
+    expect(body.query).toContain('archiveProjectV2Item')
+    expect(body.variables).toEqual({ projectId: 'PVT_1', itemId: 'ITEM_1' })
+  })
+
+  it('unarchiveItem sends unarchiveProjectV2Item with projectId/itemId and returns updatedAt', async () => {
+    fetchMock.mockResolvedValueOnce(
+      dataResponse({ unarchiveProjectV2Item: { item: { id: 'ITEM_1', updatedAt: '2026-06-11T16:00:00Z' } } }),
+    )
+
+    const result = await client().unarchiveItem('PVT_1', 'ITEM_1')
+
+    expect(result).toEqual({ updatedAt: '2026-06-11T16:00:00Z' })
+    const body = requestBody(0)
+    expect(body.query).toContain('unarchiveProjectV2Item')
+    expect(body.variables).toEqual({ projectId: 'PVT_1', itemId: 'ITEM_1' })
+  })
+
+  it('throws when archive/unarchive return no item', async () => {
+    fetchMock.mockResolvedValueOnce(dataResponse({ archiveProjectV2Item: { item: null } }))
+    await expect(client().archiveItem('PVT_1', 'ITEM_1')).rejects.toThrow(/returned no item/)
+
+    fetchMock.mockResolvedValueOnce(dataResponse({ unarchiveProjectV2Item: { item: null } }))
+    await expect(client().unarchiveItem('PVT_1', 'ITEM_1')).rejects.toThrow(/returned no item/)
+  })
+})
+
+describe('GitHubProjectsClient — fetchItemContent', () => {
+  it('resolves a draft-backed item to its DraftIssue content id', async () => {
+    fetchMock.mockResolvedValueOnce(
+      dataResponse({ node: { content: { __typename: 'DraftIssue', id: 'DI_1' } } }),
+    )
+    await expect(client().fetchItemContent('ITEM_1')).resolves.toEqual({
+      type: 'DraftIssue',
+      contentId: 'DI_1',
+    })
+  })
+
+  it('resolves an issue-backed item to owner/repo/number REST coordinates', async () => {
+    fetchMock.mockResolvedValueOnce(
+      dataResponse({
+        node: {
+          content: { __typename: 'Issue', id: 'I_1', number: 42, repository: { nameWithOwner: 'acme/app' } },
+        },
+      }),
+    )
+    await expect(client().fetchItemContent('ITEM_1')).resolves.toEqual({
+      type: 'Issue',
+      contentId: 'I_1',
+      number: 42,
+      owner: 'acme',
+      repo: 'app',
+    })
+  })
+
+  it('returns null for a vanished item, an invisible content, and NOT_FOUND', async () => {
+    fetchMock.mockResolvedValueOnce(dataResponse({ node: null }))
+    await expect(client().fetchItemContent('ITEM_GONE')).resolves.toBeNull()
+
+    fetchMock.mockResolvedValueOnce(dataResponse({ node: { content: null } }))
+    await expect(client().fetchItemContent('ITEM_HIDDEN')).resolves.toBeNull()
+
+    fetchMock.mockResolvedValueOnce(errorsResponse([{ type: 'NOT_FOUND', message: 'gone' }]))
+    await expect(client().fetchItemContent('ITEM_404')).resolves.toBeNull()
+  })
+})
+
+// ── GitHubConnector.applyMutation dispatch ──────────────────────────────────
+// The connector composes the client; same mocked fetch, no network.
+
+const connector = () =>
+  new GitHubConnector({ credentialId: 'cred-1', projectId: 'proj-1', token: 'test-token' })
+
+function envelopeFor(op: MutationOp): MutationEnvelope {
+  return { opId: 'op-1', credentialId: 'cred-1', projectId: 'proj-1', source: 'github', baseVersion: null, op }
+}
+
+const PV2_REF = { remoteType: 'pv2_item', remoteId: 'ITEM_1', containerId: 'PVT_1' }
+
+function draftContentResponse(): Response {
+  return dataResponse({ node: { content: { __typename: 'DraftIssue', id: 'DI_1' } } })
+}
+
+function issueContentResponse(): Response {
+  return dataResponse({
+    node: {
+      content: { __typename: 'Issue', id: 'I_1', number: 42, repository: { nameWithOwner: 'acme/app' } },
+    },
+  })
+}
+
+describe('GitHubConnector — capabilities', () => {
+  it('advertises the full Phase 2 item-lifecycle write surface', () => {
+    expect(connector().capabilities.write.sort()).toEqual(
+      ['close_item', 'comment', 'create_item', 'move_item', 'reopen_item', 'update_item'],
+    )
+  })
+})
+
+describe('GitHubConnector — applyMutation dispatch', () => {
+  it('move_item sets the Status single-select (Phase 1 behavior unchanged)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      dataResponse({
+        updateProjectV2ItemFieldValue: { projectV2Item: { id: 'ITEM_1', updatedAt: '2026-06-11T12:00:00Z' } },
+      }),
+    )
+
+    const result = await connector().applyMutation(envelopeFor({
+      kind: 'move_item', ref: PV2_REF, toStatusRemoteId: 'opt-done', statusFieldRemoteId: 'FIELD_STATUS',
+    }))
+
+    expect(result).toEqual({ ref: PV2_REF, remoteVersion: '2026-06-11T12:00:00Z', raw: { updatedAt: '2026-06-11T12:00:00Z' } })
+    expect(requestBody(0).query).toContain('updateProjectV2ItemFieldValue')
+  })
+
+  it('create_item adds a draft and returns a ref to the NEW pv2 item', async () => {
+    fetchMock.mockResolvedValueOnce(
+      dataResponse({
+        addProjectV2DraftIssue: { projectItem: { id: 'ITEM_NEW', updatedAt: '2026-06-11T13:00:00Z' } },
+      }),
+    )
+
+    const result = await connector().applyMutation(envelopeFor({
+      kind: 'create_item',
+      container: { remoteType: 'pv2_project', remoteId: 'PVT_1' },
+      title: 'New card',
+      body: 'Card body',
+    }))
+
+    expect(result).toEqual({
+      ref: { remoteType: 'pv2_item', remoteId: 'ITEM_NEW', containerId: 'PVT_1' },
+      remoteVersion: '2026-06-11T13:00:00Z',
+      raw: { updatedAt: '2026-06-11T13:00:00Z', draft: true },
+    })
+    expect(requestBody(0).query).toContain('addProjectV2DraftIssue')
+    expect(requestBody(0).variables).toEqual({ projectId: 'PVT_1', title: 'New card', body: 'Card body' })
+  })
+
+  it('update_item on a draft resolves the content id then updates the draft', async () => {
+    fetchMock
+      .mockResolvedValueOnce(draftContentResponse())
+      .mockResolvedValueOnce(
+        dataResponse({
+          updateProjectV2DraftIssue: { draftIssue: { id: 'DI_1', updatedAt: '2026-06-11T14:00:00Z' } },
+        }),
+      )
+
+    const result = await connector().applyMutation(envelopeFor({
+      kind: 'update_item', ref: PV2_REF, patch: { title: 'Renamed', body: 'New body' },
+    }))
+
+    expect(result).toEqual({ ref: PV2_REF, remoteVersion: '2026-06-11T14:00:00Z', raw: { updatedAt: '2026-06-11T14:00:00Z' } })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(requestBody(0).query).toContain('ItemContent')
+    expect(requestBody(1).query).toContain('updateProjectV2DraftIssue')
+    expect(requestBody(1).variables).toEqual({ draftIssueId: 'DI_1', title: 'Renamed', body: 'New body' })
+  })
+
+  it('update_item on an issue-backed item throws UnsupportedMutationError (REST PATCH is a later phase)', async () => {
+    fetchMock.mockResolvedValueOnce(issueContentResponse())
+    await expect(
+      connector().applyMutation(envelopeFor({ kind: 'update_item', ref: PV2_REF, patch: { title: 'Renamed' } })),
+    ).rejects.toBeInstanceOf(UnsupportedMutationError)
+  })
+
+  it('update_item with no title/body in the patch fails fast without any network call', async () => {
+    await expect(
+      connector().applyMutation(envelopeFor({ kind: 'update_item', ref: PV2_REF, patch: { labels: ['bug'] } })),
+    ).rejects.toThrow(/no supported fields/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('close_item archives the board item via archiveProjectV2Item', async () => {
+    fetchMock.mockResolvedValueOnce(
+      dataResponse({ archiveProjectV2Item: { item: { id: 'ITEM_1', updatedAt: '2026-06-11T15:00:00Z' } } }),
+    )
+
+    const result = await connector().applyMutation(envelopeFor({ kind: 'close_item', ref: PV2_REF }))
+
+    expect(result).toEqual({
+      ref: PV2_REF,
+      remoteVersion: '2026-06-11T15:00:00Z',
+      raw: { updatedAt: '2026-06-11T15:00:00Z', archived: true },
+    })
+    expect(requestBody(0).query).toContain('archiveProjectV2Item')
+    expect(requestBody(0).variables).toEqual({ projectId: 'PVT_1', itemId: 'ITEM_1' })
+  })
+
+  it('reopen_item unarchives the board item via unarchiveProjectV2Item', async () => {
+    fetchMock.mockResolvedValueOnce(
+      dataResponse({ unarchiveProjectV2Item: { item: { id: 'ITEM_1', updatedAt: '2026-06-11T16:00:00Z' } } }),
+    )
+
+    const result = await connector().applyMutation(envelopeFor({ kind: 'reopen_item', ref: PV2_REF }))
+
+    expect(result).toEqual({
+      ref: PV2_REF,
+      remoteVersion: '2026-06-11T16:00:00Z',
+      raw: { updatedAt: '2026-06-11T16:00:00Z', archived: false },
+    })
+    expect(requestBody(0).query).toContain('unarchiveProjectV2Item')
+    expect(requestBody(0).variables).toEqual({ projectId: 'PVT_1', itemId: 'ITEM_1' })
+  })
+
+  it('close_item / reopen_item without a containerId fail before any network call', async () => {
+    const bareRef = { remoteType: 'pv2_item', remoteId: 'ITEM_1' }
+    await expect(
+      connector().applyMutation(envelopeFor({ kind: 'close_item', ref: bareRef })),
+    ).rejects.toThrow(/missing containerId/)
+    await expect(
+      connector().applyMutation(envelopeFor({ kind: 'reopen_item', ref: bareRef })),
+    ).rejects.toThrow(/missing containerId/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('comment on an issue-backed item resolves coordinates then POSTs the REST comment', async () => {
+    fetchMock
+      .mockResolvedValueOnce(issueContentResponse())
+      .mockResolvedValueOnce(jsonResponse(
+        {
+          id: 9001,
+          html_url: 'https://github.com/acme/app/issues/42#issuecomment-9001',
+          created_at: '2026-06-11T17:00:00Z',
+        },
+        201,
+      ))
+
+    const result = await connector().applyMutation(envelopeFor({
+      kind: 'comment', ref: PV2_REF, body: 'Looks good to me',
+    }))
+
+    expect(result).toEqual({
+      ref: PV2_REF,
+      remoteVersion: '2026-06-11T17:00:00Z',
+      remoteUrl: 'https://github.com/acme/app/issues/42#issuecomment-9001',
+      raw: { commentId: 9001, createdAt: '2026-06-11T17:00:00Z' },
+    })
+
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(url).toBe('https://api.github.com/repos/acme/app/issues/42/comments')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ body: 'Looks good to me' })
+    const headers = init.headers as Record<string, string>
+    expect(headers['Authorization']).toBe('Bearer test-token')
+  })
+
+  it('comment on a draft-backed item throws UnsupportedMutationError (no comment target)', async () => {
+    fetchMock.mockResolvedValueOnce(draftContentResponse())
+    await expect(
+      connector().applyMutation(envelopeFor({ kind: 'comment', ref: PV2_REF, body: 'hi' })),
+    ).rejects.toBeInstanceOf(UnsupportedMutationError)
+    // Only the content-resolution query went out — no REST call
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('comment / update_item on a vanished item throw GitHubNotFoundError', async () => {
+    fetchMock.mockResolvedValueOnce(dataResponse({ node: null }))
+    await expect(
+      connector().applyMutation(envelopeFor({ kind: 'comment', ref: PV2_REF, body: 'hi' })),
+    ).rejects.toBeInstanceOf(GitHubNotFoundError)
+
+    fetchMock.mockResolvedValueOnce(dataResponse({ node: null }))
+    await expect(
+      connector().applyMutation(envelopeFor({ kind: 'update_item', ref: PV2_REF, patch: { title: 'x' } })),
+    ).rejects.toBeInstanceOf(GitHubNotFoundError)
+  })
+
+  it('comment surfaces a clear error when the REST call fails', async () => {
+    fetchMock
+      .mockResolvedValueOnce(issueContentResponse())
+      .mockResolvedValueOnce(jsonResponse({ message: 'Not Found' }, 404))
+
+    await expect(
+      connector().applyMutation(envelopeFor({ kind: 'comment', ref: PV2_REF, body: 'hi' })),
+    ).rejects.toThrow(/acme\/app#42 failed: HTTP 404/)
+  })
+
+  it('archive_item (not in capabilities.write) throws UnsupportedMutationError', async () => {
+    await expect(
+      connector().applyMutation(envelopeFor({ kind: 'archive_item', ref: PV2_REF })),
+    ).rejects.toBeInstanceOf(UnsupportedMutationError)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
