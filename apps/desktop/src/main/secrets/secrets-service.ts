@@ -11,33 +11,46 @@ import type { Secret } from '@creare/database'
 
 let _masterKey: CryptoKey | null = null
 
-async function getMasterKey(): Promise<CryptoKey> {
-  if (_masterKey) return _masterKey
-
-  let rawBytes: Uint8Array | null = null
-
+// Load the stable master-key bytes, or create them once. The key NEVER rotates once
+// written: a transient OS-keyring failure can no longer regenerate it and orphan every
+// encrypted secret. The key lives base64 in the 0600 keys.json (stability-over-at-rest-
+// secrecy, deliberate for a local-first single-user app); see KeysFile in auth-service.
+function loadOrCreateMasterKeyBytes(): Uint8Array {
   const keys = readKeysFile()
+
+  // 1. Stable raw key — the source of truth once written. Used forever after.
+  if (keys.masterKeyRaw) {
+    const buf = Buffer.from(keys.masterKeyRaw, 'base64')
+    if (buf.length === 32) return new Uint8Array(buf)
+  }
+
+  // 2. Legacy keyring-wrapped key — migrate the SAME key to stable raw storage. This
+  //    preserves every existing encrypted secret (it's the same key, just stored so a
+  //    keyring hiccup can't lose it).
   if (keys.masterKeyBlob && safeStorage.isEncryptionAvailable()) {
     try {
       const decrypted = safeStorage.decryptString(Buffer.from(keys.masterKeyBlob, 'base64'))
       const candidate = Buffer.from(decrypted, 'base64')
-      if (candidate.length === 32) rawBytes = new Uint8Array(candidate)
+      if (candidate.length === 32) {
+        writeKeysFile({ masterKeyRaw: candidate.toString('base64') })
+        return new Uint8Array(candidate)
+      }
     } catch {
-      // fall through to generate
+      // fall through to generate — no recoverable key (prior secrets are already lost)
     }
   }
 
-  if (!rawBytes) {
-    rawBytes = new Uint8Array(32)
-    globalThis.crypto.getRandomValues(rawBytes)
-    if (safeStorage.isEncryptionAvailable()) {
-      const b64 = Buffer.from(rawBytes).toString('base64')
-      writeKeysFile({ masterKeyBlob: safeStorage.encryptString(b64).toString('base64') })
-    }
-  }
+  // 3. No recoverable key — generate ONCE and persist raw (stable forever after).
+  const bytes = new Uint8Array(32)
+  globalThis.crypto.getRandomValues(bytes)
+  writeKeysFile({ masterKeyRaw: Buffer.from(bytes).toString('base64') })
+  return bytes
+}
 
+async function getMasterKey(): Promise<CryptoKey> {
+  if (_masterKey) return _masterKey
   _masterKey = await globalThis.crypto.subtle.importKey(
-    'raw', rawBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'],
+    'raw', loadOrCreateMasterKeyBytes(), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'],
   )
   return _masterKey
 }

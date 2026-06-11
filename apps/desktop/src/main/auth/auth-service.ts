@@ -16,8 +16,17 @@ const KEYS_FILE = join(homedir(), '.creare', 'keys.json')
 let _jwtSecret: Uint8Array | null = null
 
 interface KeysFile {
-  jwtSecretBlob?: string  // safeStorage-encrypted base64 of the raw hex secret
-  masterKeyBlob?: string  // safeStorage-encrypted base64 of the 32-byte master key
+  // Stable, keyring-independent source of truth (base64). Once written these never
+  // change, so a transient OS-keyring failure can no longer rotate the key and orphan
+  // every previously-encrypted secret. The file is mode 0600 in the user's home dir —
+  // a deliberate stability-over-at-rest-secrecy trade-off for a local-first, single-user
+  // app (the prior keyring-wrapped scheme silently destroyed data on any keyring hiccup).
+  jwtSecretRaw?: string   // base64 of the raw 64-char hex JWT secret
+  masterKeyRaw?: string   // base64 of the raw 32-byte master key
+  // Legacy safeStorage-wrapped forms — still read ONCE to migrate into the *Raw fields,
+  // then ignored. Never written again.
+  jwtSecretBlob?: string
+  masterKeyBlob?: string
 }
 
 export function readKeysFile(): KeysFile {
@@ -40,26 +49,37 @@ export function getJwtSecret(): Uint8Array {
   if (_jwtSecret) return _jwtSecret
 
   const keys = readKeysFile()
+
+  // 1. Stable raw secret — the source of truth once written. Used forever after.
+  if (keys.jwtSecretRaw) {
+    const raw = Buffer.from(keys.jwtSecretRaw, 'base64').toString('utf8')
+    if (raw.length === 64) {
+      _jwtSecret = new TextEncoder().encode(raw)
+      return _jwtSecret
+    }
+  }
+
+  // 2. Legacy keyring-wrapped secret — migrate the SAME value to stable raw storage so
+  //    a future keyring hiccup can't lose it (existing sessions keep validating).
   if (keys.jwtSecretBlob && safeStorage.isEncryptionAvailable()) {
     try {
       const raw = safeStorage.decryptString(Buffer.from(keys.jwtSecretBlob, 'base64'))
       if (raw.length === 64) {
+        writeKeysFile({ jwtSecretRaw: Buffer.from(raw, 'utf8').toString('base64') })
         _jwtSecret = new TextEncoder().encode(raw)
         return _jwtSecret
       }
     } catch {
-      // fall through to generate
+      // fall through to generate — no recoverable secret
     }
   }
 
+  // 3. No recoverable secret — generate ONCE and persist raw (stable forever after).
   const bytes = new Uint8Array(32)
   globalThis.crypto.getRandomValues(bytes)
   const raw = Buffer.from(bytes).toString('hex')
+  writeKeysFile({ jwtSecretRaw: Buffer.from(raw, 'utf8').toString('base64') })
   _jwtSecret = new TextEncoder().encode(raw)
-
-  if (safeStorage.isEncryptionAvailable()) {
-    writeKeysFile({ jwtSecretBlob: safeStorage.encryptString(raw).toString('base64') })
-  }
 
   return _jwtSecret
 }
