@@ -10,7 +10,32 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
-- **RESUME HERE (2026-06-11, latest):** big INTEGRATION REVISION landed on `main` (commits `14b1b3a` wave1, `8394a55`
+- **RESUME HERE (2026-06-11, LATEST):** **BIDIRECTIONAL SYNC — Phase 1 CODE-COMPLETE on `main`** (commits
+  `9d846e4` foundation, `61b3c44` engine, `660ac08` mirror engine, `7c99ffc` wiring/UI). Built from
+  `docs/architecture/bidirectional-sync.md` (Fable 5 design) in 4 verified waves of parallel Fable 5 agents.
+  Full gate GREEN: typecheck **23/23** · unit **131/131** · lint **12/12**. **NOT yet verified live** — the real
+  GraphQL flow needs a real GitHub Project + a classic PAT with `project`+`repo` scopes, and Electron won't launch
+  in the agent sandbox; verify in `pnpm dev`.
+  • **What Phase 1 delivers:** "Import from GitHub" on the Boards page → pick a connection + a **GitHub Project (v2)**
+    → it becomes a mirrored Creare Kanban (columns = Status options, cards = items backed by tasks). **Drag a card →
+    pushes the move back to GitHub** (durable outbox, FIFO per credential, LWW for moves). **"Pull now"** reconciles
+    remote→local (three-way diff vs `remote_links` shadow table; conflicts counted). move_item only in P1.
+  • **New:** migration `0007` (SCHEMA_VERSION **1.8.0**: `remote_links`, `mutation_queue`, `sync_conflicts`);
+    `@creare/shared.stableHash`; connector write surface (`capabilities`/`applyMutation`/`fetchRemoteVersion`/
+    `verifyWriteAccess`); `GitHubProjectsClient` (GraphQL); `mirror/{reconciler,mirror-sync,outbox}`;
+    `boards.applyMirrorSnapshot` (plain `MirrorApply` contract — boards never imports integrations, no cycle);
+    `routes/mirrors.ts` + `sync/push-worker.ts`; renderer `ImportRemoteBoardDialog` + `MirrorStatusChip`.
+  • **remote_links convention:** board link `containerRemoteId` = Status FIELD id; column/item links
+    `containerRemoteId` = ProjectV2 node id. Auto-pull deferred to manual "Pull now" (avoid mid-drag conflicts).
+  • **Roadmap (docs/architecture/bidirectional-sync.md):** P2 = GH item create/edit/close/comment + conflict-resolution
+    UI; P3 = Jira two-way (moves via transitions); P4 = Notion/Confluence/OneDrive writes; P5 = delta/webhooks/agent
+    mutations via approval_gates.
+- **Earlier 2026-06-11 fixes (all on `main`):** key-rotation root-cause fix (stable raw master/JWT keys, never rotate
+  on a keyring hiccup — `68803bc`); claude-cli provider can't crash the host (stdin EPIPE — `cdea9ba`); undecryptable
+  global setting degrades to default not a 500 (`5043999`); resource-picker surfaces the real error (`0709c06`).
+  **Token gotcha:** a token encrypted BEFORE the stable-key fix is orphaned (unrecoverable) — re-add it ONCE via
+  Connections; it then persists forever.
+- **(prior) big INTEGRATION REVISION landed on `main`** (commits `14b1b3a` wave1, `8394a55`
   wave2; tree clean). Driven by user feedback "tabs/data don't communicate, looks like a static app." Ran a Fable 5
   3-reviewer deep review → executed in 2 waves of 5 parallel Fable 5 agents. Static gate GREEN (typecheck 23/23 ·
   unit 81/81 · lint 12/12). **E2E COULD NOT RUN — tool sandbox kills Electron (exit 144); verify live in `pnpm dev`.**
