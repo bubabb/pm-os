@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   LayoutGrid, Plus, Loader2, Flag, Milestone as MilestoneIcon,
   ChevronDown, Trash2, Play, CheckCircle2, Calendar, Search, Github,
+  SquarePlus, Pencil, MessageSquare,
 } from 'lucide-react'
 import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
@@ -52,6 +53,24 @@ interface BoardItem {
   taskTitle: string | null
   createdAt: string
   updatedAt: string
+}
+
+// Subset of GET /projects/:projectId/boards/:boardId/sync-status consumed here.
+// (The full shape lives in MirrorStatusChip — both share the same query key, so
+// the cache entry is the full server payload either way.)
+interface BoardSyncStatus {
+  linked: boolean
+  source: string | null
+}
+
+/** Human label for the remote a mirrored board pushes to. */
+function mirrorSourceLabel(source: string | null | undefined): string {
+  switch (source) {
+    case 'github': return 'GitHub'
+    case 'jira':   return 'Jira'
+    case 'notion': return 'Notion'
+    default:       return 'the remote'
+  }
 }
 
 type SprintStatus = 'planning' | 'active' | 'completed'
@@ -192,6 +211,11 @@ function BoardsTab({ projectId }: { projectId: string }) {
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null)
   // Column the "Add task" dialog is targeting (null = dialog closed).
   const [addTaskColumn, setAddTaskColumn] = useState<BoardColumn | null>(null)
+  // Column whose inline "New card" composer is open (null = none).
+  const [newCardColumnId, setNewCardColumnId] = useState<string | null>(null)
+  const [newCardTitle, setNewCardTitle] = useState('')
+  // Card the comment dialog is targeting (null = dialog closed).
+  const [commentItem, setCommentItem] = useState<BoardItem | null>(null)
 
   const {
     data: boardList = [], isLoading: boardsLoading,
@@ -214,6 +238,17 @@ function BoardsTab({ projectId }: { projectId: string }) {
     queryFn: () => api.get(`/projects/${projectId}/boards/${activeBoardId}/items`),
     enabled: activeBoardId !== null,
   })
+
+  // Mirror state for the active board. Shares the cache entry MirrorStatusChip
+  // polls (same key), so this costs nothing extra while the chip is mounted.
+  // Gates the remote-only card actions (Close / Comment) below.
+  const { data: syncStatus } = useQuery<BoardSyncStatus>({
+    queryKey: ['sync-status', projectId, activeBoardId],
+    queryFn: () => api.get(`/projects/${projectId}/boards/${activeBoardId}/sync-status`),
+    enabled: activeBoardId !== null,
+  })
+  const mirrored = syncStatus?.linked === true
+  const sourceLabel = mirrorSourceLabel(syncStatus?.source)
 
   const createBoard = useMutation({
     mutationFn: (body: { name: string; type: BoardType }) =>
@@ -269,6 +304,50 @@ function BoardsTab({ projectId }: { projectId: string }) {
       setActionError(null)
     },
     onError: (e: Error) => setActionError(e.message),
+  })
+
+  // ── Card lifecycle (creates a fresh task+card; on mirrored boards the server
+  //    also pushes the change to the remote — GitHub/Jira/Notion) ──────────────
+
+  const createCard = useMutation({
+    mutationFn: ({ title, columnId }: { title: string; columnId: string }) =>
+      api.post<BoardItem>(`/projects/${projectId}/boards/${activeBoardId}/cards`, { title, columnId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['board-items', activeBoardId] })
+      qc.invalidateQueries({ queryKey: ['tasks', projectId] })
+      qc.invalidateQueries({ queryKey: ['sync-status', projectId, activeBoardId] })
+      toast.success(mirrored ? `Card created and pushed to ${sourceLabel}` : 'Card created')
+      setNewCardColumnId(null)
+      setNewCardTitle('')
+      setActionError(null)
+    },
+    onError: (e: Error) => toast.error(`Failed to create card: ${e.message}`),
+  })
+
+  const renameCard = useMutation({
+    mutationFn: ({ itemId, title }: { itemId: string; title: string }) =>
+      api.patch(`/projects/${projectId}/boards/${activeBoardId}/cards/${itemId}`, { title }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['board-items', activeBoardId] })
+      qc.invalidateQueries({ queryKey: ['tasks', projectId] })
+      qc.invalidateQueries({ queryKey: ['sync-status', projectId, activeBoardId] })
+      toast.success('Title updated')
+      setActionError(null)
+    },
+    onError: (e: Error) => toast.error(`Failed to rename card: ${e.message}`),
+  })
+
+  const closeCard = useMutation({
+    mutationFn: (itemId: string) =>
+      api.post(`/projects/${projectId}/boards/${activeBoardId}/cards/${itemId}/close`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['board-items', activeBoardId] })
+      qc.invalidateQueries({ queryKey: ['tasks', projectId] })
+      qc.invalidateQueries({ queryKey: ['sync-status', projectId, activeBoardId] })
+      toast.success('Card closed')
+      setActionError(null)
+    },
+    onError: (e: Error) => toast.error(`Failed to close card: ${e.message}`),
   })
 
   if (boardsLoading) return <Spinner />
@@ -422,9 +501,17 @@ function BoardsTab({ projectId }: { projectId: string }) {
                             {colItems.length}{col.wipLimit !== null ? `/${col.wipLimit}` : ''}
                           </span>
                           <button
+                            onClick={() => { setNewCardColumnId(col.id); setNewCardTitle('') }}
+                            title="New card"
+                            aria-label={`New card in ${col.name}`}
+                            className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          >
+                            <SquarePlus className="h-3 w-3" aria-hidden="true" />
+                          </button>
+                          <button
                             onClick={() => setAddTaskColumn(col)}
-                            title="Add task"
-                            aria-label={`Add task to ${col.name}`}
+                            title="Add existing task"
+                            aria-label={`Add existing task to ${col.name}`}
                             className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                           >
                             <Plus className="h-3 w-3" aria-hidden="true" />
@@ -432,23 +519,70 @@ function BoardsTab({ projectId }: { projectId: string }) {
                         </div>
                       </div>
                       <div className="flex-1 space-y-2 p-2">
-                        {colItems.length === 0 ? (
-                          <button
-                            onClick={() => setAddTaskColumn(col)}
-                            className="flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-border py-3 text-[11px] text-muted-foreground/60 transition-colors hover:border-primary/40 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                        {newCardColumnId === col.id && (
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault()
+                              const title = newCardTitle.trim()
+                              if (title && !createCard.isPending) createCard.mutate({ title, columnId: col.id })
+                            }}
+                            className="space-y-1.5 rounded-md border border-primary/40 bg-card p-2 shadow-sm"
                           >
-                            <Plus className="h-3 w-3" aria-hidden="true" />
-                            Add task
-                          </button>
+                            <input
+                              autoFocus
+                              aria-label={`New card title for ${col.name}`}
+                              placeholder="Card title…"
+                              value={newCardTitle}
+                              onChange={(e) => setNewCardTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') { setNewCardColumnId(null); setNewCardTitle('') }
+                              }}
+                              className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary"
+                            />
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="submit"
+                                disabled={!newCardTitle.trim() || createCard.isPending}
+                                className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+                              >
+                                {createCard.isPending && <Loader2 className="h-2.5 w-2.5 animate-spin" aria-hidden="true" />}
+                                Create
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setNewCardColumnId(null); setNewCardTitle('') }}
+                                className="rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
+                        )}
+                        {colItems.length === 0 ? (
+                          newCardColumnId !== col.id && (
+                            <button
+                              onClick={() => setAddTaskColumn(col)}
+                              className="flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-border py-3 text-[11px] text-muted-foreground/60 transition-colors hover:border-primary/40 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                            >
+                              <Plus className="h-3 w-3" aria-hidden="true" />
+                              Add task
+                            </button>
+                          )
                         ) : (
                           colItems.map((item) => (
                             <KanbanCard
                               key={item.id}
                               item={item}
                               columns={sortedColumns}
+                              mirrored={mirrored}
                               onMove={(colId) => moveItem.mutate({ itemId: item.id, columnId: colId })}
                               onRemove={() => removeItem.mutate(item.id)}
+                              onRename={(title) => renameCard.mutate({ itemId: item.id, title })}
+                              onCloseCard={() => closeCard.mutate(item.id)}
+                              onComment={() => setCommentItem(item)}
                               moving={moveItem.isPending}
+                              renaming={renameCard.isPending && renameCard.variables?.itemId === item.id}
+                              closing={closeCard.isPending && closeCard.variables === item.id}
                               dragging={draggingItemId === item.id}
                               onDragStart={() => setDraggingItemId(item.id)}
                               onDragEnd={() => {
@@ -485,6 +619,15 @@ function BoardsTab({ projectId }: { projectId: string }) {
             boardId={activeBoardId}
             column={addTaskColumn}
             boardTaskIds={items.map((i) => i.taskId)}
+          />
+
+          <CommentDialog
+            open={commentItem !== null}
+            onClose={() => setCommentItem(null)}
+            projectId={projectId}
+            boardId={activeBoardId}
+            item={commentItem}
+            sourceLabel={sourceLabel}
           />
         </>
       ) : null}
@@ -617,24 +760,45 @@ function AddTaskDialog({
 }
 
 // ── Kanban Card ───────────────────────────────────────────────────────────────
+// Card actions: Move + Remove (board-local), Edit title (any board; pushes
+// automatically on mirrored boards), and Close + Comment (remote actions —
+// rendered only when the board is mirrored, i.e. sync-status.linked === true).
 
 function KanbanCard({
-  item, columns, onMove, onRemove, moving, dragging, onDragStart, onDragEnd,
+  item, columns, mirrored, onMove, onRemove, onRename, onCloseCard, onComment,
+  moving, renaming, closing, dragging, onDragStart, onDragEnd,
 }: {
   item: BoardItem
   columns: BoardColumn[]
+  mirrored: boolean
   onMove: (colId: string) => void
   onRemove: () => void
+  onRename: (title: string) => void
+  onCloseCard: () => void
+  onComment: () => void
   moving: boolean
+  renaming: boolean
+  closing: boolean
   dragging: boolean
   onDragStart: () => void
   onDragEnd: () => void
 }) {
   const [showMenu, setShowMenu] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const title = item.taskTitle ?? item.taskId.slice(0, 8)
+  const busy = moving || renaming || closing
+
+  function commitEdit() {
+    setEditing(false)
+    const next = draft.trim()
+    if (next && next !== item.taskTitle) onRename(next)
+  }
 
   return (
     <div
-      draggable
+      draggable={!editing}
       onDragStart={(e: React.DragEvent<HTMLDivElement>) => {
         e.dataTransfer.setData('text/plain', item.id)
         e.dataTransfer.effectAllowed = 'move'
@@ -645,9 +809,24 @@ function KanbanCard({
         dragging ? 'opacity-50 ring-1 ring-primary/50' : ''
       }`}
     >
-      <p className="text-xs font-medium text-foreground leading-snug">
-        {item.taskTitle ?? item.taskId.slice(0, 8)}
-      </p>
+      {editing ? (
+        <input
+          autoFocus
+          aria-label="Edit card title"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitEdit()
+            else if (e.key === 'Escape') setEditing(false)
+          }}
+          onBlur={commitEdit}
+          className="w-full rounded border border-border bg-background px-1.5 py-1 text-xs font-medium text-foreground outline-none focus:ring-2 focus:ring-primary"
+        />
+      ) : (
+        <p className="text-xs font-medium text-foreground leading-snug">
+          {title}
+        </p>
+      )}
       {item.storyPoints !== null && (
         <span className="mt-1 inline-block rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
           {item.storyPoints} pts
@@ -656,20 +835,56 @@ function KanbanCard({
       <div className="mt-2 flex items-center gap-1">
         <button
           onClick={() => setShowMenu((s) => !s)}
-          disabled={moving}
+          disabled={busy}
           title="Move to column"
-          className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+          aria-label={`Move ${title} to another column`}
+          className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
         >
-          Move <ChevronDown className="h-2.5 w-2.5" />
+          Move <ChevronDown className="h-2.5 w-2.5" aria-hidden="true" />
         </button>
         <button
+          onClick={() => { setDraft(item.taskTitle ?? ''); setEditing(true) }}
+          disabled={busy || editing}
+          title="Edit title"
+          aria-label={`Edit title of ${title}`}
+          className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
+        >
+          {renaming
+            ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+            : <Pencil className="h-3 w-3" aria-hidden="true" />}
+        </button>
+        {mirrored && (
+          <>
+            <button
+              onClick={onCloseCard}
+              disabled={busy}
+              title="Close card (pushes to the remote)"
+              aria-label={`Close ${title}`}
+              className="rounded p-0.5 text-muted-foreground hover:bg-emerald-500/10 hover:text-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
+            >
+              {closing
+                ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                : <CheckCircle2 className="h-3 w-3" aria-hidden="true" />}
+            </button>
+            <button
+              onClick={onComment}
+              disabled={busy}
+              title="Comment (posts to the remote)"
+              aria-label={`Comment on ${title}`}
+              className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
+            >
+              <MessageSquare className="h-3 w-3" aria-hidden="true" />
+            </button>
+          </>
+        )}
+        <button
           onClick={onRemove}
-          disabled={moving}
+          disabled={busy}
           title="Remove from board"
           aria-label={`Remove ${item.taskTitle ?? 'item'} from board`}
-          className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+          className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive disabled:opacity-40"
         >
-          <Trash2 className="h-3 w-3" />
+          <Trash2 className="h-3 w-3" aria-hidden="true" />
         </button>
       </div>
       {showMenu && (
@@ -686,6 +901,82 @@ function KanbanCard({
         </div>
       )}
     </div>
+  )
+}
+
+// ── Comment Dialog ────────────────────────────────────────────────────────────
+// Posts a comment on a mirrored card's remote item (GitHub/Jira/Notion). Only
+// reachable from mirrored boards — the Comment action is gated on sync-status.
+
+function CommentDialog({
+  open, onClose, projectId, boardId, item, sourceLabel,
+}: {
+  open: boolean
+  onClose: () => void
+  projectId: string
+  boardId: string
+  item: BoardItem | null
+  sourceLabel: string
+}) {
+  const [body, setBody] = useState('')
+
+  // Start each open with an empty draft.
+  useEffect(() => {
+    if (open) setBody('')
+  }, [open])
+
+  const postComment = useMutation({
+    mutationFn: ({ itemId, commentBody }: { itemId: string; commentBody: string }) =>
+      api.post(`/projects/${projectId}/boards/${boardId}/cards/${itemId}/comment`, { body: commentBody }),
+    onSuccess: () => {
+      toast.success(`Comment posted to ${sourceLabel}`)
+      onClose()
+    },
+    onError: (e: Error) => toast.error(`Failed to post comment: ${e.message}`),
+  })
+
+  function submit() {
+    const trimmed = body.trim()
+    if (!trimmed || !item || postComment.isPending) return
+    postComment.mutate({ itemId: item.id, commentBody: trimmed })
+  }
+
+  return (
+    <Dialog
+      open={open && item !== null}
+      onClose={onClose}
+      title={`Comment on ${item?.taskTitle ?? 'card'}`}
+      footer={
+        <>
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={!body.trim() || postComment.isPending}
+            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+          >
+            {postComment.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+            Post comment
+          </button>
+        </>
+      }
+    >
+      <Field id="card-comment" label={`Comment (posted to ${sourceLabel})`}>
+        <textarea
+          id="card-comment"
+          autoFocus
+          rows={4}
+          placeholder="Write a comment…"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+        />
+      </Field>
+    </Dialog>
   )
 }
 

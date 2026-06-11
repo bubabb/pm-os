@@ -33,7 +33,16 @@ export type {
 // never decrypts anything.
 export { createMirror, pullMirror, getMirrorStatus, listRemoteBoards } from './mirror/mirror-sync'
 export type { MirrorStatus } from './mirror/mirror-sync'
-export { enqueueMutation, enqueueBoardItemMove, drainMutationQueue, recoverStaleInFlight } from './mirror/outbox'
+export {
+  enqueueMutation,
+  enqueueBoardItemMove,
+  enqueueItemCreate,
+  enqueueItemUpdate,
+  enqueueItemClose,
+  enqueueItemComment,
+  drainMutationQueue,
+  recoverStaleInFlight,
+} from './mirror/outbox'
 export type { DrainResult } from './mirror/outbox'
 // Conflict resolution backend — lists open sync_conflicts in human terms and
 // applies the user's verdict (local_wins / remote_wins / dismiss).

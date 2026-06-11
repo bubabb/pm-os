@@ -16,6 +16,7 @@ import { reportingRoutes } from './routes/reporting'
 import { orchestrationRoutes } from './routes/orchestration'
 import { boardsRoutes } from './routes/boards'
 import { mirrorsRoutes } from './routes/mirrors'
+import { mirrorCardsRoutes } from './routes/mirror-cards'
 import { conflictsRoutes } from './routes/conflicts'
 import { observabilityRoutes } from './routes/observability'
 import { toolsRoutes } from './routes/tools'
@@ -100,6 +101,7 @@ export async function startServer(): Promise<void> {
   await app.register(orchestrationRoutes)
   await app.register(boardsRoutes)
   await app.register(mirrorsRoutes)
+  await app.register(mirrorCardsRoutes)
   await app.register(conflictsRoutes)
   await app.register(observabilityRoutes)
   await app.register(toolsRoutes)

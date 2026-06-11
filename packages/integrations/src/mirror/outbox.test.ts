@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { seedWorkspace, seedCredential, destroyTestDb } from '@creare/database/testing'
+import { seedWorkspace, seedCredential, seedTask, destroyTestDb } from '@creare/database/testing'
 import {
   getDb,
+  boards,
+  boardColumns,
+  boardItems,
   events,
   integrationCredentials,
   mutationQueue,
@@ -11,7 +14,16 @@ import {
 import { generateId } from '@creare/shared'
 import { and, eq } from 'drizzle-orm'
 import { UnsupportedMutationError } from '../connectors/base'
-import { enqueueMutation, enqueueBoardItemMove, drainMutationQueue, recoverStaleInFlight } from './outbox'
+import {
+  enqueueMutation,
+  enqueueBoardItemMove,
+  enqueueItemCreate,
+  enqueueItemUpdate,
+  enqueueItemClose,
+  enqueueItemComment,
+  drainMutationQueue,
+  recoverStaleInFlight,
+} from './outbox'
 import type { IntegrationCredential } from '@creare/database'
 import type { MutationEnvelope, MutationOp } from '../types'
 
@@ -111,6 +123,23 @@ function moveOp(): MutationOp {
     toStatusRemoteId: 'OPT_DONE',
     statusFieldRemoteId: 'FIELD_STATUS',
   }
+}
+
+// Real boards/board_columns/tasks/board_items rows — the test DB enforces FKs,
+// and enqueueItemCreate reads board_items to resolve the owning board.
+function seedRealBoardItem(boardId = 'board-1', itemId = 'bi-new'): string {
+  const db = getDb()
+  db.insert(boards).values({ id: boardId, projectId, name: 'Mirrored board' }).run()
+  db.insert(boardColumns).values({ id: `${boardId}-col0`, boardId, name: 'To Do', position: 0 }).run()
+  const taskId = seedTask(projectId)
+  db.insert(boardItems).values({ id: itemId, boardId, columnId: `${boardId}-col0`, taskId }).run()
+  return itemId
+}
+
+function itemLinkRows(localId: string) {
+  return getDb().select().from(remoteLinks)
+    .where(and(eq(remoteLinks.localType, 'board_item'), eq(remoteLinks.localId, localId)))
+    .all()
 }
 
 const getCred = async (id: string): Promise<{ credential: IntegrationCredential; token: string }> => {
@@ -246,6 +275,161 @@ describe('outbox — enqueueBoardItemMove', () => {
     const row = queueRow(opId!)
     expect(row.status).toBe('failed')
     expect(row.lastError).toContain('missing containerRemoteId')
+  })
+})
+
+describe('outbox — enqueueItemUpdate / enqueueItemClose / enqueueItemComment', () => {
+  it('return null when the item has no remote link (board not mirrored)', async () => {
+    expect(await enqueueItemUpdate('bi-unlinked', { title: 'T' })).toBeNull()
+    expect(await enqueueItemClose('bi-unlinked')).toBeNull()
+    expect(await enqueueItemComment('bi-unlinked', 'hi')).toBeNull()
+    expect(getDb().select().from(mutationQueue).all()).toHaveLength(0)
+  })
+
+  it('enqueueItemUpdate enqueues update_item with the item ref, clean patch, and merge base', async () => {
+    const { itemLinkId } = seedMirroredMove('bi-1')
+
+    const opId = await enqueueItemUpdate('bi-1', { title: 'Renamed' })
+    expect(opId).not.toBeNull()
+
+    const row = queueRow(opId!)
+    expect(row.status).toBe('pending')
+    expect(row.kind).toBe('update_item')
+    expect(row.remoteLinkId).toBe(itemLinkId)
+    expect(row.baseVersion).toBe('v1') // item link's remoteVersion
+    // toEqual is strict: no `body` key may leak into the durable payload.
+    expect(JSON.parse(row.payload)).toEqual({
+      kind: 'update_item',
+      ref: { remoteType: 'pv2_item', remoteId: 'ITEM_bi-1', containerId: 'PVT_board1' },
+      patch: { title: 'Renamed' },
+    })
+    expect(eventsOfType('integration.mutation.enqueued')).toHaveLength(1)
+  })
+
+  it('enqueueItemClose enqueues close_item against the item ref', async () => {
+    const { itemLinkId } = seedMirroredMove('bi-1')
+
+    const opId = await enqueueItemClose('bi-1')
+    expect(opId).not.toBeNull()
+
+    const row = queueRow(opId!)
+    expect(row.kind).toBe('close_item')
+    expect(row.remoteLinkId).toBe(itemLinkId)
+    expect(JSON.parse(row.payload)).toEqual({
+      kind: 'close_item',
+      ref: { remoteType: 'pv2_item', remoteId: 'ITEM_bi-1', containerId: 'PVT_board1' },
+    })
+  })
+
+  it('enqueueItemComment enqueues comment carrying the body', async () => {
+    seedMirroredMove('bi-1')
+
+    const opId = await enqueueItemComment('bi-1', 'Looks good to me')
+    expect(opId).not.toBeNull()
+
+    const row = queueRow(opId!)
+    expect(row.kind).toBe('comment')
+    expect(JSON.parse(row.payload)).toEqual({
+      kind: 'comment',
+      ref: { remoteType: 'pv2_item', remoteId: 'ITEM_bi-1', containerId: 'PVT_board1' },
+      body: 'Looks good to me',
+    })
+  })
+})
+
+describe('outbox — enqueueItemCreate + create-result linking', () => {
+  it('returns null when the board_item row does not exist', async () => {
+    expect(await enqueueItemCreate('bi-ghost', 'Title')).toBeNull()
+    expect(getDb().select().from(mutationQueue).all()).toHaveLength(0)
+  })
+
+  it('returns null when the board is not mirrored (no board link)', async () => {
+    seedRealBoardItem('board-1', 'bi-new') // real rows, but NO remote link
+    expect(await enqueueItemCreate('bi-new', 'Title')).toBeNull()
+    expect(getDb().select().from(mutationQueue).all()).toHaveLength(0)
+  })
+
+  it('enqueues create_item against the board container, payload carrying the local board_item id', async () => {
+    seedBoardLink() // board-1 ↔ PVT_board1
+    seedRealBoardItem('board-1', 'bi-new')
+
+    const opId = await enqueueItemCreate('bi-new', 'New card', 'card body')
+    expect(opId).not.toBeNull()
+
+    const row = queueRow(opId!)
+    expect(row.status).toBe('pending')
+    expect(row.kind).toBe('create_item')
+    expect(row.remoteLinkId).toBeNull() // no link until the push succeeds
+    expect(row.baseVersion).toBeNull()  // nothing exists remotely — no merge base
+    expect(JSON.parse(row.payload)).toEqual({
+      kind: 'create_item',
+      container: { remoteType: 'pv2_project', remoteId: 'PVT_board1' },
+      title: 'New card',
+      body: 'card body',
+      localBoardItemId: 'bi-new', // processOp links the minted remote id back via this
+    })
+  })
+
+  it('on push success, upserts the board_item remote link from MutationResult.ref', async () => {
+    seedBoardLink()
+    seedRealBoardItem('board-1', 'bi-new')
+    const opId = (await enqueueItemCreate('bi-new', 'New card'))!
+
+    const counts = await drainMutationQueue(getCred)
+
+    expect(counts).toEqual({ applied: 1, conflicts: 0, failed: 0 })
+    expect(queueRow(opId).status).toBe('applied')
+
+    // The connector stub minted ITEM_1 @ v2 — the item is now linked so
+    // future move/edit/pull resolve it.
+    const links = itemLinkRows('bi-new')
+    expect(links).toHaveLength(1)
+    expect(links[0]).toMatchObject({
+      credentialId,
+      source: 'github',
+      remoteType: 'pv2_item',
+      remoteId: 'ITEM_1',
+      remoteVersion: 'v2',
+      containerRemoteId: 'PVT_board1', // item-link convention: the board's remote id
+      deletedAt: null,
+    })
+    expect(links[0]!.lastPushedAt).toBeTruthy()
+
+    // Lifecycle continuity: an edit enqueued AFTER the create push resolves.
+    const updateOpId = await enqueueItemUpdate('bi-new', { title: 'Edited' })
+    expect(updateOpId).not.toBeNull()
+    expect(queueRow(updateOpId!).baseVersion).toBe('v2')
+  })
+
+  it('updates an existing link in place instead of duplicating (pull linked the item mid-flight)', async () => {
+    seedBoardLink()
+    seedRealBoardItem('board-1', 'bi-new')
+    const staleLinkId = seedLink({
+      localType: 'board_item', localId: 'bi-new',
+      remoteType: 'pv2_item', remoteId: 'ITEM_stale',
+      containerRemoteId: 'PVT_board1', remoteVersion: 'v0',
+    })
+    // Enqueue bypassing the not-yet-linked guard: simulates a create op that
+    // was pending when a pull (or another worker) linked the item.
+    const op = {
+      kind: 'create_item' as const,
+      container: { remoteType: 'pv2_project', remoteId: 'PVT_board1' },
+      title: 'New card',
+      localBoardItemId: 'bi-new',
+    }
+    const opId = await enqueueMutation(
+      { credentialId, projectId, source: 'github', baseVersion: null, op },
+      null,
+    )
+
+    const counts = await drainMutationQueue(getCred)
+
+    expect(counts).toEqual({ applied: 1, conflicts: 0, failed: 0 })
+    expect(queueRow(opId).status).toBe('applied')
+    const links = itemLinkRows('bi-new')
+    expect(links).toHaveLength(1) // UNIQUE(localType, localId) respected — updated, not duplicated
+    expect(links[0]!.id).toBe(staleLinkId)
+    expect(links[0]).toMatchObject({ remoteId: 'ITEM_1', remoteVersion: 'v2' })
   })
 })
 

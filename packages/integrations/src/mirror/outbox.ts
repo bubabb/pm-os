@@ -27,6 +27,7 @@
 
 import {
   getDb,
+  boardItems,
   events,
   mutationQueue,
   remoteLinks,
@@ -48,6 +49,7 @@ import type {
   IntegrationSource,
   MutationEnvelope,
   MutationOp,
+  MutationResult,
   RemoteRef,
 } from '../types'
 
@@ -303,6 +305,138 @@ async function enqueueFailedBoardItemMove(
   return opId
 }
 
+// ── Card lifecycle enqueue helpers (create / edit / close / comment) ─────────
+//
+// Same contract as enqueueBoardItemMove: NEVER throw; return the opId, or null
+// when the entity is not mirrored (no live remote link) — plain local boards
+// push nothing. The routes layer fire-and-forgets-or-awaits these and kicks
+// the push worker only on a non-null opId.
+
+// Live (non-tombstoned) remote link for a local entity, or undefined.
+function liveLink(localType: RemoteLink['localType'], localId: string): RemoteLink | undefined {
+  return getDb()
+    .select()
+    .from(remoteLinks)
+    .where(and(
+      eq(remoteLinks.localType, localType),
+      eq(remoteLinks.localId, localId),
+      isNull(remoteLinks.deletedAt),
+    ))
+    .get()
+}
+
+// RemoteRef for an item link. exactOptionalPropertyTypes: containerId is
+// omitted (not set to undefined) when the link has no containerRemoteId.
+function itemRefOf(link: RemoteLink): RemoteRef {
+  return {
+    remoteType: link.remoteType,
+    remoteId: link.remoteId,
+    ...(link.containerRemoteId !== null ? { containerId: link.containerRemoteId } : {}),
+  }
+}
+
+// Shared ref-op path: resolve the item's live link, build the op against its
+// RemoteRef, enqueue pending. null = item not mirrored (or the DB write itself
+// failed — nothing was recorded, matching reality).
+async function enqueueItemOp(
+  boardItemId: string,
+  buildOp: (ref: RemoteRef) => MutationOp,
+): Promise<string | null> {
+  try {
+    const itemLink = liveLink('board_item', boardItemId)
+    if (itemLink === undefined) return null // board not mirrored — nothing to push
+    return await enqueueMutation(
+      {
+        credentialId: itemLink.credentialId,
+        projectId: itemLink.projectId,
+        source: itemLink.source as IntegrationSource,
+        baseVersion: itemLink.remoteVersion,
+        op: buildOp(itemRefOf(itemLink)),
+      },
+      itemLink.id,
+    )
+  } catch {
+    return null
+  }
+}
+
+/** Card edit (title/body) → update_item. Never throws; null = not mirrored. */
+export async function enqueueItemUpdate(
+  boardItemId: string,
+  patch: { title?: string; body?: string },
+): Promise<string | null> {
+  // Strip absent keys so the durable payload JSON never carries undefined.
+  const cleanPatch = {
+    ...(patch.title !== undefined ? { title: patch.title } : {}),
+    ...(patch.body !== undefined ? { body: patch.body } : {}),
+  }
+  return enqueueItemOp(boardItemId, (ref) => ({ kind: 'update_item', ref, patch: cleanPatch }))
+}
+
+/** Card close → close_item. Never throws; null = not mirrored. */
+export async function enqueueItemClose(boardItemId: string): Promise<string | null> {
+  return enqueueItemOp(boardItemId, (ref) => ({ kind: 'close_item', ref }))
+}
+
+/** Card comment → comment. Never throws; null = not mirrored. */
+export async function enqueueItemComment(boardItemId: string, body: string): Promise<string | null> {
+  return enqueueItemOp(boardItemId, (ref) => ({ kind: 'comment', ref, body }))
+}
+
+// create_item payload extension: a freshly-created local board_item has NO
+// remote_links row yet (that's the point of the op), so the op JSON itself
+// carries the local board_item id. processOp reads it back on success and
+// upserts the link with the remote id the connector minted — see
+// linkCreatedItem below.
+type CreateItemOp = Extract<MutationOp, { kind: 'create_item' }>
+type CreateItemOpPayload = CreateItemOp & { localBoardItemId: string }
+
+/**
+ * Card create on a mirrored board → create_item against the BOARD's container
+ * ref (remoteType/remoteId from the board link — the ProjectV2 node id /
+ * Jira project / Notion database id). baseVersion is null: nothing exists
+ * remotely yet, so there is no merge base and no pre-push conflict probe.
+ * Never throws; null = item row missing or board not mirrored.
+ */
+export async function enqueueItemCreate(
+  boardItemId: string,
+  title: string,
+  body?: string,
+): Promise<string | null> {
+  try {
+    const item = getDb()
+      .select()
+      .from(boardItems)
+      .where(eq(boardItems.id, boardItemId))
+      .get()
+    if (item === undefined) return null
+
+    const boardLink = liveLink('board', item.boardId)
+    if (boardLink === undefined) return null // board not mirrored — nothing to push
+
+    const op: CreateItemOpPayload = {
+      kind: 'create_item',
+      container: { remoteType: boardLink.remoteType, remoteId: boardLink.remoteId },
+      title,
+      ...(body !== undefined ? { body } : {}),
+      localBoardItemId: boardItemId,
+    }
+    // remoteLinkId is null — the link does not exist until the push succeeds.
+    return await enqueueMutation(
+      {
+        credentialId: boardLink.credentialId,
+        projectId: boardLink.projectId,
+        source: boardLink.source as IntegrationSource,
+        baseVersion: null,
+        op,
+      },
+      null,
+    )
+  } catch {
+    return null
+  }
+}
+
 /**
  * Crash recovery: reset every 'in_flight' op back to 'pending'. in_flight is
  * only ever a transient claim held inside a live processOp call — a row still
@@ -409,8 +543,11 @@ async function processOp(
   // Malformed payload is a programming error, not a remote failure — park it
   // immediately instead of burning retries.
   let op: MutationOp
+  let createLocalId: string | undefined // create_item payloads carry the local board_item id
   try {
-    op = JSON.parse(row.payload) as MutationOp
+    const parsed = JSON.parse(row.payload) as MutationOp & { localBoardItemId?: unknown }
+    op = parsed
+    if (typeof parsed.localBoardItemId === 'string') createLocalId = parsed.localBoardItemId
   } catch (err) {
     return markFailed(row, attempts, `Unparseable mutation payload: ${errorMessage(err)}`)
   }
@@ -466,6 +603,19 @@ async function processOp(
         .run()
     }
 
+    // create_item success: the connector minted a brand-new remote object
+    // (MutationResult.ref). UPSERT the board_item's remote link with that id
+    // so future move/edit/pull resolve the item. Guarded: the op WAS applied
+    // remotely — a link-write failure must never flow into the catch below
+    // and resurrect the op (a retry would create a duplicate remote item).
+    if (op.kind === 'create_item' && createLocalId !== undefined) {
+      try {
+        linkCreatedItem(row, op.container, result, createLocalId, now)
+      } catch {
+        // Link lost, push applied — the next pull re-links via the remote upsert path.
+      }
+    }
+
     emitMutationEvent('integration.mutation.applied', row.projectId, row.opId, {
       kind: op.kind,
       credentialId: row.credentialId,
@@ -486,6 +636,64 @@ async function processOp(
       .where(eq(mutationQueue.id, row.id))
       .run()
     return 'retrying'
+  }
+}
+
+// Bind a freshly-pushed create_item result to its local board_item.
+// remote_links has a UNIQUE(localType, localId) index, so at most one row can
+// exist (live OR tombstoned) — e.g. a pull that ran mid-flight may already
+// have linked the item, or a prior remove left a tombstone. UPSERT: update
+// that row in place, else insert a new one. Link conventions (see the header
+// block): item links carry the board's remote id in containerRemoteId.
+function linkCreatedItem(
+  row: MutationQueueRow,
+  container: RemoteRef,
+  result: MutationResult,
+  boardItemId: string,
+  now: string,
+): void {
+  const db = getDb()
+  const existing = db
+    .select()
+    .from(remoteLinks)
+    .where(and(
+      eq(remoteLinks.localType, 'board_item'),
+      eq(remoteLinks.localId, boardItemId),
+    ))
+    .get()
+  const containerRemoteId = result.ref.containerId ?? container.remoteId
+
+  if (existing !== undefined) {
+    db.update(remoteLinks)
+      .set({
+        remoteType: result.ref.remoteType,
+        remoteId: result.ref.remoteId,
+        containerRemoteId,
+        remoteUrl: result.remoteUrl ?? existing.remoteUrl,
+        remoteVersion: result.remoteVersion,
+        lastPushedAt: now,
+        deletedAt: null,
+        updatedAt: now,
+      })
+      .where(eq(remoteLinks.id, existing.id))
+      .run()
+  } else {
+    db.insert(remoteLinks)
+      .values({
+        id: generateId(),
+        projectId: row.projectId,
+        credentialId: row.credentialId,
+        source: row.source,
+        localType: 'board_item',
+        localId: boardItemId,
+        remoteType: result.ref.remoteType,
+        remoteId: result.ref.remoteId,
+        containerRemoteId,
+        remoteUrl: result.remoteUrl ?? null,
+        remoteVersion: result.remoteVersion,
+        lastPushedAt: now,
+      })
+      .run()
   }
 }
 
