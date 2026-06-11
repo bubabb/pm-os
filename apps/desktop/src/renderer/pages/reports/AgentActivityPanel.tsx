@@ -1,4 +1,5 @@
-import { Loader2, CheckCircle2, XCircle } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Loader2, CheckCircle2, XCircle, ArrowRight } from 'lucide-react'
 
 interface TraceStub {
   id: string
@@ -28,9 +29,14 @@ function formatCost(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`
 }
 
-function TraceRow({ trace, icon }: { trace: TraceStub; icon: React.ReactNode }) {
+function TraceRow({ trace, icon, onOpen }: { trace: TraceStub; icon: React.ReactNode; onOpen: () => void }) {
   return (
-    <div className="flex items-center gap-2.5 px-4 py-2">
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={`Open trace for ${trace.taskTitle ?? 'unnamed task'} in Observability`}
+      className="flex w-full items-center gap-2.5 px-4 py-2 text-left transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    >
       <div className="shrink-0">{icon}</div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-medium text-foreground">
@@ -42,18 +48,32 @@ function TraceRow({ trace, icon }: { trace: TraceStub; icon: React.ReactNode }) 
         <p className="text-[11px] text-muted-foreground">{formatDuration(trace.durationMs)}</p>
         <p className="text-[11px] text-muted-foreground">{formatCost(trace.costCents)}</p>
       </div>
-    </div>
+    </button>
   )
 }
 
 export function AgentActivityPanel({ running, completedToday, failed }: Props) {
+  const navigate = useNavigate()
   const total = running.length + completedToday.length + failed.length
+  const openObservability = () => navigate('/observability')
 
   return (
     <div className="flex flex-col">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold text-foreground">Agent Activity</h2>
-        {total === 0 && <span className="text-xs text-muted-foreground">No activity today</span>}
+        {total === 0 ? (
+          <span className="text-xs text-muted-foreground">No activity today</span>
+        ) : (
+          <button
+            type="button"
+            onClick={openObservability}
+            aria-label="View all agent activity in Observability"
+            className="flex items-center gap-1 rounded text-xs text-primary/80 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            View all in Observability
+            <ArrowRight className="h-3 w-3" aria-hidden="true" />
+          </button>
+        )}
       </div>
 
       {running.length > 0 && (
@@ -66,6 +86,7 @@ export function AgentActivityPanel({ running, completedToday, failed }: Props) {
               key={t.id}
               trace={t}
               icon={<Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
+              onOpen={openObservability}
             />
           ))}
         </div>
@@ -81,6 +102,7 @@ export function AgentActivityPanel({ running, completedToday, failed }: Props) {
               key={t.id}
               trace={t}
               icon={<CheckCircle2 className="h-3.5 w-3.5 text-green-500" />}
+              onOpen={openObservability}
             />
           ))}
         </div>
@@ -96,13 +118,16 @@ export function AgentActivityPanel({ running, completedToday, failed }: Props) {
               key={t.id}
               trace={t}
               icon={<XCircle className="h-3.5 w-3.5 text-destructive" />}
+              onOpen={openObservability}
             />
           ))}
         </div>
       )}
 
       {total === 0 && (
-        <p className="px-4 py-4 text-xs text-muted-foreground">No agent tasks have run yet.</p>
+        <p className="px-4 py-4 text-xs text-muted-foreground">
+          No agent tasks have run yet — activity will appear here once agents start running.
+        </p>
       )}
     </div>
   )

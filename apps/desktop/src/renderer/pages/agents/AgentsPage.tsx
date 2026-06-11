@@ -1,14 +1,17 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Bot, Plus, Loader2, CheckCircle2, XCircle, Clock,
   Play, Pause, StopCircle, ChevronDown, ChevronRight, ShieldAlert,
+  Info, CalendarRange,
 } from 'lucide-react'
 import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
 import { Badge, type BadgeVariant } from '../../components/ui/Badge'
 import { QueryError } from '../../components/ui/QueryError'
 import { Field } from '../../components/ui/Field'
+import { toast } from '../../components/ui/Toast'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -205,11 +208,20 @@ function WorkspacesTab({ projectId }: { projectId: string }) {
         <h2 className="text-sm font-medium text-foreground">Agent Workspaces</h2>
         <button
           onClick={() => setShowCreate((s) => !s)}
-          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <Plus className="h-4 w-4" />
           New workspace
         </button>
+      </div>
+
+      {/* Honesty note: status controls only record intent — there is no agent runtime yet */}
+      <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <p className="text-xs text-muted-foreground">
+          Start/Pause/Resume mark intent only — automated agent execution isn&apos;t built yet, and
+          tasks are tracked manually. A &ldquo;Running&rdquo; workspace doesn&apos;t consume tokens on its own.
+        </p>
       </div>
 
       {showCreate && (
@@ -293,7 +305,7 @@ function WorkspacesTab({ projectId }: { projectId: string }) {
                 <WorkspaceStatusBadge status={ws.status} />
                 {ws.status === 'idle' && (
                   <IconBtn
-                    title="Start"
+                    title="Mark as running (status only — no agent executes yet)"
                     onClick={() => updateStatus.mutate({ workspaceId: ws.id, status: 'running' })}
                     disabled={updateStatus.isPending}
                   >
@@ -302,7 +314,7 @@ function WorkspacesTab({ projectId }: { projectId: string }) {
                 )}
                 {ws.status === 'running' && (
                   <IconBtn
-                    title="Pause"
+                    title="Mark as paused (status only — no agent executes yet)"
                     onClick={() => updateStatus.mutate({ workspaceId: ws.id, status: 'paused' })}
                     disabled={updateStatus.isPending}
                   >
@@ -311,7 +323,7 @@ function WorkspacesTab({ projectId }: { projectId: string }) {
                 )}
                 {ws.status === 'paused' && (
                   <IconBtn
-                    title="Resume"
+                    title="Mark as running (status only — no agent executes yet)"
                     onClick={() => updateStatus.mutate({ workspaceId: ws.id, status: 'running' })}
                     disabled={updateStatus.isPending}
                   >
@@ -339,6 +351,7 @@ function WorkspacesTab({ projectId }: { projectId: string }) {
 
 function TasksTab({ projectId }: { projectId: string }) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [filter, setFilter] = useState<TaskStatus | 'all'>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -541,7 +554,7 @@ function TasksTab({ projectId }: { projectId: string }) {
                     {task.description && (
                       <p className="text-xs text-muted-foreground whitespace-pre-wrap">{task.description}</p>
                     )}
-                    <div className="flex gap-2">
+                    <div className="flex items-center gap-2">
                       {task.status === 'pending' && (
                         <StatusBtn
                           label="Start"
@@ -558,6 +571,14 @@ function TasksTab({ projectId }: { projectId: string }) {
                       {(task.status === 'pending' || task.status === 'in_progress') && (
                         <StatusBtn label="Cancel" onClick={() => updateStatus.mutate({ taskId: task.id, status: 'cancelled' })} disabled={updateStatus.isPending} danger />
                       )}
+                      <button
+                        onClick={() => navigate('/boards')} // Boards page owns the Timeline tab; no deep tab link exists yet
+                        aria-label={`View ${task.title} on the timeline (opens Boards)`}
+                        className="ml-auto flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      >
+                        <CalendarRange className="h-3.5 w-3.5" aria-hidden="true" />
+                        View on Timeline
+                      </button>
                     </div>
                   </div>
                 )}
@@ -585,9 +606,12 @@ function ApprovalGatesTab({ projectId }: { projectId: string }) {
   const resolve = useMutation({
     mutationFn: ({ gateId, resolution, reviewerNote }: { gateId: string; resolution: 'approved' | 'rejected'; reviewerNote?: string }) =>
       api.post(`/projects/${projectId}/approval-gates/${gateId}/resolve`, { resolution, reviewerNote }),
-    onSuccess: () => {
+    onSuccess: (_data, { resolution }) => {
       qc.invalidateQueries({ queryKey: ['approval-gates', projectId] })
+      qc.invalidateQueries({ queryKey: ['tasks', projectId] })    // gate resolution moves the task out of waiting_approval
+      qc.invalidateQueries({ queryKey: ['timeline', projectId] }) // Gantt reads timeline
       setActionError(null)
+      toast.success(resolution === 'approved' ? 'Gate approved — task updated.' : 'Gate rejected — task updated.')
     },
     onError: (e: Error) => setActionError(e.message),
   })
@@ -602,7 +626,7 @@ function ApprovalGatesTab({ projectId }: { projectId: string }) {
       <EmptyState
         icon={ShieldAlert}
         title="No pending approvals"
-        desc="Approval requests from agents will appear here."
+        desc="Gates appear here when an agent pauses mid-task and requests human sign-off. Automated agent execution isn't built yet, so this list will stay empty until it ships."
       />
     )
   }

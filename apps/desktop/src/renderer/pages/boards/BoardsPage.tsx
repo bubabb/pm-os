@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   LayoutGrid, Plus, Loader2, Flag, Milestone as MilestoneIcon,
-  ChevronDown, Trash2, Play, CheckCircle2, Calendar,
+  ChevronDown, Trash2, Play, CheckCircle2, Calendar, Search,
 } from 'lucide-react'
 import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
@@ -11,6 +12,8 @@ import { Badge, BADGE_VARIANT_CLASSES, type BadgeVariant } from '../../component
 import { QueryError } from '../../components/ui/QueryError'
 import { Field } from '../../components/ui/Field'
 import { toast } from '../../components/ui/Toast'
+import { Dialog } from '../../components/ui/Dialog'
+import { Spinner } from '../../components/ui/Spinner'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -78,7 +81,28 @@ interface Milestone {
   updatedAt: string
 }
 
+// Minimal task shape consumed from GET /projects/:projectId/tasks
+// (matches the Task interface owned by AgentsPage).
+type TaskStatus = 'pending' | 'in_progress' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled'
+type TaskType = 'human' | 'agent'
+
+interface Task {
+  id: string
+  title: string
+  status: TaskStatus
+  type: TaskType
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
+
+const TASK_STATUS_BADGE: Record<TaskStatus, { label: string; variant: BadgeVariant }> = {
+  pending:          { label: 'Pending',           variant: 'neutral' },
+  in_progress:      { label: 'In Progress',       variant: 'info' },
+  waiting_approval: { label: 'Awaiting Approval', variant: 'warning' },
+  completed:        { label: 'Completed',         variant: 'success' },
+  failed:           { label: 'Failed',            variant: 'danger' },
+  cancelled:        { label: 'Cancelled',         variant: 'neutral' },
+}
 
 const SPRINT_STATUS_BADGE: Record<SprintStatus, { label: string; variant: BadgeVariant }> = {
   planning:  { label: 'Planning', variant: 'neutral' },
@@ -163,6 +187,8 @@ function BoardsTab({ projectId }: { projectId: string }) {
   // environments where dataTransfer reads are restricted before drop.
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null)
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null)
+  // Column the "Add task" dialog is targeting (null = dialog closed).
+  const [addTaskColumn, setAddTaskColumn] = useState<BoardColumn | null>(null)
 
   const {
     data: boardList = [], isLoading: boardsLoading,
@@ -372,11 +398,25 @@ function BoardsTab({ projectId }: { projectId: string }) {
                           <span className={`text-[10px] font-medium ${overWip ? 'text-red-400' : 'text-muted-foreground'}`}>
                             {colItems.length}{col.wipLimit !== null ? `/${col.wipLimit}` : ''}
                           </span>
+                          <button
+                            onClick={() => setAddTaskColumn(col)}
+                            title="Add task"
+                            aria-label={`Add task to ${col.name}`}
+                            className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          >
+                            <Plus className="h-3 w-3" aria-hidden="true" />
+                          </button>
                         </div>
                       </div>
                       <div className="flex-1 space-y-2 p-2">
                         {colItems.length === 0 ? (
-                          <p className="text-center text-[11px] text-muted-foreground/50 py-3">Empty</p>
+                          <button
+                            onClick={() => setAddTaskColumn(col)}
+                            className="flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-border py-3 text-[11px] text-muted-foreground/60 transition-colors hover:border-primary/40 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          >
+                            <Plus className="h-3 w-3" aria-hidden="true" />
+                            Add task
+                          </button>
                         ) : (
                           colItems.map((item) => (
                             <KanbanCard
@@ -414,9 +454,142 @@ function BoardsTab({ projectId }: { projectId: string }) {
               Delete board
             </button>
           </div>
+
+          <AddTaskDialog
+            open={addTaskColumn !== null}
+            onClose={() => setAddTaskColumn(null)}
+            projectId={projectId}
+            boardId={activeBoardId}
+            column={addTaskColumn}
+            boardTaskIds={items.map((i) => i.taskId)}
+          />
         </>
       ) : null}
     </div>
+  )
+}
+
+// ── Add Task Dialog ───────────────────────────────────────────────────────────
+// Lists the project's tasks that are not yet on the active board and adds the
+// chosen one to the column the user clicked.
+
+function AddTaskDialog({
+  open, onClose, projectId, boardId, column, boardTaskIds,
+}: {
+  open: boolean
+  onClose: () => void
+  projectId: string
+  boardId: string
+  column: BoardColumn | null
+  boardTaskIds: string[]
+}) {
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+  const [search, setSearch] = useState('')
+
+  // Start each open with a clean search.
+  useEffect(() => {
+    if (open) setSearch('')
+  }, [open])
+
+  const { data: tasks = [], isLoading, isError, error, refetch } = useQuery<Task[]>({
+    queryKey: ['tasks', projectId],
+    queryFn: () => api.get(`/projects/${projectId}/tasks`),
+    enabled: open,
+  })
+
+  const addItem = useMutation({
+    mutationFn: ({ taskId, columnId }: { taskId: string; columnId: string }) =>
+      api.post(`/projects/${projectId}/boards/${boardId}/items`, { taskId, columnId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['board-items', boardId] })
+      qc.invalidateQueries({ queryKey: ['tasks', projectId] })
+      toast.success('Task added to board')
+      onClose()
+    },
+    onError: (e: Error) => toast.error(`Failed to add task: ${e.message}`),
+  })
+
+  const onBoard = new Set(boardTaskIds)
+  const available = tasks.filter((t) => !onBoard.has(t.id))
+  const query = search.trim().toLowerCase()
+  const filtered = query === '' ? available : available.filter((t) => t.title.toLowerCase().includes(query))
+
+  return (
+    <Dialog
+      open={open && column !== null}
+      onClose={onClose}
+      title={`Add task to ${column?.name ?? 'column'}`}
+      footer={
+        <button
+          onClick={onClose}
+          className="rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          Cancel
+        </button>
+      }
+    >
+      {isLoading ? (
+        <Spinner />
+      ) : isError ? (
+        <QueryError message={error instanceof Error ? error.message : undefined} onRetry={() => refetch()} />
+      ) : tasks.length === 0 ? (
+        <div className="py-6 text-center">
+          <p className="text-sm text-muted-foreground">No tasks yet — create one in the Agents tab.</p>
+          <button
+            onClick={() => { onClose(); navigate('/agents') }}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            Go to Agents
+          </button>
+        </div>
+      ) : available.length === 0 ? (
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          All tasks are already on this board.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {available.length > 5 && (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <input
+                autoFocus
+                aria-label="Search tasks"
+                placeholder="Search tasks…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+          )}
+          {filtered.length === 0 ? (
+            <p className="py-4 text-center text-xs text-muted-foreground">No tasks match “{search.trim()}”.</p>
+          ) : (
+            <ul className="max-h-72 space-y-1 overflow-y-auto">
+              {filtered.map((t) => {
+                const badge = TASK_STATUS_BADGE[t.status]
+                return (
+                  <li key={t.id}>
+                    <button
+                      onClick={() => { if (column) addItem.mutate({ taskId: t.id, columnId: column.id }) }}
+                      disabled={addItem.isPending}
+                      className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{t.title}</span>
+                      <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] capitalize text-muted-foreground">{t.type}</span>
+                      <Badge variant={badge.variant} className="shrink-0">{badge.label}</Badge>
+                      {addItem.isPending && addItem.variables?.taskId === t.id && (
+                        <Spinner size="sm" inline />
+                      )}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </Dialog>
   )
 }
 
@@ -930,14 +1103,6 @@ function EmptyState({
       <Icon className="mx-auto mb-2 h-8 w-8 text-muted-foreground/40" />
       <p className="text-sm font-medium text-foreground">{title}</p>
       <p className="mt-1 text-xs text-muted-foreground">{desc}</p>
-    </div>
-  )
-}
-
-function Spinner() {
-  return (
-    <div className="flex h-32 items-center justify-center">
-      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
     </div>
   )
 }

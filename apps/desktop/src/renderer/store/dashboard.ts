@@ -69,8 +69,15 @@ interface DashboardStore {
    */
   syncAndRefresh: (projectId: string) => Promise<void>
   setDelegating: (item: ClassifiedItem | null) => void
-  delegate: (projectId: string, item: ClassifiedItem, action: string) => Promise<void>
-  acknowledge: (entityId: string) => void
+  /**
+   * POST the delegation (backend creates a real `[Agent] …` task) and
+   * acknowledge the item locally. Returns the created task id so the
+   * component layer can invalidate TanStack caches, toast, and offer
+   * navigation — this store has no queryClient, so cache invalidation
+   * deliberately lives in the component.
+   */
+  delegate: (projectId: string, item: ClassifiedItem, action: string) => Promise<{ taskId: string }>
+  acknowledge: (projectId: string, entityId: string) => void
 }
 
 const SYNC_POLL_INTERVAL_MS = 1_500
@@ -80,6 +87,31 @@ const SYNC_GRACE_MS = 6_000
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// ── Acknowledged-id persistence ───────────────────────────────────────────────
+// Dismissals survive reloads: ids live in localStorage, keyed per project.
+
+const ACK_KEY_PREFIX = 'creare_ack_'
+
+function loadAckIds(projectId: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(`${ACK_KEY_PREFIX}${projectId}`)
+    if (!raw) return new Set()
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.filter((v): v is string => typeof v === 'string'))
+  } catch {
+    return new Set()
+  }
+}
+
+function saveAckIds(projectId: string, ids: Set<string>): void {
+  try {
+    localStorage.setItem(`${ACK_KEY_PREFIX}${projectId}`, JSON.stringify([...ids]))
+  } catch {
+    // Storage unavailable (quota/private mode) — dismissals stay in-memory for this session.
+  }
 }
 
 /**
@@ -138,9 +170,9 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     // (or when the project changed and the cached data is for another project).
     const { data: existing, loadedProjectId } = get()
     if (existing && loadedProjectId === projectId) {
-      set({ error: null })
+      set({ error: null, acknowledgedIds: loadAckIds(projectId) })
     } else {
-      set({ data: null, isLoading: true, error: null })
+      set({ data: null, isLoading: true, error: null, acknowledgedIds: loadAckIds(projectId) })
     }
     try {
       const data = await api.get<DashboardData>(`/projects/${projectId}/dashboard`)
@@ -181,18 +213,22 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   setDelegating: (item) => set({ delegatingItem: item }),
 
   delegate: async (projectId, item, action) => {
-    await api.post(`/projects/${projectId}/dashboard/delegate`, {
-      entity: item.entity,
-      suggestedAction: action,
-    })
+    const result = await api.post<{ ok: boolean; taskId: string }>(
+      `/projects/${projectId}/dashboard/delegate`,
+      { entity: item.entity, suggestedAction: action },
+    )
+    // Acknowledge so the item leaves the panels; the drawer stays open to show
+    // its success state (the component closes it when the user is done).
     const id = `${item.entity.source}-${item.entity.entityId}`
-    set((s) => ({
-      delegatingItem: null,
-      acknowledgedIds: new Set([...s.acknowledgedIds, id]),
-    }))
+    const acknowledgedIds = new Set([...get().acknowledgedIds, id])
+    saveAckIds(projectId, acknowledgedIds)
+    set({ acknowledgedIds })
+    return { taskId: result.taskId }
   },
 
-  acknowledge: (entityId) => {
-    set((s) => ({ acknowledgedIds: new Set([...s.acknowledgedIds, entityId]) }))
+  acknowledge: (projectId, entityId) => {
+    const acknowledgedIds = new Set([...get().acknowledgedIds, entityId])
+    saveAckIds(projectId, acknowledgedIds)
+    set({ acknowledgedIds })
   },
 }))

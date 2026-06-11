@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Bell, Check, CheckCheck } from 'lucide-react'
 import { useNotificationsStore } from '../../store/notifications'
 
@@ -8,6 +9,21 @@ const typeLabels: Record<string, string> = {
   deployment_complete: 'Deployment complete',
   cost_warning: 'Cost warning',
   mention: 'Mention',
+}
+
+// Deep-link target per resource type — null means the row is not navigable
+function routeForResource(resourceType: string | null): string | null {
+  switch (resourceType) {
+    case 'task':
+      return '/agents'
+    case 'integration_credential':
+      return '/settings'
+    case 'risk':
+    case 'event':
+      return '/reports'
+    default:
+      return null
+  }
 }
 
 export function NotificationsBell() {
@@ -33,6 +49,7 @@ export function NotificationsBell() {
 
 export function NotificationsPanel() {
   const { items, isOpen, setOpen, markRead, markAllRead } = useNotificationsStore()
+  const navigate = useNavigate()
 
   if (!isOpen) return null
 
@@ -58,12 +75,22 @@ export function NotificationsPanel() {
           {items.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">No notifications</p>
           ) : (
-            items.map((n) => (
+            items.map((n) => {
+              const to = routeForResource(n.resourceType)
+              return (
               <div
                 key={n.id}
+                onClick={() => {
+                  if (!n.readAt) markRead(n.id).catch(() => {})
+                  if (to) {
+                    setOpen(false)
+                    navigate(to)
+                  }
+                }}
+                role={to ? 'button' : undefined}
                 className={`flex gap-3 border-b border-border/50 px-4 py-3 last:border-0 ${
                   !n.readAt ? 'bg-accent/30' : ''
-                }`}
+                } ${to ? 'cursor-pointer transition-colors hover:bg-accent/50' : ''}`}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
@@ -76,7 +103,10 @@ export function NotificationsPanel() {
                     </div>
                     {!n.readAt && (
                       <button
-                        onClick={() => markRead(n.id)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          markRead(n.id).catch(() => {})
+                        }}
                         className="mt-0.5 shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                         aria-label="Mark as read"
                       >
@@ -89,7 +119,8 @@ export function NotificationsPanel() {
                   </p>
                 </div>
               </div>
-            ))
+              )
+            })
           )}
         </div>
       </div>

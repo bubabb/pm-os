@@ -1,4 +1,4 @@
-import { Send } from 'lucide-react'
+import { Send, UserPlus } from 'lucide-react'
 import type { ClassifiedItem } from '@creare/integrations'
 
 const RISK_COLORS: Record<number, { bg: string; text: string; dot: string }> = {
@@ -12,11 +12,16 @@ const RISK_COLORS: Record<number, { bg: string; text: string; dot: string }> = {
 interface Props {
   risks: ClassifiedItem[]
   acknowledgedIds: Set<string>
+  /** Creates a real human task for this risk (Agents → Tasks), then acknowledges it. */
   onHandle: (item: ClassifiedItem) => void
+  /** Acknowledges the risk locally without creating a task. */
+  onDismiss: (item: ClassifiedItem) => void
   onDelegate: (item: ClassifiedItem) => void
+  /** True while a "Handle it" task creation is in flight. */
+  isHandling: boolean
 }
 
-export function RiskRadar({ risks, acknowledgedIds, onHandle, onDelegate }: Props) {
+export function RiskRadar({ risks, acknowledgedIds, onHandle, onDismiss, onDelegate, isHandling }: Props) {
   const visible = risks.filter(
     (i) => !acknowledgedIds.has(`${i.entity.source}-${i.entity.entityId}`),
   )
@@ -56,17 +61,29 @@ export function RiskRadar({ risks, acknowledgedIds, onHandle, onDelegate }: Prop
                 <div className="flex shrink-0 gap-1.5">
                   <button
                     onClick={() => onHandle(item)}
-                    title="Acknowledge and remove from the radar"
-                    className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+                    disabled={isHandling}
+                    title="Create a human task for this risk in Agents → Tasks"
+                    aria-label={`Handle ${item.entity.title} — create a human task`}
+                    className="flex items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    Dismiss
+                    <UserPlus className="h-3 w-3" aria-hidden="true" />
+                    Handle it
                   </button>
                   <button
                     onClick={() => onDelegate(item)}
-                    className="flex items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                    aria-label={`Delegate ${item.entity.title} to an agent`}
+                    className="flex items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     Delegate
                     <Send className="h-3 w-3" aria-hidden="true" />
+                  </button>
+                  <button
+                    onClick={() => onDismiss(item)}
+                    title="Acknowledge and remove from the radar (no task is created)"
+                    aria-label={`Dismiss ${item.entity.title}`}
+                    className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    Dismiss
                   </button>
                 </div>
               </div>

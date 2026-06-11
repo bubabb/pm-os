@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import {
   Activity, Loader2, CheckCircle2, XCircle, Clock,
   ChevronDown, ChevronRight, ShieldCheck, List,
@@ -7,6 +8,7 @@ import {
 import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
 import { Badge, type BadgeVariant } from '../../components/ui/Badge'
+import { EmptyState } from '../../components/ui/EmptyState'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -130,9 +132,9 @@ export default function ObservabilityPage() {
       </div>
 
       <div className="flex-1 overflow-auto p-6">
-        {tab === 'traces'    && <TracesTab projectId={currentProject.id} />}
+        {tab === 'traces'    && <TracesTab projectId={currentProject.id} onShowEventLog={() => setTab('event-log')} />}
         {tab === 'event-log' && <EventLogTab projectId={currentProject.id} />}
-        {tab === 'audit-log' && <AuditLogTab projectId={currentProject.id} />}
+        {tab === 'audit-log' && <AuditLogTab projectId={currentProject.id} onShowEventLog={() => setTab('event-log')} />}
       </div>
     </div>
   )
@@ -140,7 +142,8 @@ export default function ObservabilityPage() {
 
 // ── Traces Tab ────────────────────────────────────────────────────────────────
 
-function TracesTab({ projectId }: { projectId: string }) {
+function TracesTab({ projectId, onShowEventLog }: { projectId: string; onShowEventLog: () => void }) {
+  const navigate = useNavigate()
   const [filter, setFilter] = useState<TraceStatus | 'all'>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
 
@@ -182,7 +185,46 @@ function TracesTab({ projectId }: { projectId: string }) {
       </div>
 
       {displayed.length === 0 ? (
-        <EmptyState icon={Activity} title="No traces" desc="Agent execution traces will appear here as workspaces run tasks." />
+        allTraces.length === 0 ? (
+          <EmptyState
+            icon={Activity}
+            title="Traces appear when agents run"
+            description="Automated agent execution isn't built yet, so this view stays empty for now — that's expected, not an error. Live activity from projects, boards, tasks, and integrations is in the Event Log."
+            action={
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={onShowEventLog}
+                  aria-label="Open the live Event Log"
+                  className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  Open Event Log
+                </button>
+                <button
+                  onClick={() => navigate('/agents')}
+                  aria-label="View agent workspaces"
+                  className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  View agents
+                </button>
+              </div>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={Activity}
+            title={`No ${filter === 'all' ? '' : `${filter} `}traces`}
+            description="No traces match this status filter. Pick another status or show all."
+            action={
+              <button
+                onClick={() => setFilter('all')}
+                aria-label="Clear the trace status filter"
+                className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Show all traces
+              </button>
+            }
+          />
+        )
       ) : (
         <div className="divide-y divide-border rounded-lg border border-border">
           {displayed.map((trace) => {
@@ -271,6 +313,7 @@ function TracesTab({ projectId }: { projectId: string }) {
 // ── Event Log Tab ─────────────────────────────────────────────────────────────
 
 function EventLogTab({ projectId }: { projectId: string }) {
+  const navigate = useNavigate()
   const [domainFilter, setDomainFilter] = useState('')
 
   const { data: evtLog = [], isLoading } = useQuery<EventLogEntry[]>({
@@ -306,7 +349,37 @@ function EventLogTab({ projectId }: { projectId: string }) {
       </div>
 
       {evtLog.length === 0 ? (
-        <EmptyState icon={List} title="No events" desc="Domain events are recorded here as the system runs." />
+        domainFilter ? (
+          <EmptyState
+            icon={List}
+            title={`No ${domainFilter} events`}
+            description="Nothing recorded for this domain yet. Clear the filter to see all activity."
+            action={
+              <button
+                onClick={() => setDomainFilter('')}
+                aria-label="Clear the domain filter"
+                className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Show all domains
+              </button>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={List}
+            title="No events yet"
+            description="This log fills in automatically as you work — project, board, task, and integration changes are recorded here the moment they happen. Create or move a task and it will show up."
+            action={
+              <button
+                onClick={() => navigate('/boards')}
+                aria-label="Open boards to create activity"
+                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Open boards
+              </button>
+            }
+          />
+        )
       ) : (
         <div className="divide-y divide-border rounded-lg border border-border font-mono text-xs">
           {evtLog.map((evt) => (
@@ -334,7 +407,7 @@ function EventLogTab({ projectId }: { projectId: string }) {
 
 // ── Audit Log Tab ─────────────────────────────────────────────────────────────
 
-function AuditLogTab({ projectId }: { projectId: string }) {
+function AuditLogTab({ projectId, onShowEventLog }: { projectId: string; onShowEventLog: () => void }) {
   const { data: auditEntries = [], isLoading } = useQuery<AuditEntry[]>({
     queryKey: ['audit-log', projectId],
     queryFn: () => api.get(`/projects/${projectId}/audit-log?limit=200`),
@@ -353,8 +426,17 @@ function AuditLogTab({ projectId }: { projectId: string }) {
       {auditEntries.length === 0 ? (
         <EmptyState
           icon={ShieldCheck}
-          title="No audit entries"
-          desc="Authorization and compliance events are recorded here."
+          title="No audit entries yet"
+          description="This trail is written through the audit API when agents take privileged actions. Agent execution isn't built yet, so it stays empty for now — day-to-day activity is in the Event Log."
+          action={
+            <button
+              onClick={onShowEventLog}
+              aria-label="Open the live Event Log"
+              className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              Open Event Log
+            </button>
+          }
         />
       ) : (
         <div className="divide-y divide-border rounded-lg border border-border">
@@ -393,22 +475,6 @@ function MetricCell({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-border bg-card px-3 py-2">
       <p className="text-[10px] text-muted-foreground">{label}</p>
       <p className="mt-0.5 text-sm font-medium text-foreground tabular-nums">{value}</p>
-    </div>
-  )
-}
-
-function EmptyState({
-  icon: Icon, title, desc,
-}: {
-  icon: React.ElementType
-  title: string
-  desc: string
-}) {
-  return (
-    <div className="rounded-lg border border-dashed border-border p-10 text-center">
-      <Icon className="mx-auto mb-2 h-8 w-8 text-muted-foreground/40" />
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      <p className="mt-1 text-xs text-muted-foreground">{desc}</p>
     </div>
   )
 }

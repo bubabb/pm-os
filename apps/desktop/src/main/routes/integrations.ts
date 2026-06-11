@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm'
 import { generateId } from '@creare/shared'
 import { triggerSync, getSyncStatus, getActiveEvents } from '@creare/integrations'
 import { assertProjectAccess } from '../utils/project-access'
+import { createNotification } from '../notifications/notification-service'
 import type { AuthenticatedRequest } from '../auth'
 import type { IntegrationCredential } from '@creare/database'
 
@@ -103,6 +104,16 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
         resourceId: safe.id,
         payload: JSON.stringify({ source: safe.source, label: safe.label }),
       }).catch((err) => console.error('[creare] Event log write failed:', err))
+      // Fire-and-forget — a notification failure never blocks the response.
+      createNotification({
+        userId: user.id,
+        projectId: request.params.id,
+        type: 'mention',
+        title: 'Source connected',
+        body: `${safe.label} (${safe.source}) bound — syncing…`,
+        resourceType: 'integration_credential',
+        resourceId: safe.id,
+      }).catch(console.error)
       // Fire-and-forget — first sync starts immediately instead of waiting for
       // the 15-min poll; the response returns without blocking on it.
       syncProjectSource(request.params.id, source).catch(console.error)
@@ -163,6 +174,20 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
       const distinctSources = [...new Set(created.map((c) => c.source))]
       for (const source of distinctSources) {
         syncProjectSource(request.params.id, source).catch(console.error)
+      }
+
+      // One summarizing notification for the whole batch (no per-item spam).
+      // Deep-links to the credential only when exactly one was created.
+      if (created.length > 0) {
+        const only = created.length === 1 ? created[0] : undefined
+        createNotification({
+          userId: user.id,
+          projectId: request.params.id,
+          type: 'mention',
+          title: created.length === 1 ? 'Source connected' : 'Sources connected',
+          body: `${created.length} source${created.length === 1 ? '' : 's'} bound (${distinctSources.join(', ')}) — syncing…`,
+          ...(only ? { resourceType: 'integration_credential', resourceId: only.id } : {}),
+        }).catch(console.error)
       }
 
       return { created, failed }

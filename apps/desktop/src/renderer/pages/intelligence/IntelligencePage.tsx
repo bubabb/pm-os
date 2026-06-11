@@ -2,13 +2,14 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   FlaskConical, BrainCircuit, Loader2, ChevronDown, ChevronRight,
-  Search, Plus, CheckCircle2, XCircle,
+  Search, Plus, CheckCircle2, XCircle, Play,
 } from 'lucide-react'
 import { useProjectStore } from '../../store/projects'
 import { api } from '../../lib/api'
 import { Badge, type BadgeVariant } from '../../components/ui/Badge'
 import { QueryError } from '../../components/ui/QueryError'
 import { Field } from '../../components/ui/Field'
+import { EmptyState } from '../../components/ui/EmptyState'
 
 // ── Types (API rows) ──────────────────────────────────────────────────────────
 
@@ -135,7 +136,20 @@ export default function IntelligencePage() {
 
 // ── Eval Tab ──────────────────────────────────────────────────────────────────
 
+// Tiny built-in sanity suite for the empty-state CTA. Runs against the real
+// POST /eval-runs route with the workspace's default reasoning model — a real
+// recorded run, not seeded data.
+const SMOKE_SUITE = {
+  suite: 'smoke',
+  scorer: 'includes' as const,
+  cases: [
+    { id: 'sanity-echo', input: 'Reply with exactly one word: OK', expected: 'OK' },
+    { id: 'sanity-math', input: 'What is 2 + 2? Reply with just the number.', expected: '4' },
+  ],
+}
+
 function EvalTab({ projectId }: { projectId: string }) {
+  const qc = useQueryClient()
   const [expanded, setExpanded] = useState<string | null>(null)
   const [suiteFilter, setSuiteFilter] = useState('')
 
@@ -143,6 +157,11 @@ function EvalTab({ projectId }: { projectId: string }) {
     queryKey: ['eval-runs', projectId],
     queryFn: () => api.get(`/projects/${projectId}/eval-runs`),
     refetchInterval: 30_000,
+  })
+
+  const runSmoke = useMutation({
+    mutationFn: () => api.post(`/projects/${projectId}/eval-runs`, SMOKE_SUITE),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['eval-runs', projectId] }),
   })
 
   if (isLoading) return <Spinner />
@@ -179,11 +198,46 @@ function EvalTab({ projectId }: { projectId: string }) {
       </div>
 
       {displayed.length === 0 ? (
-        <EmptyState
-          icon={FlaskConical}
-          title="No eval runs"
-          desc="Eval runs are recorded here when suites execute — pass rates can then be tracked over time."
-        />
+        runs.length === 0 ? (
+          <EmptyState
+            icon={FlaskConical}
+            title="No eval runs yet"
+            description="Evals are recorded through the eval API and by agents as they execute — an empty list means nothing has run for this project, not that something is broken. You can record a real first run with the built-in smoke suite."
+            action={
+              <div className="flex flex-col items-center gap-2">
+                <button
+                  onClick={() => runSmoke.mutate()}
+                  disabled={runSmoke.isPending}
+                  aria-label="Run the built-in smoke eval suite"
+                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  {runSmoke.isPending
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    : <Play className="h-3.5 w-3.5" aria-hidden="true" />}
+                  {runSmoke.isPending ? 'Running smoke suite…' : 'Run smoke suite'}
+                </button>
+                {runSmoke.isError && (
+                  <p role="alert" className="text-xs text-destructive">{(runSmoke.error as Error).message}</p>
+                )}
+              </div>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={FlaskConical}
+            title={`No runs in “${suiteFilter}”`}
+            description="Pick another suite or clear the filter to see all recorded runs."
+            action={
+              <button
+                onClick={() => setSuiteFilter('')}
+                aria-label="Clear the suite filter"
+                className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Show all suites
+              </button>
+            }
+          />
+        )
       ) : (
         <div className="divide-y divide-border rounded-lg border border-border">
           {displayed.map((run) => {
@@ -318,15 +372,44 @@ function MemoryTab({ projectId }: { projectId: string }) {
       ) : isError ? (
         <QueryError message={(error as Error).message} onRetry={() => refetch()} />
       ) : items.length === 0 ? (
-        <EmptyState
-          icon={BrainCircuit}
-          title={search.trim() ? 'No matching learnings' : 'No learnings yet'}
-          desc={
-            search.trim()
-              ? 'Try a different query — recall matches tags, titles, and content.'
-              : 'Durable learnings from agent runs, reviews, and evals appear here.'
-          }
-        />
+        search.trim() ? (
+          <EmptyState
+            icon={BrainCircuit}
+            title="No matching learnings"
+            description="Try a different query — recall matches tags, titles, and content."
+          />
+        ) : sourceFilter ? (
+          <EmptyState
+            icon={BrainCircuit}
+            title={`No ${SOURCE_CFG[sourceFilter].label.toLowerCase()} learnings yet`}
+            description="Nothing recorded from this source so far. Clear the filter to see all learnings."
+            action={
+              <button
+                onClick={() => setSourceFilter('')}
+                aria-label="Clear the source filter"
+                className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Show all sources
+              </button>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={BrainCircuit}
+            title="No learnings yet"
+            description="Record one now to start the team memory — learnings also accrue automatically as agents run, review, and eval."
+            action={
+              <button
+                onClick={() => setShowForm(true)}
+                aria-label="Record a new learning"
+                className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                Record a learning
+              </button>
+            }
+          />
+        )
       ) : (
         <div className="divide-y divide-border rounded-lg border border-border">
           {items.map((l) => {
@@ -443,22 +526,6 @@ function RecordLearningForm({ projectId, onDone }: { projectId: string; onDone: 
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
-
-function EmptyState({
-  icon: Icon, title, desc,
-}: {
-  icon: React.ElementType
-  title: string
-  desc: string
-}) {
-  return (
-    <div className="rounded-lg border border-dashed border-border p-10 text-center">
-      <Icon className="mx-auto mb-2 h-8 w-8 text-muted-foreground/40" />
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      <p className="mt-1 text-xs text-muted-foreground">{desc}</p>
-    </div>
-  )
-}
 
 function Spinner() {
   return (

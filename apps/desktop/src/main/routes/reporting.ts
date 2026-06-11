@@ -5,6 +5,7 @@ import { getLatestDigest, generatePmDigest, getActiveEvents, classifyItems } fro
 import { resolveReasoningConfig, providerNeedsKey } from '../secrets'
 import { assertProjectAccess } from '../utils/project-access'
 import { createTask } from '@creare/agent-orchestration'
+import { createNotification } from '../notifications/notification-service'
 import type { AuthenticatedRequest } from '../auth'
 import type { ReasoningConfig } from '../secrets'
 import type { ClassifiedItem } from '@creare/integrations'
@@ -100,6 +101,17 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
           },
           user.id,
         )
+        // Fire-and-forget — the bell lights up, but a notification failure
+        // never blocks or breaks the delegate response.
+        createNotification({
+          userId: user.id,
+          projectId: request.params.id,
+          type: 'mention',
+          title: 'Agent task created',
+          body: `"${entity.title}" was delegated to an agent: ${suggestedAction}`,
+          resourceType: 'task',
+          resourceId: task.id,
+        }).catch(console.error)
         return { ok: true, taskId: task.id }
       } catch {
         return reply.code(500).send({ error: 'Failed to create agent task' })

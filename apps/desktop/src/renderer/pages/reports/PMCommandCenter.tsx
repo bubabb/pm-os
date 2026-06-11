@@ -1,8 +1,12 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plug, Loader2, RefreshCw, CloudOff } from 'lucide-react'
+import type { ClassifiedItem } from '@creare/integrations'
 import { useProjectStore } from '../../store/projects'
 import { useDashboardStore } from '../../store/dashboard'
+import { api } from '../../lib/api'
+import { toast } from '../../components/ui/Toast'
 import { ContextStrip, formatRelativeTime } from './ContextStrip'
 import { DoNowPanel } from './DoNowPanel'
 import { DelegatePanel } from './DelegatePanel'
@@ -25,10 +29,59 @@ export default function PMCommandCenter() {
   const delegate        = useDashboardStore((s) => s.delegate)
   const acknowledge     = useDashboardStore((s) => s.acknowledge)
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const projectId = currentProject?.id ?? null
 
   useEffect(() => {
     if (currentProject) load(currentProject.id)
   }, [currentProject?.id, load])
+
+  // The dashboard store has no queryClient, so cross-tab cache invalidation
+  // (Agents → Tasks list, Boards → Gantt timeline) happens here in the
+  // component layer, wrapped in TanStack mutations.
+  function invalidateTaskCaches(pid: string) {
+    void queryClient.invalidateQueries({ queryKey: ['tasks', pid] })
+    void queryClient.invalidateQueries({ queryKey: ['timeline', pid] }) // Gantt reads timeline
+  }
+
+  // Delegate → backend creates a real `[Agent] …` task. The drawer shows the
+  // success state with a "View in Agents" action; the toast confirms it.
+  const delegateMutation = useMutation({
+    mutationFn: ({ item, action }: { item: ClassifiedItem; action: string }) => {
+      if (!projectId) throw new Error('No project selected')
+      return delegate(projectId, item, action)
+    },
+    onSuccess: () => {
+      if (projectId) invalidateTaskCaches(projectId)
+      toast.success('Agent task created — track it in Agents → Tasks')
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to create agent task')
+    },
+  })
+
+  // Risk "Handle it" → creates a real human task (same create-task endpoint
+  // the Agents page uses), then acknowledges the risk locally.
+  const handleRiskMutation = useMutation({
+    mutationFn: (item: ClassifiedItem) => {
+      if (!projectId) throw new Error('No project selected')
+      return api.post<{ id: string }>(`/projects/${projectId}/tasks`, {
+        title: item.entity.title,
+        description: `${item.suggestedAction}\n\nSource: ${item.entity.source} · ${item.entity.entityType}${item.riskType ? `\nRisk: ${item.riskType}` : ''}`,
+        type: 'human',
+      })
+    },
+    onSuccess: (_task, item) => {
+      if (projectId) {
+        acknowledge(projectId, `${item.entity.source}-${item.entity.entityId}`)
+        invalidateTaskCaches(projectId)
+      }
+      toast.success('Human task created — view it in Agents → Tasks')
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to create task')
+    },
+  })
 
   if (!currentProject) {
     return (
@@ -119,16 +172,20 @@ export default function PMCommandCenter() {
     )
   }
 
-  async function handleDelegate(item: typeof delegatingItem, action: string) {
+  async function handleDelegate(item: ClassifiedItem | null, action: string) {
     if (!currentProject || !item) return
-    await delegate(currentProject.id, item, action)
+    // mutateAsync so the drawer can await the result and flip to its success
+    // state; rejections are toasted in onError and caught by the drawer.
+    await delegateMutation.mutateAsync({ item, action })
   }
 
-  function handleHandle(item: (typeof classified.risks)[number]) {
-    // Move to DO NOW by flipping bucket — for now just acknowledge so it's gone from risk radar
-    // Domain 1 integration will create a human task in Phase 3
-    const id = `${item.entity.source}-${item.entity.entityId}`
-    acknowledge(id)
+  function handleHandle(item: ClassifiedItem) {
+    handleRiskMutation.mutate(item)
+  }
+
+  function handleDismiss(item: ClassifiedItem) {
+    if (!currentProject) return
+    acknowledge(currentProject.id, `${item.entity.source}-${item.entity.entityId}`)
   }
 
   return (
@@ -155,7 +212,7 @@ export default function PMCommandCenter() {
           <DoNowPanel
             items={classified.doNow}
             acknowledgedIds={acknowledgedIds}
-            onAcknowledge={acknowledge}
+            onAcknowledge={(id) => acknowledge(currentProject.id, id)}
           />
         </div>
 
@@ -184,7 +241,9 @@ export default function PMCommandCenter() {
           risks={classified.risks}
           acknowledgedIds={acknowledgedIds}
           onHandle={handleHandle}
+          onDismiss={handleDismiss}
           onDelegate={setDelegating}
+          isHandling={handleRiskMutation.isPending}
         />
       </div>
 
@@ -193,6 +252,10 @@ export default function PMCommandCenter() {
         <DelegateConfigDrawer
           item={delegatingItem}
           onConfirm={(action) => handleDelegate(delegatingItem, action)}
+          onViewAgents={() => {
+            setDelegating(null)
+            navigate('/agents')
+          }}
           onClose={() => setDelegating(null)}
         />
       )}
