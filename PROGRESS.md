@@ -10,7 +10,27 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
-- **RESUME HERE (2026-06-11, NEWEST):** **Phase 1 ADVERSARIAL DEEPREVIEW + PRODUCTION-HARDENING DONE on `main`**
+- **RESUME HERE (2026-06-11, NEWEST):** **Phase 2/3/4 connector write layer + conflict resolution DONE on `main`.**
+  Full gate GREEN: typecheck 23/23 · unit **227/227** · lint 12/12 (desktop typecheck is now a REAL `tsc -b`).
+  • **Generic mirror engine** — BaseConnector `listRemoteBoards`/`fetchBoardSnapshot`; mirror-sync builds the
+    connector by source (no hardcoded GitHub). **Conflict resolution** shipped: `mirror/conflicts.ts`
+    (listOpenConflicts/resolveConflict local_wins/remote_wins/dismiss), `routes/conflicts.ts`, `ConflictsDrawer.tsx`
+    + clickable chip badges (conflicts + failedPushes).
+  • **All 5 connectors have WRITE surfaces (tested, mocked-fetch):** GitHub full lifecycle (move/create-draft/update/
+    close=archive/reopen/comment); **Jira two-way** (board mirror; move via workflow TRANSITIONS w/ fatal-on-no-legal-
+    transition; create/update/comment/close); **Notion two-way** (database mirror; status/select prop→columns;
+    move/create/update/archive/comment; statusFieldRemoteId='type:propName'); **Confluence** (update w/ version-lock,
+    comment, archive); **OneDrive** (rename, move, If-Match eTag).
+  • **Import dialog + status chip generalized** to GitHub/Jira/Notion → import→pull→drag-to-move is two-way for all
+    three. (Confluence/OneDrive are item-level, no board mirror.)
+  • **NOT YET WIRED (remaining tail):** card-LIFECYCLE UI — create/edit/close/comment a card FROM Creare and push it
+    (connector supports all of it; only MOVE is wired UI→push so far). Needs generic board-card-action routes +
+    UI affordances on mirrored boards. Confluence/OneDrive writes have no UI surface yet. **Still NOT live-verified**
+    (Electron won't launch in agent sandbox) — verify in `pnpm dev`. Pull-side conflicts persist + show, but the
+    self-echo `lastSyncedHash` (benign, converges) and remote-column-deletion handling remain deferred.
+- **NEXT:** generic card-lifecycle actions (create/edit/close/comment → enqueue → push) across mirrored boards;
+  then live-verify in `pnpm dev`. Design+roadmap: `docs/architecture/bidirectional-sync.md`.
+- **(prior) Phase 1 ADVERSARIAL DEEPREVIEW + PRODUCTION-HARDENING DONE on `main`**
   (commits `6564e08` correctness/security, `e65a5b9` real-typecheck). 5 Fable 5 reviewers ran Ground→Verify→Break-it;
   ~10 fixes landed. **Gate now GENUINELY green: typecheck 23/23 · unit 151/151 · lint 12/12.**
   • **BIGGEST FINDING — desktop typecheck was VACUOUS:** `tsc --noEmit` on a solution tsconfig (`files:[]`) checked
