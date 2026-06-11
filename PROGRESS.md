@@ -10,6 +10,18 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
+- **Membership testing spin (2026-06-11, Opus 4.8): DONE.** Full gate GREEN — lint clean · typecheck clean ·
+    unit **81/81** · **E2E 2/2**. Commits `3f1c4f0` (fix) + `e7037a2` (test+chore) on the same feature branch.
+  • **REAL BUG found + fixed:** the claude-cli/membership model wraps its "JSON only" output in a ```json fence,
+    so the classifier's bare `JSON.parse` threw and every ambiguous item silently fell back to human/urgency-3.
+    Added `extractJson()` to ai-sdk (strips ```json/``` fences + recovers a {…}/[…] span from prose); classifier
+    now uses it. Verified live against the membership model. +6 extractJson tests, +1 classifier fenced case.
+  • **New E2E** `apps/desktop/e2e/membership.spec.ts` — drives the real Electron app → Connections → asserts the
+    live "Signed in" membership badge (renderer → Fastify `/settings/claude-cli-health` → checkClaudeCli → real
+    credential store) + the claude-cli "(membership)" reasoning models. (E2E needs Electron ABI: run `pnpm e2e`,
+    not `playwright test` directly, after `pnpm test` — `pnpm test` swaps better-sqlite3 to the Node ABI.)
+  • **Lint debt cleared:** 12 pre-existing `no-unused-vars` errors fixed (eslint config now ignores `_`-prefixed
+    vars/destructures; dropped a handful of unused imports; `get`→`_get`). Lint is green for the first time.
 - **Membership/claude-cli provider (2026-06-11, Opus 4.8): DONE.** typecheck clean · tests **74/74** · build clean.
   **Committed locally** on branch `feat/claude-cli-membership-provider` (commit `4d5c223`); NOT merged to `main`,
   NOT pushed (no GitHub remote yet). Session log: `docs/sessions/session-2026-06-11-claude-cli-provider.md`.
