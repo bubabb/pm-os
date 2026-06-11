@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import AppShell from './layouts/AppShell'
 import ProtectedRoute from './components/ProtectedRoute'
+import { ToastViewport } from './components/ui/Toast'
 
 // Code-split pages: each route loads its own chunk on first visit,
 // trimming initial parse/init time and memory (shell stays eager).
@@ -61,6 +62,8 @@ export default function App() {
           </Routes>
         </Suspense>
       </HashRouter>
+      {/* Global toast stack — mounted once so toast.* works app-wide */}
+      <ToastViewport />
     </QueryClientProvider>
   )
 }
