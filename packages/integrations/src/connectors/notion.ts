@@ -1,5 +1,5 @@
 import { BaseConnector } from './base'
-import type { FetchResult, NormalizedEntity } from '../types'
+import type { FetchResult, NormalizedEntity, ResourceOption } from '../types'
 
 const NOTION_API = 'https://api.notion.com/v1'
 const NOTION_VERSION = '2022-06-28'
@@ -13,6 +13,32 @@ export class NotionConnector extends BaseConnector {
       'Notion-Version': NOTION_VERSION,
       'Content-Type': 'application/json',
     }
+  }
+
+  // All databases shared with the integration — powers the database picker
+  override async listResources(): Promise<ResourceOption[]> {
+    const res = await this.fetchWithRetry(
+      `${NOTION_API}/search`,
+      {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify({
+          filter: { property: 'object', value: 'database' },
+          page_size: 100,
+        }),
+      },
+    )
+    if (!res.ok) return []
+
+    const data = await res.json() as NotionDbSearchResult
+    return (data.results ?? []).map((db) => {
+      const title = (db.title ?? []).map((t) => t.plain_text).join('')
+      return {
+        id: db.id,
+        label: title || 'Untitled',
+        metadata: { databaseId: db.id },
+      }
+    })
   }
 
   async fetchEntities(cursor?: string): Promise<FetchResult> {
@@ -67,6 +93,10 @@ function extractNotionStatus(props: Record<string, NotionProperty>): string | nu
     if (prop.type === 'select') return prop.select?.name ?? null
   }
   return null
+}
+
+interface NotionDbSearchResult {
+  results?: Array<{ id: string; title?: Array<{ plain_text: string }> }>
 }
 
 interface NotionQueryResult {

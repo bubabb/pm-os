@@ -1,5 +1,5 @@
 import { BaseConnector } from './base'
-import type { FetchResult, NormalizedEntity } from '../types'
+import type { FetchResult, NormalizedEntity, ResourceOption } from '../types'
 
 const GRAPH_API = 'https://graph.microsoft.com/v1.0'
 
@@ -11,6 +11,24 @@ export class OneDriveConnector extends BaseConnector {
       Authorization: `Bearer ${this.config.token}`,
       Accept: 'application/json',
     }
+  }
+
+  // Top-level folders in the user's drive — powers the folder picker
+  override async listResources(): Promise<ResourceOption[]> {
+    const res = await this.fetchWithRetry(
+      `${GRAPH_API}/me/drive/root/children?$top=200&$select=id,name,folder`,
+      { headers: this.headers },
+    )
+    if (!res.ok) return []
+
+    const data = await res.json() as GraphChildList
+    return (data.value ?? [])
+      .filter((item) => item.folder != null)
+      .map((item) => ({
+        id: item.id,
+        label: item.name,
+        metadata: { folder: item.name },
+      }))
   }
 
   async fetchEntities(_cursor?: string): Promise<FetchResult> {
@@ -36,6 +54,10 @@ export class OneDriveConnector extends BaseConnector {
     // Microsoft Graph uses @odata.nextLink for pagination — single page for MVP
     return { entities, nextCursor: null }
   }
+}
+
+interface GraphChildList {
+  value?: Array<{ id: string; name: string; folder?: { childCount: number } | null }>
 }
 
 interface GraphDriveItemList {

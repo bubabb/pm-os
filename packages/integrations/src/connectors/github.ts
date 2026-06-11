@@ -1,5 +1,5 @@
 import { BaseConnector } from './base'
-import type { FetchResult, NormalizedEntity } from '../types'
+import type { FetchResult, NormalizedEntity, ResourceOption } from '../types'
 
 const BASE = 'https://api.github.com'
 
@@ -22,6 +22,34 @@ export class GitHubConnector extends BaseConnector {
   private get repo(): { owner: string; repo: string } {
     const meta = this.config.metadata as { owner?: string; repo?: string } | undefined
     return { owner: meta?.owner ?? '', repo: meta?.repo ?? '' }
+  }
+
+  // All repos the token can access — owned, private, and invited/collaborator
+  override async listResources(): Promise<ResourceOption[]> {
+    const PER_PAGE = 100
+    const options: ResourceOption[] = []
+
+    for (let page = 1; page <= 2; page++) {
+      const res = await this.fetchWithRetry(
+        `${BASE}/user/repos?affiliation=owner,collaborator,organization_member&per_page=${PER_PAGE}&sort=updated&page=${page}`,
+        { headers: this.headers },
+      )
+      if (!res.ok) break
+
+      const repos = await res.json() as GhRepo[]
+      if (!Array.isArray(repos)) break
+      for (const r of repos) {
+        options.push({
+          id: r.full_name,
+          label: r.full_name,
+          sublabel: r.private ? 'Private' : 'Public',
+          metadata: { owner: r.owner.login, repo: r.name },
+        })
+      }
+      if (repos.length < PER_PAGE) break
+    }
+
+    return options
   }
 
   async fetchEntities(cursor?: string): Promise<FetchResult> {
@@ -102,6 +130,13 @@ export class GitHubConnector extends BaseConnector {
 
     return { entities, nextCursor }
   }
+}
+
+interface GhRepo {
+  name: string
+  full_name: string
+  private: boolean
+  owner: { login: string }
 }
 
 interface GhPr {

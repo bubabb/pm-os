@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
-import { listConnections, storeConnection, updateConnection, deleteConnection } from '../secrets'
+import { listConnections, storeConnection, updateConnection, deleteConnection, getConnection, getConnectionToken } from '../secrets'
+import { listConnectorResources } from '@creare/integrations'
+import type { ConnectorConfig } from '@creare/integrations'
 import type { Connection } from '@creare/database'
 
 // Workspace-level (GLOBAL) tool connections — requireAuth, but NOT project-scoped.
@@ -63,6 +65,40 @@ export async function connectionsRoutes(app: FastifyInstance): Promise<void> {
         return safe
       } catch {
         return reply.code(404).send({ error: 'Not found' })
+      }
+    },
+  )
+
+  // List the resources (repos/projects/spaces/databases/folders) this
+  // connection's token can access — powers the UI resource picker.
+  app.get<{ Params: ConnectionParams }>(
+    '/connections/:connectionId/resources',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest<{ Params: ConnectionParams }>, reply) => {
+      const connection = await getConnection(request.params.connectionId)
+      if (!connection) return reply.code(404).send({ error: 'Not found' })
+
+      try {
+        const token = await getConnectionToken(connection.id)
+        const metadata = (() => {
+          try { return JSON.parse(connection.metadata) as Record<string, unknown> }
+          catch { return {} }
+        })()
+        const baseUrl = typeof metadata['baseUrl'] === 'string' ? metadata['baseUrl'] : undefined
+
+        const config: ConnectorConfig = {
+          credentialId: '',
+          projectId: '',
+          token,
+          ...(baseUrl !== undefined ? { baseUrl } : {}),
+          metadata,
+        }
+        return await listConnectorResources(connection.source, config)
+      } catch (err) {
+        // Upstream API failure (bad token, network, rate limit) — the UI falls
+        // back to manual entry.
+        const message = err instanceof Error ? err.message : String(err)
+        return reply.code(502).send({ error: message })
       }
     },
   )

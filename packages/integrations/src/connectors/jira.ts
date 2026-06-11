@@ -1,5 +1,5 @@
 import { BaseConnector } from './base'
-import type { FetchResult, NormalizedEntity } from '../types'
+import type { FetchResult, NormalizedEntity, ResourceOption } from '../types'
 
 export class JiraConnector extends BaseConnector {
   get source() { return 'jira' as const }
@@ -14,6 +14,26 @@ export class JiraConnector extends BaseConnector {
       Accept: 'application/json',
       'Content-Type': 'application/json',
     }
+  }
+
+  // All Jira projects the token can access — powers the project picker
+  override async listResources(): Promise<ResourceOption[]> {
+    const baseUrl = this.config.baseUrl
+    if (!baseUrl) return []
+
+    const res = await this.fetchWithRetry(
+      `${baseUrl}/rest/api/3/project/search?maxResults=100`,
+      { headers: this.headers },
+    )
+    if (!res.ok) return []
+
+    const data = await res.json() as JiraProjectSearchResult
+    return (data.values ?? []).map((project) => ({
+      id: project.key,
+      label: project.name,
+      sublabel: project.key,
+      metadata: { projectKey: project.key },
+    }))
   }
 
   async fetchEntities(cursor?: string): Promise<FetchResult> {
@@ -59,6 +79,10 @@ export class JiraConnector extends BaseConnector {
 
     return { entities, nextCursor }
   }
+}
+
+interface JiraProjectSearchResult {
+  values?: Array<{ key: string; name: string }>
 }
 
 interface JiraSearchResult {

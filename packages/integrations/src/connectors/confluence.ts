@@ -1,5 +1,5 @@
 import { BaseConnector } from './base'
-import type { FetchResult, NormalizedEntity } from '../types'
+import type { FetchResult, NormalizedEntity, ResourceOption } from '../types'
 
 export class ConfluenceConnector extends BaseConnector {
   get source() { return 'confluence' as const }
@@ -9,6 +9,27 @@ export class ConfluenceConnector extends BaseConnector {
     const email = meta?.email ?? ''
     const encoded = Buffer.from(`${email}:${this.config.token}`).toString('base64')
     return { Authorization: `Basic ${encoded}`, Accept: 'application/json' }
+  }
+
+  // All Confluence spaces the token can access — powers the space picker.
+  // Uses the numeric space ID (what the v2 pages API filters on), not the key.
+  override async listResources(): Promise<ResourceOption[]> {
+    const baseUrl = this.config.baseUrl
+    if (!baseUrl) return []
+
+    const res = await this.fetchWithRetry(
+      `${baseUrl}/wiki/api/v2/spaces?limit=100`,
+      { headers: this.headers },
+    )
+    if (!res.ok) return []
+
+    const data = await res.json() as ConfluenceSpaceList
+    return (data.results ?? []).map((space) => ({
+      id: String(space.id),
+      label: space.name,
+      sublabel: space.key,
+      metadata: { spaceId: String(space.id) },
+    }))
   }
 
   async fetchEntities(cursor?: string): Promise<FetchResult> {
@@ -55,6 +76,10 @@ export class ConfluenceConnector extends BaseConnector {
       nextCursor: data._links?.next ? data._links.next : null,
     }
   }
+}
+
+interface ConfluenceSpaceList {
+  results?: Array<{ id: string | number; key: string; name: string }>
 }
 
 interface ConfluencePageList {

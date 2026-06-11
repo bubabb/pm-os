@@ -37,6 +37,16 @@ export interface ConnectorConfig {
   metadata?: Record<string, unknown>     // source-specific config (owner, repo, email, databaseId…)
 }
 
+// A pickable resource (repo/project/space/database/folder) the connection's
+// token can access. `metadata` is the per-project scope to persist when this
+// resource is picked (e.g. github → {owner, repo}; jira → {projectKey}).
+export interface ResourceOption {
+  id: string
+  label: string
+  sublabel?: string
+  metadata: Record<string, string>
+}
+
 export interface FetchResult {
   entities: NormalizedEntity[]
   nextCursor: string | null

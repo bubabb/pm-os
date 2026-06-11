@@ -1,14 +1,35 @@
 import { getDb, externalEventCache, integrationSyncState } from '@creare/database'
 import { eq, and, isNull, gte, inArray, desc } from 'drizzle-orm'
 import { sync } from './sync-engine'
+import { GitHubConnector } from './connectors/github'
+import { JiraConnector } from './connectors/jira'
+import { ConfluenceConnector } from './connectors/confluence'
+import { NotionConnector } from './connectors/notion'
+import { OneDriveConnector } from './connectors/onedrive'
 import { classifyItems as classifyRows } from './classifier'
 import { correlateEntities as correlate } from './correlator'
 import { generateDigest, getLatestDigest as getCachedDigest } from './digest-generator'
 import type { ModelProvider } from '@creare/ai-sdk'
 import type { IntegrationCredential, ExternalEventCache, PmDigestCache } from '@creare/database'
-import type { ClassifiedItem, IntegrationSource, SyncStatus } from './types'
+import type { ClassifiedItem, ConnectorConfig, IntegrationSource, ResourceOption, SyncStatus } from './types'
 
-export type { IntegrationSource, ClassifiedItem, SyncStatus, NormalizedEntity, ConnectorConfig } from './types'
+export type { IntegrationSource, ClassifiedItem, SyncStatus, NormalizedEntity, ConnectorConfig, ResourceOption } from './types'
+
+// Lists the resources (repos/projects/spaces/databases/folders) the given
+// connection token can access — powers the UI resource picker. The connector
+// classes stay internal to this package; this helper is the public surface.
+export async function listConnectorResources(
+  source: IntegrationSource,
+  config: ConnectorConfig,
+): Promise<ResourceOption[]> {
+  switch (source) {
+    case 'github':     return new GitHubConnector(config).listResources()
+    case 'jira':       return new JiraConnector(config).listResources()
+    case 'confluence': return new ConfluenceConnector(config).listResources()
+    case 'notion':     return new NotionConnector(config).listResources()
+    case 'onedrive':   return new OneDriveConnector(config).listResources()
+  }
+}
 
 export async function triggerSync(
   projectId: string,

@@ -1,10 +1,17 @@
-import type { ConnectorConfig, FetchResult, IntegrationSource } from '../types'
+import type { ConnectorConfig, FetchResult, IntegrationSource, ResourceOption } from '../types'
 
 export abstract class BaseConnector {
   constructor(protected config: ConnectorConfig) {}
 
   abstract get source(): IntegrationSource
   abstract fetchEntities(cursor?: string): Promise<FetchResult>
+
+  // Lists the resources (repos/projects/spaces/databases/folders) this
+  // connection's token can access — powers the UI resource picker.
+  // Default: no picker support; subclasses override.
+  async listResources(): Promise<ResourceOption[]> {
+    return []
+  }
 
   protected async fetchWithRetry(url: string, init: RequestInit = {}, attempts = 3): Promise<Response> {
     let lastError: Error = new Error('Unknown fetch error')
