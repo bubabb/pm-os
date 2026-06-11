@@ -10,7 +10,27 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
-- **RESUME HERE (2026-06-11, LATEST):** **BIDIRECTIONAL SYNC — Phase 1 CODE-COMPLETE on `main`** (commits
+- **RESUME HERE (2026-06-11, NEWEST):** **Phase 1 ADVERSARIAL DEEPREVIEW + PRODUCTION-HARDENING DONE on `main`**
+  (commits `6564e08` correctness/security, `e65a5b9` real-typecheck). 5 Fable 5 reviewers ran Ground→Verify→Break-it;
+  ~10 fixes landed. **Gate now GENUINELY green: typecheck 23/23 · unit 151/151 · lint 12/12.**
+  • **BIGGEST FINDING — desktop typecheck was VACUOUS:** `tsc --noEmit` on a solution tsconfig (`files:[]`) checked
+    NOTHING, so the renderer was never type-checked and **`@types/react` wasn't even installed** (every React import
+    was silently `any`). Fixed: script → `tsc -b --noEmit`, added `@types/react(-dom)`, fixed the 18 real errors it
+    surfaced. **`apps/desktop` typecheck = `tsc -b --noEmit` now — do NOT revert to `tsc --noEmit`.**
+  • **Correctness fixes (silent-data-loss):** failed/conflicted ops now count as divergence (no silent move-revert);
+    `enqueueBoardItemMove` never throws (records a tracked failed row); `recoverStaleInFlight()` at boot (crash
+    recovery); boards PATCH awaits enqueue; pull conflicts persisted to `sync_conflicts`; `getMirrorStatus.failedPushes`;
+    push-worker notifies on failures; duplicate-import 409 guard + credential cleanup; mirrored task writes now emit
+    events; link lookups scoped by containerRemoteId (**migration 0008**); local deletes tombstone links.
+  • **Security:** atomic `keys.json` write (temp+rename); loud-warn-not-silent on re-key when ciphertext exists;
+    JWT no longer in dev logs.
+  • **Still NOT live-verified** (Electron won't launch in agent sandbox) — verify in `pnpm dev`. **STILL OUTSTANDING
+    from review (defer to Phase 2): conflict-resolution UI** (sync_conflicts now populated + chip shows counts, but the
+    badge links nowhere — build the review/resolve surface in Phase 2); remote-column-deletion handling; failedPushes
+    not yet rendered on the chip.
+- **NEXT: Phase 2 (GitHub item lifecycle: create/edit/close/comment + conflict-resolution UI) then Phase 3 (Jira
+  two-way).** Build on the now-hardened foundation, review-as-you-go. Design+roadmap: `docs/architecture/bidirectional-sync.md`.
+- **(prior) BIDIRECTIONAL SYNC — Phase 1 CODE-COMPLETE on `main`** (commits
   `9d846e4` foundation, `61b3c44` engine, `660ac08` mirror engine, `7c99ffc` wiring/UI). Built from
   `docs/architecture/bidirectional-sync.md` (Fable 5 design) in 4 verified waves of parallel Fable 5 agents.
   Full gate GREEN: typecheck **23/23** · unit **131/131** · lint **12/12**. **NOT yet verified live** — the real
