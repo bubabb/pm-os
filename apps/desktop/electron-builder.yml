@@ -1,0 +1,51 @@
+# electron-builder configuration for Creare.
+#
+# Run via `pnpm --filter @creare/desktop package` (installers) or
+# `pnpm --filter @creare/desktop package:dir` (unpacked dir under release/ —
+# faster, good for smoke-testing the packaged app).
+#
+# Notes:
+# - @creare/* workspace packages are BUNDLED into out/main/index.js by
+#   electron.vite.config.ts (pnpm symlinks don't survive packaging), so the
+#   only native runtime dep that must travel in node_modules is better-sqlite3.
+# - better-sqlite3's .node binary cannot be loaded from inside an asar archive,
+#   hence asarUnpack. npmRebuild ensures it is compiled for the target
+#   Electron ABI (the dev tree may hold a Node-ABI build — see
+#   scripts/rebuild-better-sqlite3.mjs).
+# - @creare/database's runMigrations() probes process.resourcesPath/migrations
+#   at runtime; extraResources ships the SQL migrations (incl. meta/ journal)
+#   to exactly that location.
+
+appId: com.creare.app
+productName: Creare
+
+directories:
+  output: release
+
+files:
+  - 'out/**/*'
+  - 'package.json'
+
+asarUnpack:
+  - '**/*.node'
+
+extraResources:
+  - from: ../../packages/database/src/migrations
+    to: migrations
+
+npmRebuild: true
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Development
+  icon: resources/icon.png
+
+mac:
+  target:
+    - dmg
+
+win:
+  target:
+    - nsis

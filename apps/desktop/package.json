@@ -2,6 +2,8 @@
   "name": "@creare/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Creare — agentic DevOps platform for AI-native software teams",
+  "author": "Bruna Goncalves Vasconcelos",
   "main": "out/main/index.js",
   "scripts": {
     "predev": "node ../../scripts/rebuild-better-sqlite3.mjs ensure electron && node ../../scripts/install-desktop-entry.mjs",
@@ -14,7 +16,9 @@
     "test": "vitest run",
     "pree2e": "node ../../scripts/rebuild-better-sqlite3.mjs ensure electron",
     "e2e": "electron-vite build && playwright test",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "package": "electron-vite build && electron-builder",
+    "package:dir": "electron-vite build && electron-builder --dir"
   },
   "dependencies": {
     "@creare/agent-orchestration": "workspace:*",
@@ -29,6 +33,7 @@
     "@creare/shared": "workspace:*",
     "@creare/tool-registry": "workspace:*",
     "@fastify/cors": "^9.0.0",
+    "better-sqlite3": "^12.10.0",
     "@fastify/swagger": "^8.14.0",
     "@fastify/swagger-ui": "^3.0.0",
     "@tanstack/react-query": "^5.28.0",
@@ -54,6 +59,7 @@
     "@vitejs/plugin-react": "^4.2.0",
     "autoprefixer": "^10.4.0",
     "electron": "^30.0.0",
+    "electron-builder": "^24.13.0",
     "electron-vite": "^2.1.0",
     "playwright": "^1.43.0",
     "postcss": "^8.4.0",
