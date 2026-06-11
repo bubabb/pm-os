@@ -60,15 +60,20 @@ export function MirrorStatusChip({ projectId, boardId }: { projectId: string; bo
   // Plain Creare board (or status still loading / unavailable) — render nothing.
   if (!status?.linked) return null
 
+  const sourceLabel = status.source === 'github' ? 'GitHub Project'
+    : status.source === 'jira' ? 'Jira project'
+    : status.source === 'notion' ? 'Notion database'
+    : 'Mirrored board'
+
   return (
     <div
       role="status"
-      aria-label="GitHub mirror status"
+      aria-label="Mirror status"
       className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-border bg-card px-3 py-1.5"
     >
       <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
         <Github className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-        GitHub Project
+        {sourceLabel}
         {status.remoteUrl && (
           <a
             href={status.remoteUrl}

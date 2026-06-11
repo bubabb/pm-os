@@ -33,6 +33,13 @@ interface ImportRemoteBoardDialogProps {
   onImported?: (boardId: string) => void
 }
 
+// Connector sources that expose a board mirror (listRemoteBoards / fetchBoardSnapshot).
+// Confluence/OneDrive are item-level, not boards, so they're excluded here.
+const MIRROR_SOURCES = ['github', 'jira', 'notion'] as const
+const SOURCE_LABEL: Record<string, string> = { github: 'GitHub', jira: 'Jira', notion: 'Notion' }
+const BOARD_NOUN: Record<string, string> = { github: 'Project', jira: 'project', notion: 'database' }
+function sourceLabel(source: string): string { return SOURCE_LABEL[source] ?? source }
+
 // ── Dialog ────────────────────────────────────────────────────────────────────
 // Step 1: pick a GitHub connection. Step 2: pick one of its remote Projects.
 // Picking a project immediately creates the mirror (POST /mirrors).
@@ -62,7 +69,7 @@ export function ImportRemoteBoardDialog({
     enabled: open,
   })
 
-  const githubConnections = connections.filter((c) => c.source === 'github')
+  const mirrorConnections = connections.filter((c) => MIRROR_SOURCES.includes(c.source as typeof MIRROR_SOURCES[number]))
 
   const {
     data: remoteBoards = [], isLoading: boardsLoading,
@@ -76,7 +83,7 @@ export function ImportRemoteBoardDialog({
 
   const importBoard = useMutation({
     mutationFn: (option: RemoteBoardOption) => {
-      if (!connectionId) throw new Error('Pick a GitHub connection first.')
+      if (!connectionId) throw new Error('Pick a connection first.')
       return api.post<{ boardId: string }>(`/projects/${projectId}/mirrors`, {
         connectionId,
         remoteId: option.id,
@@ -85,14 +92,15 @@ export function ImportRemoteBoardDialog({
     },
     onSuccess: ({ boardId }) => {
       qc.invalidateQueries({ queryKey: ['boards', projectId] })
-      toast.success('Board imported from GitHub')
+      toast.success(`Board imported from ${sourceLabel(selectedConnection?.source ?? '')}`)
       onImported?.(boardId)
       onClose()
     },
     onError: (e: Error) => toast.error(`Import failed: ${e.message}`),
   })
 
-  const selectedConnection = githubConnections.find((c) => c.id === connectionId)
+  const selectedConnection = mirrorConnections.find((c) => c.id === connectionId)
+  const selectedNoun = BOARD_NOUN[selectedConnection?.source ?? ''] ?? 'board'
   const query = search.trim().toLowerCase()
   const filtered = query === ''
     ? remoteBoards
@@ -104,7 +112,7 @@ export function ImportRemoteBoardDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title="Import from GitHub"
+      title="Import a board"
       footer={
         <button
           onClick={onClose}
@@ -120,12 +128,12 @@ export function ImportRemoteBoardDialog({
           <Spinner />
         ) : connsError ? (
           <QueryError message={connsErr instanceof Error ? connsErr.message : undefined} onRetry={() => refetchConns()} />
-        ) : githubConnections.length === 0 ? (
+        ) : mirrorConnections.length === 0 ? (
           <div className="py-6 text-center">
-            <Github className="mx-auto mb-2 h-8 w-8 text-muted-foreground/40" aria-hidden="true" />
-            <p className="text-sm font-medium text-foreground">No GitHub connection</p>
+            <LayoutGrid className="mx-auto mb-2 h-8 w-8 text-muted-foreground/40" aria-hidden="true" />
+            <p className="text-sm font-medium text-foreground">No board connection</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Connect a GitHub account first, then come back to import a Project board.
+              Connect a GitHub, Jira, or Notion account first, then come back to import a board.
             </p>
             <button
               onClick={() => { onClose(); navigate('/connections') }}
@@ -136,17 +144,19 @@ export function ImportRemoteBoardDialog({
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">Pick the GitHub connection to import from.</p>
+            <p className="text-xs text-muted-foreground">Pick the connection to import a board from (GitHub, Jira, or Notion).</p>
             <ul className="space-y-1">
-              {githubConnections.map((c) => (
+              {mirrorConnections.map((c) => (
                 <li key={c.id}>
                   <button
                     onClick={() => setConnectionId(c.id)}
                     className="flex w-full items-center gap-2.5 rounded-lg border border-border px-3 py-2.5 text-left transition-colors hover:border-primary/40 hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   >
-                    <Github className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    {c.source === 'github'
+                      ? <Github className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      : <LayoutGrid className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{c.label}</span>
-                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">GitHub</span>
+                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{sourceLabel(c.source)}</span>
                   </button>
                 </li>
               ))}
@@ -164,9 +174,11 @@ export function ImportRemoteBoardDialog({
             >
               <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             </button>
-            <Github className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            {selectedConnection?.source === 'github'
+              ? <Github className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              : <LayoutGrid className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
             <span className="min-w-0 truncate text-xs text-muted-foreground">
-              {selectedConnection?.label ?? 'GitHub connection'}
+              {selectedConnection?.label ?? 'Connection'}
             </span>
           </div>
 
@@ -176,7 +188,7 @@ export function ImportRemoteBoardDialog({
             <QueryError message={boardsErr instanceof Error ? boardsErr.message : undefined} onRetry={() => refetchBoards()} />
           ) : remoteBoards.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
-              No GitHub Projects found on this connection.
+              No {selectedNoun}s found on this connection.
             </p>
           ) : (
             <>
@@ -185,8 +197,8 @@ export function ImportRemoteBoardDialog({
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
                   <input
                     autoFocus
-                    aria-label="Search GitHub Projects"
-                    placeholder="Search projects…"
+                    aria-label="Search boards"
+                    placeholder={`Search ${selectedNoun}s…`}
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
@@ -225,7 +237,7 @@ export function ImportRemoteBoardDialog({
                             target="_blank"
                             rel="noreferrer"
                             onClick={(e) => e.stopPropagation()}
-                            aria-label={`Open ${b.label} on GitHub`}
+                            aria-label={`Open ${b.label} in ${sourceLabel(selectedConnection?.source ?? '')}`}
                             className="mr-2 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                           >
                             <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
