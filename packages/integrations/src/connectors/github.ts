@@ -1,5 +1,16 @@
-import { BaseConnector } from './base'
-import type { FetchResult, NormalizedEntity, ResourceOption } from '../types'
+import { BaseConnector, UnsupportedMutationError } from './base'
+import { GitHubProjectsClient } from './github-projects'
+import type {
+  ConnectorCapabilities,
+  FetchResult,
+  MutationEnvelope,
+  MutationKind,
+  MutationResult,
+  NormalizedEntity,
+  RemoteBoardOption,
+  RemoteRef,
+  ResourceOption,
+} from '../types'
 
 const BASE = 'https://api.github.com'
 
@@ -22,6 +33,51 @@ export class GitHubConnector extends BaseConnector {
   private get repo(): { owner: string; repo: string } {
     const meta = this.config.metadata as { owner?: string; repo?: string } | undefined
     return { owner: meta?.owner ?? '', repo: meta?.repo ?? '' }
+  }
+
+  // ── Write surface (bidirectional-sync.md §3.2) — Phase 1: card moves only ──
+
+  override get capabilities(): ConnectorCapabilities {
+    return { write: ['move_item'] as MutationKind[] }
+  }
+
+  override async applyMutation(envelope: MutationEnvelope): Promise<MutationResult> {
+    const { op } = envelope
+    if (op.kind !== 'move_item') {
+      throw new UnsupportedMutationError(this.source, op.kind)
+    }
+    if (!op.ref.containerId || !op.statusFieldRemoteId) {
+      throw new Error(`move_item op ${envelope.opId} is missing containerId or statusFieldRemoteId`)
+    }
+    const client = new GitHubProjectsClient(this.config.token)
+    const { updatedAt } = await client.moveItem(
+      op.ref.containerId,
+      op.ref.remoteId,
+      op.statusFieldRemoteId,
+      op.toStatusRemoteId,
+    )
+    return { ref: op.ref, remoteVersion: updatedAt, raw: { updatedAt } }
+  }
+
+  override async fetchRemoteVersion(ref: RemoteRef): Promise<string | null> {
+    return new GitHubProjectsClient(this.config.token).fetchItemVersion(ref.remoteId)
+  }
+
+  // Classic PATs report granted scopes in the x-oauth-scopes response header;
+  // fine-grained PATs omit it entirely → 'unknown' (badge shows "untested").
+  override async verifyWriteAccess(): Promise<'read_write' | 'read_only' | 'unknown'> {
+    const res = await this.fetchWithRetry(`${BASE}/user`, { headers: this.headers })
+    if (!res.ok) return 'unknown'
+    const scopeHeader = res.headers.get('x-oauth-scopes')
+    if (scopeHeader === null) return 'unknown'
+    const scopes = scopeHeader.split(',').map((s) => s.trim())
+    // 'project' = read/write on Projects v2; 'read:project' is read-only
+    return scopes.includes('project') ? 'read_write' : 'read_only'
+  }
+
+  // ProjectV2 boards this token can see — powers the "Import remote board" picker
+  async listRemoteBoards(): Promise<RemoteBoardOption[]> {
+    return new GitHubProjectsClient(this.config.token).listProjects()
   }
 
   // All repos the token can access — owned, private, and invited/collaborator

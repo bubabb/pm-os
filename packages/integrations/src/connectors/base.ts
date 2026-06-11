@@ -1,4 +1,24 @@
-import type { ConnectorConfig, FetchResult, IntegrationSource, ResourceOption } from '../types'
+import type {
+  ConnectorCapabilities,
+  ConnectorConfig,
+  FetchResult,
+  IntegrationSource,
+  MutationEnvelope,
+  MutationKind,
+  MutationResult,
+  RemoteRef,
+  ResourceOption,
+} from '../types'
+
+// Thrown when a mutation kind is pushed at a connector that can't perform it.
+// The outbox worker treats this as fatal (no retry) — it signals a programming
+// error or a capability mismatch, not a transient remote failure.
+export class UnsupportedMutationError extends Error {
+  constructor(source: IntegrationSource, kind: MutationKind) {
+    super(`Connector "${source}" does not support the "${kind}" mutation`)
+    this.name = 'UnsupportedMutationError'
+  }
+}
 
 export abstract class BaseConnector {
   constructor(protected config: ConnectorConfig) {}
@@ -11,6 +31,29 @@ export abstract class BaseConnector {
   // Default: no picker support; subclasses override.
   async listResources(): Promise<ResourceOption[]> {
     return []
+  }
+
+  // ── Write surface (docs/architecture/bidirectional-sync.md §3.1) ──
+  // Defaults make every connector read-only; writable connectors override.
+
+  get capabilities(): ConnectorCapabilities {
+    return { write: [] }
+  }
+
+  async applyMutation(envelope: MutationEnvelope): Promise<MutationResult> {
+    throw new UnsupportedMutationError(this.source, envelope.op.kind)
+  }
+
+  // Cheap pre-push conflict probe — returns the remote's current version token
+  // for a single object, or null when unknown/unsupported.
+  async fetchRemoteVersion(_ref: RemoteRef): Promise<string | null> {
+    return null
+  }
+
+  // Powers the Connections write-access badge. 'unknown' = cannot determine
+  // (e.g. fine-grained PATs expose no scope header).
+  async verifyWriteAccess(): Promise<'read_write' | 'read_only' | 'unknown'> {
+    return 'unknown'
   }
 
   protected async fetchWithRetry(url: string, init: RequestInit = {}, attempts = 3): Promise<Response> {
