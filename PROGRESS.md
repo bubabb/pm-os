@@ -10,8 +10,26 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
-- **RESUME HERE (2026-06-11, NEWEST):** **Card-lifecycle on buttons + whole-project production deepreview + hardening
-  + packaging path DONE on `main`.** Gate GREEN: typecheck 23/23 · unit **240/240** · lint 12/12 · desktop real `tsc -b`.
+- **RESUME HERE (2026-06-12, NEWEST):** **All-connector access + correctness fixes, UI crash/focus fixes, import-by-URL.**
+  Gate GREEN: typecheck 23/23 · unit **293/293** · lint 12/12 · desktop real `tsc -b`. `main`, 77 commits, no GitHub remote yet.
+  • **Connector access (owned + shared/invited) + correctness deepreview (commit `f7aa17c`):** OneDrive now lists
+    **shared-with-me** (was own-drive only) + real folder scoping; all listings paginate fully (were capped 100-200).
+    **Jira P0:** migrated `/rest/api/3/search` (REMOVED from Jira Cloud → was silently syncing 0) → `/search/jql` w/
+    nextPageToken. **Confluence P0:** fixed broken pagination cursor (was syncing only ~25 items) + archive endpoint.
+    GitHub: repo list no longer 200-capped (affiliation already covers collaborator/org/invited), Projects list
+    paginates, Status-field fallback, 403-rate-limit retry. Jira JQL quoting + Done-transition pick. +41 tests.
+  • **Import a GitHub Project by URL** (commit earlier today): `resolveRemoteBoard` + `GET /connections/:id/resolve-board`
+    + dialog input — for cross-owner projects the viewer-scoped list can't show (GitHub has no "shared projects" API).
+    VERIFIED LIVE: bubabb token resolves `rsemnani/projects/2`.
+  • **UI fixes:** inputs no longer lose focus after one char (Dialog focus-trap effect depended on inline onClose →
+    fixed deps `[open]`+ref; DelegateConfigDrawer same); "View synced items" crash (events route returned raw cache
+    rows w/ payload-nested fields → UI read them top-level → threw → blanked app) → route normalizes + **new root
+    ErrorBoundary** so a render crash shows a recoverable card, never a blank screen.
+  • **VERIFIED LIVE on Kali (real app, port 4321):** token re-add works (stable key), GitHub source sync (12 issues
+    from rsemnani/DeepLearningCapstone), GitHub Projects import (board+columns), import-by-URL resolves rsemnani/projects/2.
+  • **NOT live-verified:** Jira/Confluence/Notion/OneDrive write+mirror round-trips (mocked tests only — need real
+    tenants); the packaged installer (electron-builder config exists, needs a real per-OS build machine).
+- **(prior) 2026-06-11: Card-lifecycle on buttons + whole-project production deepreview + hardening + packaging path.** Gate GREEN: typecheck 23/23 · unit **240/240** · lint 12/12 · desktop real `tsc -b`.
   • **Every action on a button:** New card / Edit title / Close / Comment on mirrored boards push to GitHub/Jira/Notion
     (outbox enqueueItemCreate/Update/Close/Comment; create links the remote id on push success). Renderer↔backend
     wiring verified 100% matched (no dead buttons/routes).
