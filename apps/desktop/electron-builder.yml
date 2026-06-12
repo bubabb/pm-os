@@ -45,6 +45,14 @@ linux:
 mac:
   target:
     - dmg
+  category: public.app-category.developer-tools
+  # Unsigned / ad-hoc — no Apple Developer certificate required. The tester opens it
+  # once via right-click → Open (or `xattr -cr /Applications/Creare.app`) to clear
+  # Gatekeeper quarantine. Set a real identity here to notarize for wider distribution.
+  identity: null
+  # No custom mac icon: resources/icon.png is 256x256 and electron-builder requires
+  # >=512x512 for macOS, so the default Electron icon is used for now (a 512px .icns
+  # can be added later). A wrong-size icon would FAIL the build.
 
 win:
   target:
