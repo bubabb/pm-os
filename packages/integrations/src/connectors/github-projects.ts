@@ -151,30 +151,14 @@ export class GitHubProjectsClient {
   }
 
   // Projects the viewer can see — personal + each org's. Used by the
-  // "Import remote board" picker.
-  // v1 cap: first 50 personal projects, 25 orgs × 50 projects each — no
-  // cursor pagination yet (a user with >50 projects in one bucket will see a
-  // truncated list; revisit if it bites).
+  // "Import remote board" picker. Cursor-paginated in every bucket (personal
+  // projects, the org list, and each org's projects) so nothing is silently
+  // truncated; MAX_PAGES is a runaway guard (10 × 100 per bucket), not an
+  // expected limit. Cross-owner projects the viewer merely collaborates on
+  // are NOT enumerable via the API — that path is resolveProject (import by
+  // URL).
   async listProjects(): Promise<RemoteBoardOption[]> {
-    const data = await this.graphql<ListProjectsData>(
-      `query ListProjects {
-        viewer {
-          projectsV2(first: 50, orderBy: { field: UPDATED_AT, direction: DESC }) {
-            nodes { id title number url }
-          }
-          organizations(first: 25) {
-            nodes {
-              login
-              projectsV2(first: 50, orderBy: { field: UPDATED_AT, direction: DESC }) {
-                nodes { id title number url }
-              }
-            }
-          }
-        }
-      }`,
-      {},
-    )
-
+    const MAX_PAGES = 10
     const options: RemoteBoardOption[] = []
     const seen = new Set<string>()
     const push = (node: ProjectNode | null) => {
@@ -183,10 +167,82 @@ export class GitHubProjectsClient {
       options.push({ id: node.id, label: node.title, sublabel: `#${node.number}`, url: node.url })
     }
 
-    for (const node of data.viewer.projectsV2.nodes ?? []) push(node)
-    for (const org of data.viewer.organizations.nodes ?? []) {
-      for (const node of org?.projectsV2.nodes ?? []) push(node)
+    // Personal projects — page until exhausted
+    let cursor: string | null = null
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const data: ViewerProjectsData = await this.graphql<ViewerProjectsData>(
+        `query ViewerProjects($cursor: String) {
+          viewer {
+            projectsV2(first: 100, after: $cursor, orderBy: { field: UPDATED_AT, direction: DESC }) {
+              pageInfo { hasNextPage endCursor }
+              nodes { id title number url }
+            }
+          }
+        }`,
+        { cursor },
+      )
+      const conn = data.viewer.projectsV2
+      for (const node of conn.nodes ?? []) push(node)
+      if (!conn.pageInfo.hasNextPage) break
+      cursor = conn.pageInfo.endCursor
     }
+
+    // Org projects — page the org list; orgs whose first 100 projects
+    // overflow get follow-up paging below
+    const overflow: Array<{ login: string; cursor: string | null }> = []
+    let orgCursor: string | null = null
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const data: ViewerOrganizationsData = await this.graphql<ViewerOrganizationsData>(
+        `query ViewerOrgProjects($orgCursor: String) {
+          viewer {
+            organizations(first: 25, after: $orgCursor) {
+              pageInfo { hasNextPage endCursor }
+              nodes {
+                login
+                projectsV2(first: 100, orderBy: { field: UPDATED_AT, direction: DESC }) {
+                  pageInfo { hasNextPage endCursor }
+                  nodes { id title number url }
+                }
+              }
+            }
+          }
+        }`,
+        { orgCursor },
+      )
+      const orgs = data.viewer.organizations
+      for (const org of orgs.nodes ?? []) {
+        if (!org) continue
+        for (const node of org.projectsV2.nodes ?? []) push(node)
+        if (org.projectsV2.pageInfo.hasNextPage) {
+          overflow.push({ login: org.login, cursor: org.projectsV2.pageInfo.endCursor })
+        }
+      }
+      if (!orgs.pageInfo.hasNextPage) break
+      orgCursor = orgs.pageInfo.endCursor
+    }
+
+    // Follow-up paging for orgs with >100 projects
+    for (const org of overflow) {
+      let projectCursor: string | null = org.cursor
+      for (let page = 0; page < MAX_PAGES && projectCursor !== null; page++) {
+        const data: OrgProjectsData = await this.graphql<OrgProjectsData>(
+          `query OrgProjects($login: String!, $cursor: String) {
+            organization(login: $login) {
+              projectsV2(first: 100, after: $cursor, orderBy: { field: UPDATED_AT, direction: DESC }) {
+                pageInfo { hasNextPage endCursor }
+                nodes { id title number url }
+              }
+            }
+          }`,
+          { login: org.login, cursor: projectCursor },
+        )
+        const conn = data.organization?.projectsV2
+        if (!conn) break
+        for (const node of conn.nodes ?? []) push(node)
+        projectCursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null
+      }
+    }
+
     return options
   }
 
@@ -231,27 +287,55 @@ export class GitHubProjectsClient {
     }
   }
 
-  // Full mirror snapshot of one ProjectV2: columns from the Status
+  // Full mirror snapshot of one ProjectV2: columns from the status
   // single-select field's options, items paginated 100/page until exhausted.
+  // The status field is resolved up front: field(name: "Status") first
+  // (case-sensitive), falling back to the FIRST ProjectV2SingleSelectField
+  // when the field was renamed/localized — its NAME then drives each item's
+  // fieldValueByName lookup so item statuses follow the same field.
   async fetchProjectSnapshot(projectV2Id: string): Promise<MirrorBoardSnapshot> {
-    let project: ProjectSnapshotNode | null = null
+    const meta = await this.graphql<ProjectMetaData>(
+      `query ProjectMeta($projectId: ID!) {
+        node(id: $projectId) {
+          ... on ProjectV2 {
+            id title url updatedAt
+            field(name: "Status") {
+              ... on ProjectV2SingleSelectField { id name options { id name } }
+            }
+            fields(first: 30) {
+              nodes {
+                __typename
+                ... on ProjectV2SingleSelectField { id name options { id name } }
+              }
+            }
+          }
+        }
+      }`,
+      { projectId: projectV2Id },
+    )
+
+    const project = meta.node
+    // A non-ProjectV2 node id resolves the inline fragment to `{}` — guard it
+    if (!project || !project.fields) {
+      throw new GitHubNotFoundError(`ProjectV2 ${projectV2Id} not found or not a project`)
+    }
+    const statusField = resolveStatusField(project)
+    const statusFieldRemoteId = statusField?.id ?? null
+    const statusOptions = statusField?.options ?? []
+
     const itemNodes: ProjectItemNode[] = []
     let cursor: string | null = null
 
     do {
-      const data: ProjectSnapshotData = await this.graphql<ProjectSnapshotData>(
-        `query ProjectSnapshot($projectId: ID!, $cursor: String) {
+      const data: ProjectItemsPageData = await this.graphql<ProjectItemsPageData>(
+        `query ProjectSnapshotItems($projectId: ID!, $cursor: String, $statusFieldName: String!) {
           node(id: $projectId) {
             ... on ProjectV2 {
-              id title url updatedAt
-              field(name: "Status") {
-                ... on ProjectV2SingleSelectField { id options { id name } }
-              }
               items(first: 100, after: $cursor) {
                 pageInfo { hasNextPage endCursor }
                 nodes {
                   id isArchived updatedAt
-                  fieldValueByName(name: "Status") {
+                  fieldValueByName(name: $statusFieldName) {
                     ... on ProjectV2ItemFieldSingleSelectValue { optionId }
                   }
                   content {
@@ -265,27 +349,20 @@ export class GitHubProjectsClient {
             }
           }
         }`,
-        { projectId: projectV2Id, cursor },
+        // No status field at all → the name is never matched; statusRemoteId
+        // is forced null below anyway
+        { projectId: projectV2Id, cursor, statusFieldName: statusField?.name ?? 'Status' },
       )
 
       const node = data.node
-      // A non-ProjectV2 node id resolves the inline fragment to `{}` — guard it
       if (!node || !node.items) {
         throw new GitHubNotFoundError(`ProjectV2 ${projectV2Id} not found or not a project`)
       }
-      project = node
       for (const item of node.items.nodes ?? []) {
         if (item) itemNodes.push(item)
       }
       cursor = node.items.pageInfo.hasNextPage ? node.items.pageInfo.endCursor : null
     } while (cursor !== null)
-
-    // The do-while body ran at least once, so project is set — but TS widens
-    // across loop back-edges, hence the explicit guard
-    if (!project) throw new GitHubNotFoundError(`ProjectV2 ${projectV2Id} not found`)
-    const statusField = project.field
-    const statusFieldRemoteId = statusField?.id ?? null
-    const statusOptions = statusField?.options ?? []
 
     const columns: MirrorColumnSnapshot[] = statusOptions.map((opt, index) => ({
       remoteId: opt.id,
@@ -523,6 +600,28 @@ function normalizeContent(content: ProjectItemContent): {
   }
 }
 
+// The single-select field that drives board columns: the field literally
+// named "Status" when it exists (and is single-select), otherwise the FIRST
+// single-select field on the project — covers renamed/localized status
+// fields, which field(name: "Status") misses (it is case-sensitive).
+function resolveStatusField(
+  project: Pick<ProjectMetaNode, 'field' | 'fields'>,
+): { id: string; name: string; options: ProjectFieldOption[] } | null {
+  const named = project.field
+  if (named?.id && named.options) {
+    return { id: named.id, name: named.name ?? 'Status', options: named.options }
+  }
+  for (const candidate of project.fields?.nodes ?? []) {
+    if (
+      candidate?.__typename === 'ProjectV2SingleSelectField' &&
+      candidate.id && candidate.name && candidate.options
+    ) {
+      return { id: candidate.id, name: candidate.name, options: candidate.options }
+    }
+  }
+  return null
+}
+
 function toBoardOption(node: ProjectNode): RemoteBoardOption {
   return { id: node.id, label: node.title, sublabel: `#${node.number}`, url: node.url }
 }
@@ -547,13 +646,31 @@ interface ProjectNode {
   url: string
 }
 
-interface ListProjectsData {
+interface PageInfo {
+  hasNextPage: boolean
+  endCursor: string | null
+}
+
+interface ProjectsConnection {
+  pageInfo: PageInfo
+  nodes: Array<ProjectNode | null> | null
+}
+
+interface ViewerProjectsData {
+  viewer: { projectsV2: ProjectsConnection }
+}
+
+interface ViewerOrganizationsData {
   viewer: {
-    projectsV2: { nodes: Array<ProjectNode | null> | null }
     organizations: {
-      nodes: Array<{ login: string; projectsV2: { nodes: Array<ProjectNode | null> | null } } | null> | null
+      pageInfo: PageInfo
+      nodes: Array<{ login: string; projectsV2: ProjectsConnection } | null> | null
     }
   }
+}
+
+interface OrgProjectsData {
+  organization: { projectsV2: ProjectsConnection } | null
 }
 
 interface ResolveUserProjectData {
@@ -580,21 +697,43 @@ interface ProjectItemNode {
   content: ProjectItemContent | null
 }
 
-interface ProjectSnapshotNode {
+interface ProjectFieldOption {
+  id: string
+  name: string
+}
+
+// A field candidate from field(name:)/fields(first:) — every property is
+// optional because the ProjectV2SingleSelectField inline fragment resolves to
+// `{}` (plus __typename where requested) on any other field type.
+interface ProjectFieldCandidate {
+  __typename?: string
+  id?: string
+  name?: string
+  options?: ProjectFieldOption[]
+}
+
+interface ProjectMetaNode {
   id: string
   title: string
   url: string | null
   updatedAt: string
-  field: { id: string; options: Array<{ id: string; name: string }> } | null
+  field: ProjectFieldCandidate | null
   // Optional because a node id that is not a ProjectV2 resolves to `{}`
-  items?: {
-    pageInfo: { hasNextPage: boolean; endCursor: string | null }
-    nodes: Array<ProjectItemNode | null> | null
-  }
+  fields?: { nodes: Array<ProjectFieldCandidate | null> | null }
 }
 
-interface ProjectSnapshotData {
-  node: ProjectSnapshotNode | null
+interface ProjectMetaData {
+  node: ProjectMetaNode | null
+}
+
+interface ProjectItemsPageData {
+  node: {
+    // Optional because a node id that is not a ProjectV2 resolves to `{}`
+    items?: {
+      pageInfo: PageInfo
+      nodes: Array<ProjectItemNode | null> | null
+    }
+  } | null
 }
 
 interface ItemVersionData {

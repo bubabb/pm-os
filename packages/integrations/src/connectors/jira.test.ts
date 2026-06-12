@@ -64,6 +64,7 @@ describe('JiraConnector — listRemoteBoards', () => {
           { id: '10001', key: 'CRE', name: 'Creare' },
           { id: '10002', key: 'OPS', name: 'Platform Ops' },
         ],
+        isLast: true,
       }),
     )
 
@@ -75,10 +76,36 @@ describe('JiraConnector — listRemoteBoards', () => {
     ])
 
     const { url, init } = requestAt(0)
-    expect(url).toBe(`${BASE}/rest/api/3/project/search?maxResults=100`)
+    expect(url).toBe(`${BASE}/rest/api/3/project/search?startAt=0&maxResults=50`)
     const headers = init.headers as Record<string, string>
     const expectedAuth = `Basic ${Buffer.from('pm@acme.dev:api-token').toString('base64')}`
     expect(headers['Authorization']).toBe(expectedAuth)
+  })
+
+  it('paginates project/search with startAt until isLast and accumulates all pages', async () => {
+    const page = (offset: number, count: number, isLast: boolean) => ({
+      values: Array.from({ length: count }, (_, i) => ({
+        id: `${10000 + offset + i}`,
+        key: `P${offset + i}`,
+        name: `Project ${offset + i}`,
+      })),
+      isLast,
+    })
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(page(0, 50, false)))
+      .mockResolvedValueOnce(jsonResponse(page(50, 50, false)))
+      .mockResolvedValueOnce(jsonResponse(page(100, 7, true)))
+
+    const boards = await connector().listRemoteBoards()
+
+    expect(boards).toHaveLength(107)
+    expect(boards[0]?.id).toBe('P0')
+    expect(boards[106]?.id).toBe('P106')
+    expect(requestAt(0).url).toBe(`${BASE}/rest/api/3/project/search?startAt=0&maxResults=50`)
+    expect(requestAt(1).url).toBe(`${BASE}/rest/api/3/project/search?startAt=50&maxResults=50`)
+    expect(requestAt(2).url).toBe(`${BASE}/rest/api/3/project/search?startAt=100&maxResults=50`)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('returns [] when baseUrl is missing', async () => {
@@ -116,10 +143,10 @@ describe('JiraConnector — fetchBoardSnapshot', () => {
           },
         ]),
       )
-      // 3. issue search — fewer than a full page, so pagination stops
+      // 3. issue search — isLast with no nextPageToken, so pagination stops
       .mockResolvedValueOnce(
         jsonResponse({
-          total: 2,
+          isLast: true,
           issues: [
             {
               key: 'CRE-2',
@@ -184,14 +211,19 @@ describe('JiraConnector — fetchBoardSnapshot', () => {
       },
     ])
 
-    // Request shape: search JQL scoped to the project, newest-updated first
-    const searchUrl = requestAt(2).url
-    expect(searchUrl).toContain('/rest/api/3/search?jql=')
-    expect(searchUrl).toContain(encodeURIComponent('project = CRE ORDER BY updated DESC'))
-    expect(searchUrl).toContain('fields=summary,status,updated')
+    // Request shape: POST /search/jql (the old GET /search is gone from Jira
+    // Cloud), JQL scoped to the QUOTED project key, newest-updated first
+    const search = requestAt(2)
+    expect(search.url).toBe(`${BASE}/rest/api/3/search/jql`)
+    expect(search.init.method).toBe('POST')
+    expect(requestBody(2)).toEqual({
+      jql: 'project = "CRE" ORDER BY updated DESC',
+      maxResults: 100,
+      fields: ['summary', 'status', 'updated'],
+    })
   })
 
-  it('paginates a second page when the first is full and more issues exist', async () => {
+  it('paginates a second page via nextPageToken and stops when the token disappears', async () => {
     const fullPage = Array.from({ length: 100 }, (_, i) => ({
       key: `CRE-${i + 1}`,
       fields: {
@@ -204,10 +236,10 @@ describe('JiraConnector — fetchBoardSnapshot', () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ id: '10001', key: 'CRE', name: 'Creare' }))
       .mockResolvedValueOnce(jsonResponse([{ name: 'Task', statuses: [{ id: '1', name: 'To Do', statusCategory: { key: 'new' } }] }]))
-      .mockResolvedValueOnce(jsonResponse({ total: 150, issues: fullPage }))
+      .mockResolvedValueOnce(jsonResponse({ issues: fullPage, nextPageToken: 'tok-page-2', isLast: false }))
       .mockResolvedValueOnce(
         jsonResponse({
-          total: 150,
+          isLast: true,
           issues: [{
             key: 'CRE-101',
             fields: { summary: 'Tail issue', updated: '2026-06-09T00:00:00.000+0000', status: { id: '1', statusCategory: { key: 'new' } } },
@@ -218,8 +250,22 @@ describe('JiraConnector — fetchBoardSnapshot', () => {
     const snapshot = await connector().fetchBoardSnapshot('CRE')
 
     expect(snapshot.items).toHaveLength(101)
-    expect(requestAt(2).url).toContain('startAt=0')
-    expect(requestAt(3).url).toContain('startAt=100')
+    // First page carries no token; the second echoes the server's cursor
+    expect(requestBody(2)['nextPageToken']).toBeUndefined()
+    expect(requestBody(3)['nextPageToken']).toBe('tok-page-2')
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+
+  it('quotes the project key in JQL so a crafted key cannot inject clauses', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: '10001', key: 'CRE" OR project != "X', name: 'Evil' }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ issues: [], isLast: true }))
+
+    await connector().fetchBoardSnapshot('EVIL')
+
+    // Embedded quotes are stripped; the key stays inside one quoted literal
+    expect(requestBody(2)['jql']).toBe('project = "CRE OR project != X" ORDER BY updated DESC')
   })
 
   it('throws when the project is not visible to this token', async () => {
@@ -409,7 +455,30 @@ describe('JiraConnector — applyMutation comment', () => {
 // ── applyMutation: close_item ────────────────────────────────────────────────
 
 describe('JiraConnector — applyMutation close_item', () => {
-  it('transitions to the first Done-category transition', async () => {
+  it('prefers the Done-category transition whose target status reads Done/Complete', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          transitions: [
+            // Done-category but NOT a completion — must lose to "Done" below
+            { id: '21', name: 'Abandon', to: { id: '5', name: "Won't Do", statusCategory: { key: 'done' } } },
+            { id: '31', name: 'Finish', to: { id: '3', name: 'Done', statusCategory: { key: 'done' } } },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(noContentResponse())
+      .mockResolvedValueOnce(versionResponse())
+
+    const result = await connector().applyMutation(envelope({
+      kind: 'close_item',
+      ref: { remoteType: 'ticket', remoteId: 'CRE-7' },
+    }))
+
+    expect(requestBody(1)).toEqual({ transition: { id: '31' } })
+    expect(result.raw).toMatchObject({ transitionId: '31' })
+  })
+
+  it('falls back to the first Done-category transition when none reads Done/Complete', async () => {
     fetchMock
       .mockResolvedValueOnce(
         jsonResponse({
@@ -442,6 +511,85 @@ describe('JiraConnector — applyMutation close_item', () => {
       kind: 'close_item',
       ref: { remoteType: 'ticket', remoteId: 'CRE-7' },
     }))).rejects.toThrow(/no Jira transition to a Done-category status/)
+  })
+})
+
+// ── fetchEntities ────────────────────────────────────────────────────────────
+
+describe('JiraConnector — fetchEntities', () => {
+  const issue = (key: string) => ({
+    key,
+    fields: {
+      summary: `Summary of ${key}`,
+      updated: '2026-06-11T12:00:00.000+0000',
+      labels: ['sync'],
+      assignee: { displayName: 'Bruna' },
+      status: { name: 'In Progress', statusCategory: { name: 'In Progress' } },
+      priority: { name: 'High' },
+    },
+  })
+
+  it('POSTs /search/jql, normalizes issues, and returns nextPageToken as the cursor', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ issues: [issue('CRE-1')], nextPageToken: 'tok-abc', isLast: false }),
+    )
+
+    const result = await connector().fetchEntities()
+
+    const { url, init } = requestAt(0)
+    expect(url).toBe(`${BASE}/rest/api/3/search/jql`)
+    expect(init.method).toBe('POST')
+    expect(requestBody(0)).toEqual({
+      jql: 'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC',
+      maxResults: 50,
+      fields: ['summary', 'status', 'assignee', 'updated', 'labels', 'priority'],
+    })
+
+    expect(result.nextCursor).toBe('tok-abc')
+    expect(result.entities).toEqual([{
+      source: 'jira',
+      entityType: 'ticket',
+      entityId: 'CRE-1',
+      entityUrl: `${BASE}/browse/CRE-1`,
+      title: 'Summary of CRE-1',
+      status: 'In Progress',
+      assignee: 'Bruna',
+      updatedAt: '2026-06-11T12:00:00.000+0000',
+      raw: { key: 'CRE-1', labels: ['sync'], priority: 'High', statusCategory: 'In Progress' },
+    }])
+  })
+
+  it('passes the incoming cursor through as nextPageToken and ends on isLast', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ issues: [issue('CRE-2')], isLast: true }),
+    )
+
+    const result = await connector().fetchEntities('tok-abc')
+
+    expect(requestBody(0)['nextPageToken']).toBe('tok-abc')
+    expect(result.entities).toHaveLength(1)
+    expect(result.nextCursor).toBeNull()
+  })
+
+  it('scopes and QUOTES the JQL when a projectKey is bound to the source', async () => {
+    const scoped = new JiraConnector({
+      ...config,
+      metadata: { email: 'pm@acme.dev', projectKey: 'CRE" OR project != "X' },
+    })
+    fetchMock.mockResolvedValueOnce(jsonResponse({ issues: [], isLast: true }))
+
+    await scoped.fetchEntities()
+
+    expect(requestBody(0)['jql']).toBe(
+      'project = "CRE OR project != X" AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC',
+    )
+  })
+
+  it('returns empty without fetching when baseUrl is missing', async () => {
+    const { baseUrl: _omitted, ...rest } = config
+    const bare = new JiraConnector(rest)
+    await expect(bare.fetchEntities()).resolves.toEqual({ entities: [], nextCursor: null })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 

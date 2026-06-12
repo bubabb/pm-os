@@ -94,9 +94,9 @@ describe('GitHubProjectsClient — graphql error classification', () => {
   })
 
   it('sends the bearer token and Accept header', async () => {
-    fetchMock.mockResolvedValueOnce(
-      dataResponse({ viewer: { projectsV2: { nodes: [] }, organizations: { nodes: [] } } }),
-    )
+    fetchMock
+      .mockResolvedValueOnce(viewerProjectsResponse([]))
+      .mockResolvedValueOnce(viewerOrgsResponse([]))
     await client().listProjects()
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
@@ -109,35 +109,44 @@ describe('GitHubProjectsClient — graphql error classification', () => {
 })
 
 // ── listProjects ────────────────────────────────────────────────────────────
+// Two query loops: ViewerProjects (cursor-paginated) then ViewerOrgProjects
+// (org list cursor-paginated, with organization(login) follow-up paging for
+// orgs whose projects overflow their first page).
+
+const NO_MORE = { hasNextPage: false, endCursor: null }
+
+function projectNode(id: string, number = 1): { id: string; title: string; number: number; url: string } {
+  return { id, title: `Board ${id}`, number, url: `https://github.com/orgs/acme/projects/${number}` }
+}
+
+function viewerProjectsResponse(nodes: unknown[], pageInfo: { hasNextPage: boolean; endCursor: string | null } = NO_MORE): Response {
+  return dataResponse({ viewer: { projectsV2: { pageInfo, nodes } } })
+}
+
+function viewerOrgsResponse(orgs: unknown[], pageInfo: { hasNextPage: boolean; endCursor: string | null } = NO_MORE): Response {
+  return dataResponse({ viewer: { organizations: { pageInfo, nodes: orgs } } })
+}
 
 describe('GitHubProjectsClient — listProjects', () => {
   it('maps viewer and org projects to RemoteBoardOption, deduplicating by id', async () => {
-    fetchMock.mockResolvedValueOnce(
-      dataResponse({
-        viewer: {
+    fetchMock
+      .mockResolvedValueOnce(viewerProjectsResponse([
+        { id: 'PVT_1', title: 'Personal Roadmap', number: 3, url: 'https://github.com/users/me/projects/3' },
+        null, // GraphQL list elements can be null
+      ]))
+      .mockResolvedValueOnce(viewerOrgsResponse([
+        {
+          login: 'acme',
           projectsV2: {
+            pageInfo: NO_MORE,
             nodes: [
-              { id: 'PVT_1', title: 'Personal Roadmap', number: 3, url: 'https://github.com/users/me/projects/3' },
-              null, // GraphQL list elements can be null
-            ],
-          },
-          organizations: {
-            nodes: [
-              {
-                login: 'acme',
-                projectsV2: {
-                  nodes: [
-                    { id: 'PVT_2', title: 'Acme Sprint', number: 7, url: 'https://github.com/orgs/acme/projects/7' },
-                    { id: 'PVT_1', title: 'Personal Roadmap', number: 3, url: 'https://github.com/users/me/projects/3' }, // dupe
-                  ],
-                },
-              },
-              null,
+              { id: 'PVT_2', title: 'Acme Sprint', number: 7, url: 'https://github.com/orgs/acme/projects/7' },
+              { id: 'PVT_1', title: 'Personal Roadmap', number: 3, url: 'https://github.com/users/me/projects/3' }, // dupe
             ],
           },
         },
-      }),
-    )
+        null,
+      ]))
 
     const options = await client().listProjects()
 
@@ -145,6 +154,49 @@ describe('GitHubProjectsClient — listProjects', () => {
       { id: 'PVT_1', label: 'Personal Roadmap', sublabel: '#3', url: 'https://github.com/users/me/projects/3' },
       { id: 'PVT_2', label: 'Acme Sprint', sublabel: '#7', url: 'https://github.com/orgs/acme/projects/7' },
     ])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('pages personal projects with the cursor until hasNextPage is false', async () => {
+    fetchMock
+      .mockResolvedValueOnce(viewerProjectsResponse([projectNode('PVT_1')], { hasNextPage: true, endCursor: 'pc-1' }))
+      .mockResolvedValueOnce(viewerProjectsResponse([projectNode('PVT_2', 2)]))
+      .mockResolvedValueOnce(viewerOrgsResponse([]))
+
+    const options = await client().listProjects()
+
+    expect(options.map((o) => o.id)).toEqual(['PVT_1', 'PVT_2'])
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(requestBody(0).query).toContain('projectsV2(first: 100, after: $cursor')
+    expect(requestBody(0).variables).toEqual({ cursor: null })
+    expect(requestBody(1).variables).toEqual({ cursor: 'pc-1' })
+  })
+
+  it('pages the org list and follows up on orgs whose projects overflow their first page', async () => {
+    fetchMock
+      .mockResolvedValueOnce(viewerProjectsResponse([]))
+      // org page 1: acme has more than one page of projects
+      .mockResolvedValueOnce(viewerOrgsResponse(
+        [{ login: 'acme', projectsV2: { pageInfo: { hasNextPage: true, endCursor: 'ac-1' }, nodes: [projectNode('PVT_A1')] } }],
+        { hasNextPage: true, endCursor: 'oc-1' },
+      ))
+      // org page 2: beta fits in one page
+      .mockResolvedValueOnce(viewerOrgsResponse(
+        [{ login: 'beta', projectsV2: { pageInfo: NO_MORE, nodes: [projectNode('PVT_B1', 2)] } }],
+      ))
+      // follow-up paging: acme's remaining projects via organization(login)
+      .mockResolvedValueOnce(dataResponse({
+        organization: { projectsV2: { pageInfo: NO_MORE, nodes: [projectNode('PVT_A2', 3)] } },
+      }))
+
+    const options = await client().listProjects()
+
+    expect(options.map((o) => o.id)).toEqual(['PVT_A1', 'PVT_B1', 'PVT_A2'])
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(requestBody(1).variables).toEqual({ orgCursor: null })
+    expect(requestBody(2).variables).toEqual({ orgCursor: 'oc-1' })
+    expect(requestBody(3).query).toContain('organization(login: $login)')
+    expect(requestBody(3).variables).toEqual({ login: 'acme', cursor: 'ac-1' })
   })
 })
 
@@ -268,9 +320,12 @@ describe('GitHubConnector — resolveRemoteBoard', () => {
 })
 
 // ── fetchProjectSnapshot ────────────────────────────────────────────────────
+// Request 0 resolves project meta + the status field (named "Status" first,
+// first single-select fallback); requests 1..n page the items 100 at a time.
 
 const STATUS_FIELD = {
   id: 'FIELD_STATUS',
+  name: 'Status',
   options: [
     { id: 'opt-todo', name: 'Todo' },
     { id: 'opt-prog', name: 'In Progress' },
@@ -278,7 +333,7 @@ const STATUS_FIELD = {
   ],
 }
 
-function projectPage(items: unknown[], pageInfo: { hasNextPage: boolean; endCursor: string | null }, field: unknown = STATUS_FIELD) {
+function projectMeta(field: unknown = STATUS_FIELD, fields: unknown[] = []): Response {
   return dataResponse({
     node: {
       id: 'PVT_1',
@@ -286,16 +341,21 @@ function projectPage(items: unknown[], pageInfo: { hasNextPage: boolean; endCurs
       url: 'https://github.com/orgs/acme/projects/1',
       updatedAt: '2026-06-11T10:00:00Z',
       field,
-      items: { pageInfo, nodes: items },
+      fields: { nodes: fields },
     },
   })
+}
+
+function itemsPage(items: unknown[], pageInfo: { hasNextPage: boolean; endCursor: string | null }): Response {
+  return dataResponse({ node: { items: { pageInfo, nodes: items } } })
 }
 
 describe('GitHubProjectsClient — fetchProjectSnapshot', () => {
   it('paginates items, builds columns with terminal detection, and hashes item content', async () => {
     fetchMock
+      .mockResolvedValueOnce(projectMeta())
       .mockResolvedValueOnce(
-        projectPage(
+        itemsPage(
           [
             {
               id: 'ITEM_1', isArchived: false, updatedAt: '2026-06-10T09:00:00Z',
@@ -312,7 +372,7 @@ describe('GitHubProjectsClient — fetchProjectSnapshot', () => {
         ),
       )
       .mockResolvedValueOnce(
-        projectPage(
+        itemsPage(
           [
             {
               id: 'ITEM_3', isArchived: true, updatedAt: '2026-06-10T11:00:00Z',
@@ -328,10 +388,11 @@ describe('GitHubProjectsClient — fetchProjectSnapshot', () => {
 
     const snapshot = await client().fetchProjectSnapshot('PVT_1')
 
-    // Pagination: two requests, second carries the cursor from page one
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(requestBody(0).variables).toEqual({ projectId: 'PVT_1', cursor: null })
-    expect(requestBody(1).variables).toEqual({ projectId: 'PVT_1', cursor: 'cursor-1' })
+    // Meta request, then two item pages — the third carries page two's cursor
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(requestBody(0).variables).toEqual({ projectId: 'PVT_1' })
+    expect(requestBody(1).variables).toEqual({ projectId: 'PVT_1', cursor: null, statusFieldName: 'Status' })
+    expect(requestBody(2).variables).toEqual({ projectId: 'PVT_1', cursor: 'cursor-1', statusFieldName: 'Status' })
 
     expect(snapshot.remoteId).toBe('PVT_1')
     expect(snapshot.title).toBe('Roadmap')
@@ -361,20 +422,63 @@ describe('GitHubProjectsClient — fetchProjectSnapshot', () => {
   })
 
   it('falls back to marking the LAST option terminal when no name matches the done-ish regex', async () => {
-    fetchMock.mockResolvedValueOnce(
-      projectPage([], { hasNextPage: false, endCursor: null }, {
+    fetchMock
+      .mockResolvedValueOnce(projectMeta({
         id: 'FIELD_STATUS',
+        name: 'Status',
         options: [{ id: 'a', name: 'Alpha' }, { id: 'b', name: 'Beta' }],
-      }),
-    )
+      }))
+      .mockResolvedValueOnce(itemsPage([], { hasNextPage: false, endCursor: null }))
 
     const snapshot = await client().fetchProjectSnapshot('PVT_1')
     expect(snapshot.columns.map((c) => c.isTerminal)).toEqual([false, true])
   })
 
-  it('handles projects without a Status field: null statusFieldRemoteId, all items unstatused', async () => {
-    fetchMock.mockResolvedValueOnce(
-      projectPage(
+  it('falls back to the FIRST single-select field when no field is named "Status" (renamed/localized)', async () => {
+    fetchMock
+      .mockResolvedValueOnce(projectMeta(null, [
+        { __typename: 'ProjectV2Field' }, // e.g. Title — not single-select, skipped
+        {
+          __typename: 'ProjectV2SingleSelectField', id: 'FIELD_ESTADO', name: 'Estado',
+          options: [{ id: 'opt-pend', name: 'Pendente' }, { id: 'opt-feito', name: 'Feito' }],
+        },
+        // A LATER single-select must not win over the first one
+        { __typename: 'ProjectV2SingleSelectField', id: 'FIELD_PRIO', name: 'Priority', options: [{ id: 'p1', name: 'High' }] },
+      ]))
+      .mockResolvedValueOnce(itemsPage([
+        {
+          id: 'ITEM_1', isArchived: false, updatedAt: '2026-06-10T09:00:00Z',
+          fieldValueByName: { optionId: 'opt-feito' },
+          content: { __typename: 'Issue', title: 'Traduzido', url: null, state: 'OPEN' },
+        },
+      ], { hasNextPage: false, endCursor: null }))
+
+    const snapshot = await client().fetchProjectSnapshot('PVT_1')
+
+    expect(snapshot.statusFieldRemoteId).toBe('FIELD_ESTADO')
+    expect(snapshot.columns.map((c) => c.remoteId)).toEqual(['opt-pend', 'opt-feito'])
+    // Items are looked up by the FALLBACK field's name, not "Status"
+    expect(requestBody(1).variables).toEqual({ projectId: 'PVT_1', cursor: null, statusFieldName: 'Estado' })
+    expect(snapshot.items[0]).toMatchObject({ statusRemoteId: 'opt-feito' })
+  })
+
+  it('also falls back when a field named "Status" exists but is not single-select', async () => {
+    fetchMock
+      // field(name: "Status") on a non-single-select field resolves to `{}`
+      .mockResolvedValueOnce(projectMeta({}, [
+        { __typename: 'ProjectV2SingleSelectField', id: 'FIELD_STAGE', name: 'Stage', options: [{ id: 's1', name: 'One' }] },
+      ]))
+      .mockResolvedValueOnce(itemsPage([], { hasNextPage: false, endCursor: null }))
+
+    const snapshot = await client().fetchProjectSnapshot('PVT_1')
+    expect(snapshot.statusFieldRemoteId).toBe('FIELD_STAGE')
+    expect(requestBody(1).variables).toMatchObject({ statusFieldName: 'Stage' })
+  })
+
+  it('handles projects without any single-select field: null statusFieldRemoteId, all items unstatused', async () => {
+    fetchMock
+      .mockResolvedValueOnce(projectMeta(null, [{ __typename: 'ProjectV2Field' }]))
+      .mockResolvedValueOnce(itemsPage(
         [{
           id: 'ITEM_1', isArchived: false, updatedAt: '2026-06-10T09:00:00Z',
           // even if the API returned a value, no Status field means no status mapping
@@ -382,9 +486,7 @@ describe('GitHubProjectsClient — fetchProjectSnapshot', () => {
           content: { __typename: 'Issue', title: 'Orphan', url: null, state: 'CLOSED' },
         }],
         { hasNextPage: false, endCursor: null },
-        null,
-      ),
-    )
+      ))
 
     const snapshot = await client().fetchProjectSnapshot('PVT_1')
     expect(snapshot.statusFieldRemoteId).toBeNull()
@@ -794,5 +896,83 @@ describe('GitHubConnector — applyMutation dispatch', () => {
       connector().applyMutation(envelopeFor({ kind: 'archive_item', ref: PV2_REF })),
     ).rejects.toBeInstanceOf(UnsupportedMutationError)
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+// ── GitHubConnector.listResources (REST repo pagination) ───────────────────
+
+function ghRepo(n: number): { name: string; full_name: string; private: boolean; owner: { login: string } } {
+  return { name: `repo-${n}`, full_name: `acme/repo-${n}`, private: false, owner: { login: 'acme' } }
+}
+
+describe('GitHubConnector — listResources', () => {
+  it('pages past 200 repos until a short page (no 2-page truncation)', async () => {
+    const fullPage = (start: number) => Array.from({ length: 100 }, (_, i) => ghRepo(start + i))
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(fullPage(0)))
+      .mockResolvedValueOnce(jsonResponse(fullPage(100)))
+      .mockResolvedValueOnce(jsonResponse([ghRepo(200)]))
+
+    const options = await connector().listResources()
+
+    expect(options).toHaveLength(201)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const urls = fetchMock.mock.calls.map((call) => call[0] as string)
+    // Owned + invited/collaborator + org repos all come from one affiliation param
+    expect(urls[0]).toContain('affiliation=owner,collaborator,organization_member')
+    expect(urls[0]).toContain('page=1')
+    expect(urls[2]).toContain('page=3')
+    expect(options[200]).toEqual({
+      id: 'acme/repo-200',
+      label: 'acme/repo-200',
+      sublabel: 'Public',
+      metadata: { owner: 'acme', repo: 'repo-200' },
+    })
+  })
+
+  it('stops exactly at a short page', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([ghRepo(0), ghRepo(1)]))
+
+    const options = await connector().listResources()
+
+    expect(options).toHaveLength(2)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── fetchWithRetry — GitHub REST 403 rate limits are retryable, auth 403 fatal ──
+// Exercised through verifyWriteAccess (a thin fetchWithRetry consumer).
+
+describe('GitHubConnector — REST 403 handling (via verifyWriteAccess)', () => {
+  it('retries a 403 carrying Retry-After and succeeds on the next attempt', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ message: 'API rate limit exceeded' }, 403, { 'retry-after': '0' }))
+      .mockResolvedValueOnce(jsonResponse({ login: 'me' }, 200, { 'x-oauth-scopes': 'repo, project' }))
+
+    await expect(connector().verifyWriteAccess()).resolves.toBe('read_write')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries a 403 with X-RateLimit-Remaining: 0 (primary rate limit, no Retry-After)', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ message: 'API rate limit exceeded' }, 403, { 'x-ratelimit-remaining': '0' }))
+      .mockResolvedValueOnce(jsonResponse({ login: 'me' }, 200, { 'x-oauth-scopes': 'repo' }))
+
+    await expect(connector().verifyWriteAccess()).resolves.toBe('read_only')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('still treats a genuine 403 (no rate-limit headers) as a fatal auth failure', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Forbidden' }, 403, { 'x-ratelimit-remaining': '4999' }))
+
+    await expect(connector().verifyWriteAccess()).rejects.toThrow(/HTTP 403/)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('still treats 401 as fatal even with rate-limit headers present', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Bad credentials' }, 401, { 'retry-after': '0' }))
+
+    await expect(connector().verifyWriteAccess()).rejects.toThrow(/HTTP 401/)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

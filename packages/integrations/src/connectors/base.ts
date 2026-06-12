@@ -96,14 +96,17 @@ export abstract class BaseConnector {
         continue
       }
       // Auth failures are fatal — throw so the sync is marked as an error
-      // instead of being treated as an empty successful fetch
-      if (res.status === 401 || res.status === 403) {
+      // instead of being treated as an empty successful fetch. EXCEPT: GitHub
+      // signals rate limiting as 403 + Retry-After / X-RateLimit-Remaining: 0,
+      // which must retry like a 429, not fail as bad auth.
+      if (res.status === 401 || (res.status === 403 && !isRateLimit403(res))) {
         throw new Error(`HTTP ${res.status} from ${url}`)
       }
-      // Rate limits and server errors: retry with backoff, throw if exhausted
-      if (res.status === 429 || res.status >= 500) {
+      // Rate limits (429 + rate-limited 403) and server errors: retry with
+      // backoff (honoring Retry-After when present), throw if exhausted
+      if (res.status === 403 || res.status === 429 || res.status >= 500) {
         lastError = new Error(`HTTP ${res.status} from ${url}`)
-        await sleep(500 * Math.pow(2, i))
+        await sleep(retryDelayMs(res, i))
         continue
       }
       // 404 is non-fatal — connectors treat !res.ok as "no data available"
@@ -111,6 +114,20 @@ export abstract class BaseConnector {
     }
     throw lastError
   }
+}
+
+// A 403 that is really a rate limit, not an auth failure (GitHub REST uses
+// 403 for both): Retry-After present, or the primary rate limit is exhausted.
+function isRateLimit403(res: Response): boolean {
+  return res.headers.get('retry-after') !== null || res.headers.get('x-ratelimit-remaining') === '0'
+}
+
+// Backoff delay for a retryable response — honors Retry-After (seconds,
+// capped at 10s) when sent, exponential backoff otherwise.
+function retryDelayMs(res: Response, attempt: number): number {
+  const header = res.headers.get('retry-after')
+  const seconds = header === null ? Number.NaN : Number(header)
+  return Number.isFinite(seconds) ? Math.min(seconds * 1000, 10_000) : 500 * Math.pow(2, attempt)
 }
 
 function sleep(ms: number): Promise<void> {

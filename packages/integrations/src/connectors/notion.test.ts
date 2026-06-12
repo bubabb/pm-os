@@ -124,9 +124,101 @@ describe('NotionConnector — listRemoteBoards', () => {
     expect(headers['Notion-Version']).toBe('2022-06-28')
   })
 
+  it('paginates the search with start_cursor while has_more and concatenates all pages', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        results: [{ id: 'db-1', title: [{ plain_text: 'Page one DB' }] }],
+        has_more: true,
+        next_cursor: 'search-cursor-1',
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        results: [{ id: 'db-2', title: [{ plain_text: 'Page two DB' }] }],
+        has_more: false,
+        next_cursor: null,
+      }))
+
+    const boards = await connector().listRemoteBoards()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(requestAt(0).url).toBe('https://api.notion.com/v1/search')
+    expect(requestAt(1).url).toBe('https://api.notion.com/v1/search')
+    // First page carries no cursor; the second carries the returned one —
+    // and the database filter rides along on every page
+    expect(requestBody(0)).toEqual({
+      filter: { property: 'object', value: 'database' },
+      page_size: 100,
+    })
+    expect(requestBody(1)).toEqual({
+      filter: { property: 'object', value: 'database' },
+      page_size: 100,
+      start_cursor: 'search-cursor-1',
+    })
+
+    expect(boards).toEqual([
+      { id: 'db-1', label: 'Page one DB' },
+      { id: 'db-2', label: 'Page two DB' },
+    ])
+  })
+
   it('returns [] on a non-ok response', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'nope' }, 404))
     await expect(connector().listRemoteBoards()).resolves.toEqual([])
+  })
+})
+
+// ── listResources ────────────────────────────────────────────────────────────
+
+describe('NotionConnector — listResources', () => {
+  it('maps databases to ResourceOption with databaseId metadata', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      results: [
+        { id: 'db-1', title: [{ plain_text: 'Roadmap' }] },
+        { id: 'db-2', title: [] },
+      ],
+      has_more: false,
+      next_cursor: null,
+    }))
+
+    await expect(connector().listResources()).resolves.toEqual([
+      { id: 'db-1', label: 'Roadmap', metadata: { databaseId: 'db-1' } },
+      { id: 'db-2', label: 'Untitled', metadata: { databaseId: 'db-2' } },
+    ])
+    expect(requestBody(0)['filter']).toEqual({ property: 'object', value: 'database' })
+  })
+
+  it('follows has_more across search pages so >100 shared databases are not truncated', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        results: [{ id: 'db-1', title: [{ plain_text: 'First' }] }],
+        has_more: true,
+        next_cursor: 'search-cursor-1',
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        results: [{ id: 'db-2', title: [{ plain_text: 'Second' }] }],
+        has_more: false,
+        next_cursor: null,
+      }))
+
+    const resources = await connector().listResources()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(requestBody(1)['start_cursor']).toBe('search-cursor-1')
+    expect(resources.map((r) => r.id)).toEqual(['db-1', 'db-2'])
+  })
+
+  it('keeps the databases already fetched when a later search page fails', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        results: [{ id: 'db-1', title: [{ plain_text: 'Survivor' }] }],
+        has_more: true,
+        next_cursor: 'search-cursor-1',
+      }))
+      .mockResolvedValueOnce(jsonResponse({ message: 'nope' }, 404))
+
+    const resources = await connector().listResources()
+    expect(resources).toEqual([
+      { id: 'db-1', label: 'Survivor', metadata: { databaseId: 'db-1' } },
+    ])
   })
 })
 

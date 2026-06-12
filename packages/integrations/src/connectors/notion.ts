@@ -19,6 +19,10 @@ import type {
 const NOTION_API = 'https://api.notion.com/v1'
 const NOTION_VERSION = '2022-06-28'
 
+// Safety cap on /v1/search pagination — 50 pages × 100 = 5 000 databases,
+// far beyond any real workspace; guards against a misbehaving cursor loop.
+const MAX_SEARCH_PAGES = 50
+
 // ── statusFieldRemoteId convention (bidirectional-sync.md §3.2, Notion row) ──
 // A Notion database is board-like when it has a Status (preferred) or Select
 // property — the options are the columns. The mirror engine stores the
@@ -45,23 +49,39 @@ export class NotionConnector extends BaseConnector {
     }
   }
 
+  // Paginated /v1/search for databases. Notion's search only surfaces content
+  // explicitly shared with the integration — that IS Notion's shared/invited
+  // model, so the filter stays; we just walk every page so workspaces with
+  // >100 shared databases aren't truncated (mirrors fetchBoardSnapshot's
+  // start_cursor loop).
+  private async searchDatabases(): Promise<NotionSearchDatabase[]> {
+    const databases: NotionSearchDatabase[] = []
+    let cursor: string | null = null
+    for (let pages = 0; pages < MAX_SEARCH_PAGES; pages++) {
+      const body: Record<string, unknown> = {
+        filter: { property: 'object', value: 'database' },
+        page_size: 100,
+      }
+      if (cursor) body['start_cursor'] = cursor
+
+      const res = await this.fetchWithRetry(
+        `${NOTION_API}/search`,
+        { method: 'POST', headers: this.headers, body: JSON.stringify(body) },
+      )
+      if (!res.ok) break
+
+      const data = await res.json() as NotionDbSearchResult
+      databases.push(...(data.results ?? []))
+      cursor = data.has_more ? (data.next_cursor ?? null) : null
+      if (cursor === null) break
+    }
+    return databases
+  }
+
   // All databases shared with the integration — powers the database picker
   override async listResources(): Promise<ResourceOption[]> {
-    const res = await this.fetchWithRetry(
-      `${NOTION_API}/search`,
-      {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify({
-          filter: { property: 'object', value: 'database' },
-          page_size: 100,
-        }),
-      },
-    )
-    if (!res.ok) return []
-
-    const data = await res.json() as NotionDbSearchResult
-    return (data.results ?? []).map((db) => {
+    const databases = await this.searchDatabases()
+    return databases.map((db) => {
       const title = (db.title ?? []).map((t) => t.plain_text).join('')
       return {
         id: db.id,
@@ -111,21 +131,8 @@ export class NotionConnector extends BaseConnector {
 
   // Databases this token can mirror — powers the "Import remote board" picker
   override async listRemoteBoards(): Promise<RemoteBoardOption[]> {
-    const res = await this.fetchWithRetry(
-      `${NOTION_API}/search`,
-      {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify({
-          filter: { property: 'object', value: 'database' },
-          page_size: 100,
-        }),
-      },
-    )
-    if (!res.ok) return []
-
-    const data = await res.json() as NotionDbSearchResult
-    return (data.results ?? []).map((db) => {
+    const databases = await this.searchDatabases()
+    return databases.map((db) => {
       const title = (db.title ?? []).map((t) => t.plain_text).join('')
       const option: RemoteBoardOption = { id: db.id, label: title || 'Untitled' }
       if (db.url) option.url = db.url
@@ -401,8 +408,16 @@ function findBoardStatusProp(props: Record<string, NotionDbProperty>): {
   return selectFallback
 }
 
+interface NotionSearchDatabase {
+  id: string
+  url?: string
+  title?: Array<{ plain_text: string }>
+}
+
 interface NotionDbSearchResult {
-  results?: Array<{ id: string; url?: string; title?: Array<{ plain_text: string }> }>
+  results?: NotionSearchDatabase[]
+  has_more?: boolean
+  next_cursor?: string | null
 }
 
 interface NotionQueryResult {

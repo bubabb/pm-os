@@ -193,11 +193,15 @@ export class GitHubConnector extends BaseConnector {
   }
 
   // All repos the token can access — owned, private, and invited/collaborator
+  // (affiliation=owner,collaborator,organization_member covers all three).
+  // Pages of 100 until a short page signals the end; MAX_PAGES is a runaway
+  // guard, not an expected limit.
   override async listResources(): Promise<ResourceOption[]> {
     const PER_PAGE = 100
+    const MAX_PAGES = 10 // safety cap — 1000 repos
     const options: ResourceOption[] = []
 
-    for (let page = 1; page <= 2; page++) {
+    for (let page = 1; page <= MAX_PAGES; page++) {
       const res = await this.fetchWithRetry(
         `${BASE}/user/repos?affiliation=owner,collaborator,organization_member&per_page=${PER_PAGE}&sort=updated&page=${page}`,
         { headers: this.headers },

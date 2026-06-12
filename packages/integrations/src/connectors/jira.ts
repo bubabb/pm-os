@@ -47,19 +47,35 @@ export class JiraConnector extends BaseConnector {
     return baseUrl
   }
 
+  // All BROWSEABLE projects the token can access (incl. shared), paginated
+  // with startAt until isLast — /project/search caps a single page at 50.
+  private async listProjects(baseUrl: string): Promise<Array<{ key: string; name: string }>> {
+    const PAGE_SIZE = 50
+    const projects: Array<{ key: string; name: string }> = []
+    let startAt = 0
+    for (;;) {
+      const res = await this.fetchWithRetry(
+        `${baseUrl}/rest/api/3/project/search?startAt=${startAt}&maxResults=${PAGE_SIZE}`,
+        { headers: this.headers },
+      )
+      if (!res.ok) break
+
+      const data = await res.json() as JiraProjectSearchResult
+      const values = data.values ?? []
+      projects.push(...values)
+      if (data.isLast === true || values.length === 0) break
+      startAt += values.length
+    }
+    return projects
+  }
+
   // All Jira projects the token can access — powers the project picker
   override async listResources(): Promise<ResourceOption[]> {
     const baseUrl = this.config.baseUrl
     if (!baseUrl) return []
 
-    const res = await this.fetchWithRetry(
-      `${baseUrl}/rest/api/3/project/search?maxResults=100`,
-      { headers: this.headers },
-    )
-    if (!res.ok) return []
-
-    const data = await res.json() as JiraProjectSearchResult
-    return (data.values ?? []).map((project) => ({
+    const projects = await this.listProjects(baseUrl)
+    return projects.map((project) => ({
       id: project.key,
       label: project.name,
       sublabel: project.key,
@@ -75,14 +91,8 @@ export class JiraConnector extends BaseConnector {
     const baseUrl = this.config.baseUrl
     if (!baseUrl) return []
 
-    const res = await this.fetchWithRetry(
-      `${baseUrl}/rest/api/3/project/search?maxResults=100`,
-      { headers: this.headers },
-    )
-    if (!res.ok) return []
-
-    const data = await res.json() as JiraProjectSearchResult
-    return (data.values ?? []).map((project) => ({
+    const projects = await this.listProjects(baseUrl)
+    return projects.map((project) => ({
       id: project.key,
       label: project.name,
       sublabel: project.key,
@@ -152,23 +162,32 @@ export class JiraConnector extends BaseConnector {
   }
 
   // Items = the project's issues, newest-updated first, capped at 2 pages of
-  // 100 (mirror v1 — same spirit as the GitHub 50-project cap; revisit if it bites)
+  // 100 (mirror v1 — same spirit as the GitHub 50-project cap; revisit if it bites).
+  // Uses POST /search/jql — the old /rest/api/3/search was removed from Jira
+  // Cloud (HTTP 410); the replacement paginates by nextPageToken, no total.
   private async fetchIssueSnapshots(baseUrl: string, projectKey: string): Promise<MirrorItemSnapshot[]> {
     const PAGE_SIZE = 100
     const MAX_PAGES = 2
-    const jql = encodeURIComponent(`project = ${projectKey} ORDER BY updated DESC`)
+    const jql = `project = ${jqlQuote(projectKey)} ORDER BY updated DESC`
     const items: MirrorItemSnapshot[] = []
+    let nextPageToken: string | undefined
 
     for (let page = 0; page < MAX_PAGES; page++) {
-      const startAt = page * PAGE_SIZE
+      const body: Record<string, unknown> = {
+        jql,
+        maxResults: PAGE_SIZE,
+        fields: ['summary', 'status', 'updated'],
+      }
+      if (nextPageToken !== undefined) body['nextPageToken'] = nextPageToken
+
       const res = await this.fetchWithRetry(
-        `${baseUrl}/rest/api/3/search?jql=${jql}&startAt=${startAt}&maxResults=${PAGE_SIZE}&fields=summary,status,updated`,
-        { headers: this.headers },
+        `${baseUrl}/rest/api/3/search/jql`,
+        { method: 'POST', headers: this.headers, body: JSON.stringify(body) },
       )
       if (!res.ok) break
 
       const data = await res.json() as JiraMirrorSearchResult
-      for (const issue of data.issues) {
+      for (const issue of data.issues ?? []) {
         const title = issue.fields.summary
         const statusRemoteId = issue.fields.status?.id ?? null
         const state: 'open' | 'closed' = issue.fields.status?.statusCategory?.key === 'done' ? 'closed' : 'open'
@@ -186,8 +205,8 @@ export class JiraConnector extends BaseConnector {
         })
       }
 
-      const fetched = startAt + data.issues.length
-      if (data.issues.length < PAGE_SIZE || fetched >= data.total) break
+      nextPageToken = data.nextPageToken
+      if (data.isLast === true || nextPageToken === undefined) break
     }
 
     return items
@@ -281,11 +300,15 @@ export class JiraConnector extends BaseConnector {
     return this.mutationResult(baseUrl, op.ref, { commentId: comment.id ?? null })
   }
 
-  // Close = transition to any Done-category status the workflow allows from here
+  // Close = transition to a Done-category status the workflow allows from here.
+  // Prefer the one whose TARGET status reads like an actual completion
+  // ("Done", "Complete[d]") over e.g. "Won't Do" / "Cancelled" — those are all
+  // done-category, but only one means "finished". Fall back to the first.
   private async applyClose(baseUrl: string, op: Extract<MutationOp, { kind: 'close_item' }>): Promise<MutationResult> {
     const issueKey = op.ref.remoteId
     const transitions = await this.fetchTransitions(baseUrl, issueKey)
-    const match = transitions.find((t) => t.to?.statusCategory?.key === 'done')
+    const doneTransitions = transitions.filter((t) => t.to?.statusCategory?.key === 'done')
+    const match = doneTransitions.find((t) => /done|complete/i.test(t.to?.name ?? '')) ?? doneTransitions[0]
     if (!match) {
       throw new Error(
         `no Jira transition to a Done-category status from the current status of ${issueKey} — close it in Jira`,
@@ -334,7 +357,6 @@ export class JiraConnector extends BaseConnector {
     const baseUrl = this.config.baseUrl
     if (!baseUrl) return { entities: [], nextCursor: null }
 
-    const startAt = cursor ? parseInt(cursor, 10) : 0
     const maxResults = 50
     // Per-project resource scope: when a projectKey is set (source bound to a
     // global connection), constrain the JQL to that Jira project so data from
@@ -342,16 +364,25 @@ export class JiraConnector extends BaseConnector {
     const meta = this.config.metadata as { projectKey?: string } | undefined
     const projectKey = meta?.projectKey
     const baseJql = 'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC'
-    const jql = encodeURIComponent(projectKey ? `project = ${projectKey} AND ${baseJql}` : baseJql)
+    const jql = projectKey ? `project = ${jqlQuote(projectKey)} AND ${baseJql}` : baseJql
+
+    // POST /search/jql — the old /rest/api/3/search was removed from Jira Cloud
+    // (HTTP 410). The cursor is the API's opaque nextPageToken, not a startAt.
+    const body: Record<string, unknown> = {
+      jql,
+      maxResults,
+      fields: ['summary', 'status', 'assignee', 'updated', 'labels', 'priority'],
+    }
+    if (cursor) body['nextPageToken'] = cursor
 
     const res = await this.fetchWithRetry(
-      `${baseUrl}/rest/api/3/search?jql=${jql}&startAt=${startAt}&maxResults=${maxResults}&fields=summary,status,assignee,updated,labels,priority`,
-      { headers: this.headers },
+      `${baseUrl}/rest/api/3/search/jql`,
+      { method: 'POST', headers: this.headers, body: JSON.stringify(body) },
     )
     if (!res.ok) return { entities: [], nextCursor: null }
 
     const data = await res.json() as JiraSearchResult
-    const entities: NormalizedEntity[] = data.issues.map((issue) => ({
+    const entities: NormalizedEntity[] = (data.issues ?? []).map((issue) => ({
       source: 'jira' as const,
       entityType: 'ticket',
       entityId: issue.key,
@@ -368,8 +399,9 @@ export class JiraConnector extends BaseConnector {
       },
     }))
 
-    const fetched = startAt + data.issues.length
-    const nextCursor = fetched < data.total ? String(fetched) : null
+    const nextCursor = data.isLast === true || data.nextPageToken === undefined
+      ? null
+      : data.nextPageToken
 
     return { entities, nextCursor }
   }
@@ -377,6 +409,13 @@ export class JiraConnector extends BaseConnector {
 
 function categoryOrder(status: JiraStatus): number {
   return CATEGORY_ORDER[status.statusCategory?.key ?? ''] ?? 1
+}
+
+// Quote a config-supplied value for interpolation into JQL. Embedded double
+// quotes are stripped (Jira project keys can't contain them anyway) so a
+// crafted value can never break out of the quoted clause.
+function jqlQuote(value: string): string {
+  return `"${String(value).replace(/"/g, '')}"`
 }
 
 // Minimal Atlassian Document Format wrapper — Jira Cloud v3 rejects plain text
@@ -390,6 +429,7 @@ function adfDoc(text: string): Record<string, unknown> {
 
 interface JiraProjectSearchResult {
   values?: Array<{ key: string; name: string }>
+  isLast?: boolean
 }
 
 interface JiraProject {
@@ -411,12 +451,14 @@ interface JiraIssueTypeStatuses {
 interface JiraTransition {
   id: string
   name?: string
-  to?: { id?: string; statusCategory?: { key?: string } }
+  to?: { id?: string; name?: string; statusCategory?: { key?: string } }
 }
 
+// POST /rest/api/3/search/jql response shape — token-paginated, NO total
 interface JiraMirrorSearchResult {
-  total: number
-  issues: JiraMirrorIssue[]
+  issues?: JiraMirrorIssue[]
+  nextPageToken?: string
+  isLast?: boolean
 }
 
 interface JiraMirrorIssue {
@@ -428,9 +470,11 @@ interface JiraMirrorIssue {
   }
 }
 
+// POST /rest/api/3/search/jql response shape — token-paginated, NO total
 interface JiraSearchResult {
-  total: number
-  issues: JiraIssue[]
+  issues?: JiraIssue[]
+  nextPageToken?: string
+  isLast?: boolean
 }
 
 interface JiraIssue {

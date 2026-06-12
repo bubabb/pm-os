@@ -26,23 +26,30 @@ export class ConfluenceConnector extends BaseConnector {
 
   // All Confluence spaces the token can access — powers the space picker.
   // Uses the numeric space ID (what the v2 pages API filters on), not the key.
+  // Follows `_links.next` (a relative URL) so sites with more spaces than one
+  // page's `limit` still list everything.
   override async listResources(): Promise<ResourceOption[]> {
     const baseUrl = this.config.baseUrl
     if (!baseUrl) return []
 
-    const res = await this.fetchWithRetry(
-      `${baseUrl}/wiki/api/v2/spaces?limit=100`,
-      { headers: this.headers },
-    )
-    if (!res.ok) return []
+    const spaces: ResourceOption[] = []
+    let url: string | null = `${baseUrl}/wiki/api/v2/spaces?limit=250`
+    while (url) {
+      const res = await this.fetchWithRetry(url, { headers: this.headers })
+      if (!res.ok) break
 
-    const data = await res.json() as ConfluenceSpaceList
-    return (data.results ?? []).map((space) => ({
-      id: String(space.id),
-      label: space.name,
-      sublabel: space.key,
-      metadata: { spaceId: String(space.id) },
-    }))
+      const data = await res.json() as ConfluenceSpaceList
+      for (const space of data.results ?? []) {
+        spaces.push({
+          id: String(space.id),
+          label: space.name,
+          sublabel: space.key,
+          metadata: { spaceId: String(space.id) },
+        })
+      }
+      url = data._links?.next ? `${baseUrl}${data._links.next}` : null
+    }
+    return spaces
   }
 
   async fetchEntities(cursor?: string): Promise<FetchResult> {
@@ -79,14 +86,20 @@ export class ConfluenceConnector extends BaseConnector {
       assignee: null,
       updatedAt: page.version?.createdAt ?? null,
       raw: {
-        spaceKey: page.spaceId,
+        spaceId: page.spaceId,
         version: page.version?.number,
       },
     }))
 
+    // `_links.next` is a RELATIVE URL ("/wiki/api/v2/pages?cursor=…&limit=25"),
+    // not a cursor token. The sync engine round-trips nextCursor straight back
+    // into the `cursor` query param above, so extract just the token — feeding
+    // the whole URL back makes Confluence 400 and pagination silently stops
+    // after one page.
+    const next = data._links?.next
     return {
       entities,
-      nextCursor: data._links?.next ? data._links.next : null,
+      nextCursor: next ? new URL(`${baseUrl}${next}`).searchParams.get('cursor') : null,
     }
   }
 
@@ -130,10 +143,9 @@ export class ConfluenceConnector extends BaseConnector {
     return await res.json() as ConfluencePageDetail
   }
 
-  private async putPage(
+  private async updatePage(
     baseUrl: string,
     ref: RemoteRef,
-    status: 'current' | 'archived',
     patch: { title?: string; body?: string },
   ): Promise<MutationResult> {
     const current = await this.readPage(baseUrl, ref.remoteId)
@@ -145,7 +157,7 @@ export class ConfluenceConnector extends BaseConnector {
         headers: this.jsonHeaders,
         body: JSON.stringify({
           id: ref.remoteId,
-          status,
+          status: 'current',
           title: patch.title ?? current.title,
           body: {
             representation: 'storage',
@@ -158,21 +170,29 @@ export class ConfluenceConnector extends BaseConnector {
     if (!res.ok) throw new Error(`HTTP ${res.status} updating Confluence page ${ref.remoteId}`)
     const data = await res.json() as ConfluencePageDetail
     const version = data.version?.number ?? nextVersion
-    return { ref, remoteVersion: String(version), raw: { version, status } }
+    return { ref, remoteVersion: String(version), raw: { version, status: 'current' } }
   }
 
-  private async updatePage(
-    baseUrl: string,
-    ref: RemoteRef,
-    patch: { title?: string; body?: string },
-  ): Promise<MutationResult> {
-    return this.putPage(baseUrl, ref, 'current', patch)
-  }
-
-  // close_item on a document connector = archive the page (still a version
-  // bump, so the same read-then-PUT dance applies).
+  // close_item on a document connector = archive the page. The v2 update
+  // endpoint only accepts status current/draft (PUTting 'archived' is a 400),
+  // so this goes through the v1 archive endpoint, which queues a long-running
+  // task. Archiving doesn't bump the page version → remoteVersion stays null.
   private async archivePage(baseUrl: string, ref: RemoteRef): Promise<MutationResult> {
-    return this.putPage(baseUrl, ref, 'archived', {})
+    const res = await this.fetchWithRetry(
+      `${baseUrl}/wiki/rest/api/content/archive`,
+      {
+        method: 'POST',
+        headers: this.jsonHeaders,
+        body: JSON.stringify({ pages: [{ id: ref.remoteId }] }),
+      },
+    )
+    if (!res.ok) throw new Error(`HTTP ${res.status} archiving Confluence page ${ref.remoteId}`)
+    const data = await res.json().catch(() => ({})) as { id?: string | number }
+    return {
+      ref,
+      remoteVersion: null,
+      raw: { archived: true, taskId: data.id != null ? String(data.id) : null },
+    }
   }
 
   // Footer comments don't bump the page version → remoteVersion stays null.
@@ -193,6 +213,7 @@ export class ConfluenceConnector extends BaseConnector {
 
 interface ConfluenceSpaceList {
   results?: Array<{ id: string | number; key: string; name: string }>
+  _links?: { next?: string }
 }
 
 interface ConfluencePageList {
