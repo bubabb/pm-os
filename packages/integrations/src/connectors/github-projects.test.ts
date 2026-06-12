@@ -5,6 +5,7 @@ import {
   GitHubRateLimitError,
   GitHubScopeError,
   GitHubNotFoundError,
+  parseProjectUrl,
 } from './github-projects'
 import { GitHubConnector } from './github'
 import { UnsupportedMutationError } from './base'
@@ -144,6 +145,125 @@ describe('GitHubProjectsClient — listProjects', () => {
       { id: 'PVT_1', label: 'Personal Roadmap', sublabel: '#3', url: 'https://github.com/users/me/projects/3' },
       { id: 'PVT_2', label: 'Acme Sprint', sublabel: '#7', url: 'https://github.com/orgs/acme/projects/7' },
     ])
+  })
+})
+
+// ── parseProjectUrl ─────────────────────────────────────────────────────────
+
+describe('parseProjectUrl', () => {
+  it('parses a user project URL', () => {
+    expect(parseProjectUrl('https://github.com/users/rsemnani/projects/2')).toEqual({
+      login: 'rsemnani', number: 2, ownerType: 'user',
+    })
+  })
+
+  it('parses an org project URL', () => {
+    expect(parseProjectUrl('https://github.com/orgs/acme/projects/7')).toEqual({
+      login: 'acme', number: 7, ownerType: 'org',
+    })
+  })
+
+  it('tolerates www host, trailing segments (views), query strings, and whitespace', () => {
+    expect(parseProjectUrl(' https://www.github.com/users/me/projects/3/views/1?pane=info ')).toEqual({
+      login: 'me', number: 3, ownerType: 'user',
+    })
+  })
+
+  it('returns null for non-URL input (bare numbers require the picker, not resolve)', () => {
+    expect(parseProjectUrl('2')).toBeNull()
+    expect(parseProjectUrl('not a url')).toBeNull()
+    expect(parseProjectUrl('')).toBeNull()
+  })
+
+  it('returns null for non-GitHub hosts and non-project GitHub URLs', () => {
+    expect(parseProjectUrl('https://gitlab.com/users/me/projects/2')).toBeNull()
+    expect(parseProjectUrl('https://github.com/acme/app/projects/2')).toBeNull() // repo path, not users/orgs
+    expect(parseProjectUrl('https://github.com/users/me/projects/')).toBeNull()
+    expect(parseProjectUrl('https://github.com/users/me/projects/abc')).toBeNull()
+    expect(parseProjectUrl('https://github.com/users/me/projects/0')).toBeNull()
+  })
+})
+
+// ── resolveProject (cross-owner import) ─────────────────────────────────────
+
+const RESOLVED_NODE = {
+  id: 'PVT_other',
+  title: 'Their Roadmap',
+  number: 2,
+  url: 'https://github.com/users/rsemnani/projects/2',
+}
+
+const RESOLVED_OPTION = {
+  id: 'PVT_other',
+  label: 'Their Roadmap',
+  sublabel: '#2',
+  url: 'https://github.com/users/rsemnani/projects/2',
+}
+
+describe('GitHubProjectsClient — resolveProject', () => {
+  it('resolves a user-owned project on the first query', async () => {
+    fetchMock.mockResolvedValueOnce(dataResponse({ user: { projectV2: RESOLVED_NODE } }))
+
+    await expect(client().resolveProject('rsemnani', 2)).resolves.toEqual(RESOLVED_OPTION)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const body = requestBody(0)
+    expect(body.query).toContain('user(login: $login)')
+    expect(body.query).toContain('projectV2(number: $number)')
+    expect(body.variables).toEqual({ login: 'rsemnani', number: 2 })
+  })
+
+  it('falls back to organization(login) when the user query is NOT_FOUND', async () => {
+    fetchMock
+      .mockResolvedValueOnce(errorsResponse([{ type: 'NOT_FOUND', message: 'no such user' }]))
+      .mockResolvedValueOnce(dataResponse({ organization: { projectV2: RESOLVED_NODE } }))
+
+    await expect(client().resolveProject('rsemnani', 2)).resolves.toEqual(RESOLVED_OPTION)
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(requestBody(1).query).toContain('organization(login: $login)')
+    expect(requestBody(1).variables).toEqual({ login: 'rsemnani', number: 2 })
+  })
+
+  it('falls back to organization(login) when the user exists but has no such project', async () => {
+    fetchMock
+      .mockResolvedValueOnce(dataResponse({ user: { projectV2: null } }))
+      .mockResolvedValueOnce(dataResponse({ organization: { projectV2: RESOLVED_NODE } }))
+
+    await expect(client().resolveProject('rsemnani', 2)).resolves.toEqual(RESOLVED_OPTION)
+  })
+
+  it('returns null (never throws) when neither user nor organization resolves', async () => {
+    fetchMock
+      .mockResolvedValueOnce(errorsResponse([{ type: 'NOT_FOUND', message: 'no such user' }]))
+      .mockResolvedValueOnce(errorsResponse([{ type: 'NOT_FOUND', message: 'no such org' }]))
+
+    await expect(client().resolveProject('nobody', 99)).resolves.toBeNull()
+  })
+
+  it('lets scope/auth errors propagate instead of mapping them to null', async () => {
+    fetchMock.mockResolvedValueOnce(
+      errorsResponse([{ type: 'INSUFFICIENT_SCOPES', message: 'token needs project scope' }]),
+    )
+    await expect(client().resolveProject('rsemnani', 2)).rejects.toBeInstanceOf(GitHubScopeError)
+  })
+})
+
+describe('GitHubConnector — resolveRemoteBoard', () => {
+  it('parses the project URL and resolves it through the client', async () => {
+    fetchMock.mockResolvedValueOnce(dataResponse({ user: { projectV2: RESOLVED_NODE } }))
+
+    await expect(
+      connector().resolveRemoteBoard('https://github.com/users/rsemnani/projects/2'),
+    ).resolves.toEqual(RESOLVED_OPTION)
+
+    expect(requestBody(0).variables).toEqual({ login: 'rsemnani', number: 2 })
+  })
+
+  it('returns null without any network call when the ref does not parse', async () => {
+    await expect(connector().resolveRemoteBoard('2')).resolves.toBeNull()
+    await expect(connector().resolveRemoteBoard('https://github.com/acme/app')).resolves.toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 

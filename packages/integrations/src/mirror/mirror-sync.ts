@@ -99,6 +99,22 @@ export async function listRemoteBoards(
   return buildConnector(source, config).listRemoteBoards()
 }
 
+/**
+ * Resolve ONE remote board from a user-supplied reference (a full board URL) —
+ * the cross-owner import path for boards the token can access but that
+ * listRemoteBoards never surfaces (e.g. another user's GitHub Project the
+ * token's account collaborates on). null = unparseable ref or board not
+ * visible to this token; upstream auth/scope failures throw. Connectors
+ * without resolution support inherit the BaseConnector default (null).
+ */
+export async function resolveRemoteBoard(
+  source: IntegrationSource,
+  config: ConnectorConfig,
+  ref: string,
+): Promise<RemoteBoardOption | null> {
+  return buildConnector(source, config).resolveRemoteBoard(ref)
+}
+
 // ── Snapshot → MirrorApply mapping ──────────────────────────────────────────
 
 function toApplyColumn(column: MirrorColumnSnapshot): MirrorApplyColumn {

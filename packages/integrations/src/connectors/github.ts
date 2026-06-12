@@ -1,5 +1,5 @@
 import { BaseConnector, UnsupportedMutationError } from './base'
-import { GitHubNotFoundError, GitHubProjectsClient } from './github-projects'
+import { GitHubNotFoundError, GitHubProjectsClient, parseProjectUrl } from './github-projects'
 import type {
   ConnectorCapabilities,
   FetchResult,
@@ -174,6 +174,16 @@ export class GitHubConnector extends BaseConnector {
   // ProjectV2 boards this token can see — powers the "Import remote board" picker
   override async listRemoteBoards(): Promise<RemoteBoardOption[]> {
     return new GitHubProjectsClient(this.config.token).listProjects()
+  }
+
+  // Resolve a ProjectV2 from its URL — the cross-owner import path. The token
+  // can access other users'/orgs' projects it collaborates on, which the
+  // viewer-scoped listRemoteBoards never surfaces. null = unparseable URL or
+  // project not visible to this token.
+  override async resolveRemoteBoard(ref: string): Promise<RemoteBoardOption | null> {
+    const parsed = parseProjectUrl(ref)
+    if (!parsed) return null
+    return new GitHubProjectsClient(this.config.token).resolveProject(parsed.login, parsed.number)
   }
 
   // Full ProjectV2 snapshot — the pull side of the board mirror (mirror-sync

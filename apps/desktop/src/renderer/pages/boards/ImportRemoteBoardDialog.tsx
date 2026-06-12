@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, ExternalLink, Github, LayoutGrid, Search } from 'lucide-react'
+import { ChevronLeft, ExternalLink, Github, LayoutGrid, Link2, Search } from 'lucide-react'
 import { api } from '../../lib/api'
 import { Dialog } from '../../components/ui/Dialog'
 import { Spinner } from '../../components/ui/Spinner'
@@ -51,12 +51,14 @@ export function ImportRemoteBoardDialog({
   const navigate = useNavigate()
   const [connectionId, setConnectionId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [boardUrl, setBoardUrl] = useState('')
 
   // Start each open at step 1 with a clean search.
   useEffect(() => {
     if (open) {
       setConnectionId(null)
       setSearch('')
+      setBoardUrl('')
     }
   }, [open])
 
@@ -98,6 +100,15 @@ export function ImportRemoteBoardDialog({
     },
     onError: (e: Error) => toast.error(`Import failed: ${e.message}`),
   })
+
+  // Resolve a pasted GitHub project URL into a RemoteBoardOption (import-by-URL).
+  const resolveBoard = useMutation<RemoteBoardOption, Error, string>({
+    mutationFn: (ref) => {
+      if (!connectionId) throw new Error('Pick a connection first.')
+      return api.get(`/connections/${connectionId}/resolve-board?ref=${encodeURIComponent(ref)}`)
+    },
+  })
+  const resolved = resolveBoard.data
 
   const selectedConnection = mirrorConnections.find((c) => c.id === connectionId)
   const selectedNoun = BOARD_NOUN[selectedConnection?.source ?? ''] ?? 'board'
@@ -149,7 +160,7 @@ export function ImportRemoteBoardDialog({
               {mirrorConnections.map((c) => (
                 <li key={c.id}>
                   <button
-                    onClick={() => setConnectionId(c.id)}
+                    onClick={() => { setConnectionId(c.id); setBoardUrl(''); resolveBoard.reset() }}
                     className="flex w-full items-center gap-2.5 rounded-lg border border-border px-3 py-2.5 text-left transition-colors hover:border-primary/40 hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     {c.source === 'github'
@@ -249,6 +260,87 @@ export function ImportRemoteBoardDialog({
                 </ul>
               )}
             </>
+          )}
+
+          {selectedConnection?.source === 'github' && (
+            // ── Import by URL (projects owned by another user/org) ───────────
+            <div className="space-y-2 border-t border-border pt-3">
+              <p className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                <Link2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                Import by URL
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                List shows projects you own. To import a project owned by someone else (that your token can access), paste its URL.
+              </p>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  const ref = boardUrl.trim()
+                  if (ref !== '' && !resolveBoard.isPending) resolveBoard.mutate(ref)
+                }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  aria-label="GitHub project URL"
+                  placeholder="https://github.com/users/<owner>/projects/<n>"
+                  value={boardUrl}
+                  onChange={(e) => {
+                    setBoardUrl(e.target.value)
+                    if (resolveBoard.data || resolveBoard.isError) resolveBoard.reset()
+                  }}
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
+                />
+                <button
+                  type="submit"
+                  disabled={boardUrl.trim() === '' || resolveBoard.isPending}
+                  aria-label="Find GitHub project by URL"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+                >
+                  {resolveBoard.isPending
+                    ? <Spinner size="sm" inline />
+                    : <Search className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />}
+                  Find
+                </button>
+              </form>
+              {resolveBoard.isError && (
+                <p role="alert" className="text-xs text-destructive">
+                  {resolveBoard.error.message || "Project not found, or your token can't access it."}
+                </p>
+              )}
+              {resolved && (
+                <div className="flex items-center gap-2.5 rounded-lg border border-border px-3 py-2.5">
+                  <LayoutGrid className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-foreground">{resolved.label}</span>
+                    {resolved.sublabel && (
+                      <span className="block truncate text-[11px] text-muted-foreground">{resolved.sublabel}</span>
+                    )}
+                  </span>
+                  {resolved.url && (
+                    <a
+                      href={resolved.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={`Open ${resolved.label} in GitHub`}
+                      className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                    </a>
+                  )}
+                  <button
+                    onClick={() => importBoard.mutate(resolved)}
+                    disabled={importBoard.isPending}
+                    aria-label={`Import ${resolved.label} as a mirrored board`}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+                  >
+                    {importBoard.isPending && importBoard.variables?.id === resolved.id && (
+                      <Spinner size="sm" inline />
+                    )}
+                    Import
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}

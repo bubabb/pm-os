@@ -48,6 +48,42 @@ interface GraphqlErrorEntry {
   message?: string
 }
 
+// ── Project URL parsing ─────────────────────────────────────────────────────
+// Cross-owner import requires a full project URL — a bare number would be
+// ambiguous (whose project #2?). Unparseable input → null, never a throw.
+
+export interface ParsedProjectUrl {
+  login: string
+  number: number
+  ownerType: 'user' | 'org'
+}
+
+/**
+ * Parse a GitHub Projects v2 URL into its owner + number:
+ *   https://github.com/users/<login>/projects/<n> → { login, number, ownerType: 'user' }
+ *   https://github.com/orgs/<login>/projects/<n>  → { login, number, ownerType: 'org' }
+ * Trailing path segments (e.g. /views/1) and query strings are tolerated.
+ * Anything else (non-GitHub host, repo URLs, bare numbers) → null.
+ */
+export function parseProjectUrl(input: string): ParsedProjectUrl | null {
+  let url: URL
+  try {
+    url = new URL(input.trim())
+  } catch {
+    return null
+  }
+  if (url.hostname !== 'github.com' && url.hostname !== 'www.github.com') return null
+  const match = /^\/(users|orgs)\/([^/]+)\/projects\/(\d+)(?:\/|$)/.exec(url.pathname)
+  if (!match) return null
+  const number = Number(match[3]!)
+  if (!Number.isSafeInteger(number) || number <= 0) return null
+  return {
+    login: decodeURIComponent(match[2]!),
+    number,
+    ownerType: match[1] === 'users' ? 'user' : 'org',
+  }
+}
+
 export class GitHubProjectsClient {
   constructor(private token: string) {}
 
@@ -152,6 +188,47 @@ export class GitHubProjectsClient {
       for (const node of org?.projectsV2.nodes ?? []) push(node)
     }
     return options
+  }
+
+  // Resolve one ProjectV2 by owner login + project number — the cross-owner
+  // import path (listProjects only sees the viewer's own + org projects, but a
+  // token can also access OTHER users'/orgs' projects it collaborates on).
+  // Tries user(login) first, falls back to organization(login). "Not found /
+  // not accessible" is a legitimate answer → null, never a throw; scope/auth/
+  // rate-limit errors still propagate from graphql().
+  async resolveProject(login: string, number: number): Promise<RemoteBoardOption | null> {
+    const userData = await this.tryResolveQuery<ResolveUserProjectData>(
+      `query ResolveUserProject($login: String!, $number: Int!) {
+        user(login: $login) {
+          projectV2(number: $number) { id title number url }
+        }
+      }`,
+      { login, number },
+    )
+    const userProject = userData?.user?.projectV2 ?? null
+    if (userProject) return toBoardOption(userProject)
+
+    const orgData = await this.tryResolveQuery<ResolveOrgProjectData>(
+      `query ResolveOrgProject($login: String!, $number: Int!) {
+        organization(login: $login) {
+          projectV2(number: $number) { id title number url }
+        }
+      }`,
+      { login, number },
+    )
+    const orgProject = orgData?.organization?.projectV2 ?? null
+    return orgProject ? toBoardOption(orgProject) : null
+  }
+
+  // A NOT_FOUND from graphql() here means "no such owner / project invisible
+  // to this token" — a resolvable null, not a failure.
+  private async tryResolveQuery<T>(query: string, variables: Record<string, unknown>): Promise<T | null> {
+    try {
+      return await this.graphql<T>(query, variables)
+    } catch (err) {
+      if (err instanceof GitHubNotFoundError) return null
+      throw err
+    }
   }
 
   // Full mirror snapshot of one ProjectV2: columns from the Status
@@ -446,6 +523,10 @@ function normalizeContent(content: ProjectItemContent): {
   }
 }
 
+function toBoardOption(node: ProjectNode): RemoteBoardOption {
+  return { id: node.id, label: node.title, sublabel: `#${node.number}`, url: node.url }
+}
+
 function parseRetryAfter(res: Response): number | null {
   const header = res.headers.get('retry-after')
   if (!header) return null
@@ -473,6 +554,14 @@ interface ListProjectsData {
       nodes: Array<{ login: string; projectsV2: { nodes: Array<ProjectNode | null> | null } } | null> | null
     }
   }
+}
+
+interface ResolveUserProjectData {
+  user: { projectV2: ProjectNode | null } | null
+}
+
+interface ResolveOrgProjectData {
+  organization: { projectV2: ProjectNode | null } | null
 }
 
 interface ProjectItemContent {

@@ -31,7 +31,7 @@ export type {
 // Pull/import surface + durable push outbox. The desktop routes layer resolves
 // plaintext tokens via the secrets layer and passes them in — this package
 // never decrypts anything.
-export { createMirror, pullMirror, getMirrorStatus, listRemoteBoards } from './mirror/mirror-sync'
+export { createMirror, pullMirror, getMirrorStatus, listRemoteBoards, resolveRemoteBoard } from './mirror/mirror-sync'
 export type { MirrorStatus } from './mirror/mirror-sync'
 export {
   enqueueMutation,

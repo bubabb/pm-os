@@ -12,9 +12,10 @@ import {
 import { getDb, integrationCredentials, remoteLinks, events } from '@creare/database'
 import { and, eq, isNull } from 'drizzle-orm'
 import { generateId } from '@creare/shared'
-import { listRemoteBoards, createMirror, pullMirror, getMirrorStatus } from '@creare/integrations'
+import { listRemoteBoards, resolveRemoteBoard, createMirror, pullMirror, getMirrorStatus } from '@creare/integrations'
 import type { ConnectorConfig } from '@creare/integrations'
 import type { AuthenticatedRequest } from '../auth'
+import type { Connection } from '@creare/database'
 
 // Bidirectional board mirrors (GitHub Projects v2, Phase 1) — remote-board
 // picker, mirror creation (import), manual pull, and sync status. The push
@@ -25,6 +26,27 @@ interface ProjectParams    { id: string }
 interface BoardParams      { id: string; boardId: string }
 
 interface CreateMirrorBody { connectionId: string; remoteId: string; label: string }
+interface ResolveBoardQuery { ref?: string }
+
+// Connection-scoped ConnectorConfig — connections are workspace-global, so the
+// credential/project ids are intentionally blank; only the token + metadata
+// (baseUrl…) matter to the connector. Shared by the remote-boards and
+// resolve-board routes.
+function connectionConnectorConfig(connection: Connection, token: string): ConnectorConfig {
+  const metadata = (() => {
+    try { return JSON.parse(connection.metadata) as Record<string, unknown> }
+    catch { return {} }
+  })()
+  const baseUrl = typeof metadata['baseUrl'] === 'string' ? metadata['baseUrl'] : undefined
+
+  return {
+    credentialId: '',
+    projectId: '',
+    token,
+    ...(baseUrl !== undefined ? { baseUrl } : {}),
+    metadata,
+  }
+}
 
 export async function mirrorsRoutes(app: FastifyInstance): Promise<void> {
   // List the remote boards this connection's token can access — powers the
@@ -40,20 +62,41 @@ export async function mirrorsRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         const token = await getConnectionToken(connection.id)
-        const metadata = (() => {
-          try { return JSON.parse(connection.metadata) as Record<string, unknown> }
-          catch { return {} }
-        })()
-        const baseUrl = typeof metadata['baseUrl'] === 'string' ? metadata['baseUrl'] : undefined
+        return await listRemoteBoards(connection.source, connectionConnectorConfig(connection, token))
+      } catch (err) {
+        // Upstream API failure (bad token, missing scope, network, rate limit)
+        const message = err instanceof Error ? err.message : String(err)
+        return reply.code(502).send({ error: message })
+      }
+    },
+  )
 
-        const config: ConnectorConfig = {
-          credentialId: '',
-          projectId: '',
-          token,
-          ...(baseUrl !== undefined ? { baseUrl } : {}),
-          metadata,
+  // Resolve ONE remote board from its URL — the cross-owner import path. The
+  // connection's token can access other users'/orgs' boards it collaborates
+  // on, which the "own boards" picker above never lists. Returns the same
+  // RemoteBoardOption shape the picker uses, so the UI feeds the resolved id
+  // straight into POST /projects/:id/mirrors.
+  app.get<{ Params: ConnectionParams; Querystring: ResolveBoardQuery }>(
+    '/connections/:connectionId/resolve-board',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest<{ Params: ConnectionParams; Querystring: ResolveBoardQuery }>, reply) => {
+      const connection = await getConnection(request.params.connectionId)
+      if (!connection) return reply.code(404).send({ error: 'Not found' })
+
+      const ref = request.query.ref
+      if (!ref) return reply.code(400).send({ error: 'Missing required query parameter "ref" (the project URL)' })
+
+      try {
+        const token = await getConnectionToken(connection.id)
+        const option = await resolveRemoteBoard(connection.source, connectionConnectorConfig(connection, token), ref)
+        if (option === null) {
+          // Unparseable URL, nonexistent project, or invisible to this token —
+          // GitHub does not distinguish "missing" from "no access".
+          return reply.code(404).send({
+            error: "Project not found, or your token cannot access it. Make sure the token's account is a collaborator on that project.",
+          })
         }
-        return await listRemoteBoards(connection.source, config)
+        return option
       } catch (err) {
         // Upstream API failure (bad token, missing scope, network, rate limit)
         const message = err instanceof Error ? err.message : String(err)

@@ -46,6 +46,15 @@ export abstract class BaseConnector {
     return []
   }
 
+  // Resolve ONE remote board from a user-supplied reference (a full board URL)
+  // — the cross-owner import path for boards the token can access but that
+  // listRemoteBoards' "own boards" enumeration never surfaces. null = the ref
+  // didn't parse, or no such board is visible to this token; upstream
+  // auth/scope failures still throw. Default: no resolution support.
+  async resolveRemoteBoard(_ref: string): Promise<RemoteBoardOption | null> {
+    return null
+  }
+
   // Full normalized snapshot (columns + items) of one remote board — the pull
   // side of the mirror. mirror-sync calls this instead of any provider client.
   async fetchBoardSnapshot(_remoteBoardId: string): Promise<MirrorBoardSnapshot> {
