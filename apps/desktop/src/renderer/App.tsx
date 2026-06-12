@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import AppShell from './layouts/AppShell'
 import ProtectedRoute from './components/ProtectedRoute'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { ToastViewport } from './components/ui/Toast'
 
 // Code-split pages: each route loads its own chunk on first visit,
@@ -36,6 +37,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <HashRouter>
+        <ErrorBoundary>
         <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/auth" element={<SignIn />} />
@@ -61,6 +63,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        </ErrorBoundary>
       </HashRouter>
       {/* Global toast stack — mounted once so toast.* works app-wide */}
       <ToastViewport />

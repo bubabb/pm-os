@@ -393,8 +393,8 @@ function SourcesTab({ projectId }: { projectId: string }) {
 // ── Source card ───────────────────────────────────────────────────────────────
 
 /** Heuristic mapping of normalized item statuses to badge colors. */
-function statusVariant(status: string): BadgeVariant {
-  const s = status.toLowerCase().replace(/[_-]/g, ' ')
+function statusVariant(status: string | null | undefined): BadgeVariant {
+  const s = (status ?? '').toLowerCase().replace(/[_-]/g, ' ')
   if (['closed', 'done', 'merged', 'resolved', 'completed'].includes(s)) return 'success'
   if (['open', 'in progress', 'todo', 'to do', 'in review'].includes(s)) return 'info'
   if (['blocked', 'failed', 'error'].includes(s)) return 'danger'

@@ -288,10 +288,25 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Not found' })
       }
       const { source, entityType, since } = request.query
-      return getActiveEvents(request.params.id, {
+      const rows = await getActiveEvents(request.params.id, {
         ...(source ? { sources: [source as IntegrationCredential['source']] } : {}),
         ...(entityType ? { entityTypes: [entityType] } : {}),
         ...(since ? { since } : {}),
+      })
+      // Normalize: the cache row stores the entity fields (title/status/updatedAt)
+      // inside the stringified `payload`. The UI reads them top-level, so flatten
+      // them here (and never let a bad payload throw — fall back to safe defaults).
+      return rows.map((r) => {
+        let p: { title?: string; status?: string; updatedAt?: string | null } = {}
+        try { p = JSON.parse(r.payload) as typeof p } catch { /* keep defaults */ }
+        return {
+          entityType: r.entityType,
+          entityId: r.entityId,
+          entityUrl: r.entityUrl,
+          title: p.title ?? r.entityId,
+          status: p.status ?? 'unknown',
+          updatedAt: p.updatedAt ?? r.fetchedAt,
+        }
       })
     },
   )
