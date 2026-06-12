@@ -23,6 +23,14 @@ export function Dialog({ open, onClose, title, children, footer }: DialogProps) 
   const panelRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
 
+  // Read onClose through a ref so the focus-trap effect below does NOT depend on
+  // its identity. Parents almost always pass an inline `onClose`, which changes
+  // every render; if the effect depended on it, every keystroke in a dialog input
+  // would re-run the effect and `panel.focus()` would steal focus from the input
+  // (the classic "only types one character at a time" bug).
+  const onCloseRef = useRef(onClose)
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
+
   useEffect(() => {
     if (!open) return
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -31,7 +39,7 @@ export function Dialog({ open, onClose, title, children, footer }: DialogProps) 
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.stopPropagation()
-        onClose()
+        onCloseRef.current()
         return
       }
       if (e.key !== 'Tab') return
@@ -61,7 +69,8 @@ export function Dialog({ open, onClose, title, children, footer }: DialogProps) 
       document.removeEventListener('keydown', onKeyDown)
       previouslyFocused?.focus()
     }
-  }, [open, onClose])
+    // Only on open/close transitions — NOT on every render (see onCloseRef above).
+  }, [open])
 
   if (!open) return null
 

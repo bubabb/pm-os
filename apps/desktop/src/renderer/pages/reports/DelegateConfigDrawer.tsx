@@ -22,15 +22,23 @@ export function DelegateConfigDrawer({ item, onConfirm, onViewAgents, onClose }:
   const [isDone, setIsDone] = useState(false)
   const actionInputRef = useRef<HTMLTextAreaElement>(null)
 
-  // Dialog behavior: focus the first input on open, close on Escape
+  // Read onClose through a ref so the focus effect below does NOT depend on its
+  // identity. The parent passes an inline `onClose`, which changes every parent
+  // render (e.g. dashboard refresh, mutation state flips); if the effect depended
+  // on it, each of those re-renders would re-run the effect and `.focus()` would
+  // steal focus mid-interaction (same class of bug as the Dialog focus trap).
+  const onCloseRef = useRef(onClose)
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
+
+  // Dialog behavior: focus the first input on open (mount), close on Escape
   useEffect(() => {
     actionInputRef.current?.focus()
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onCloseRef.current()
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+  }, [])
 
   async function handleConfirm() {
     setIsSending(true)
