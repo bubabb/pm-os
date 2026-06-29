@@ -14,6 +14,22 @@ import type { Secret } from '@creare/database'
 
 let _masterKey: CryptoKey | null = null
 
+/**
+ * Thrown when a stored secret (a connector token or the reasoning API key) can't be
+ * decrypted — almost always because it was encrypted under a previous master key and
+ * is now orphaned. `statusCode` is honored by Fastify's default error handler, so the
+ * client gets a clear, actionable 422 instead of a raw 500. 422 (not 401) on purpose:
+ * 401 makes the renderer auto-sign-out.
+ */
+export class CredentialError extends Error {
+  readonly statusCode = 422
+  readonly code = 'credential_unreadable'
+  constructor(message: string) {
+    super(message)
+    this.name = 'CredentialError'
+  }
+}
+
 // True when any row encrypted under the master key already exists. Used to detect —
 // and loudly report — the data-loss case where a new key is generated while old
 // ciphertext is still in the DB (those rows can never be decrypted again).
@@ -109,12 +125,21 @@ export async function encryptSecretAsync(value: string): Promise<{ encryptedValu
 
 export async function decryptSecretAsync(encryptedValue: string, iv: string): Promise<string> {
   const key = await getMasterKey()
-  const plaintext = await globalThis.crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: Buffer.from(iv, 'base64') },
-    key,
-    Buffer.from(encryptedValue, 'base64'),
-  )
-  return new TextDecoder().decode(plaintext)
+  try {
+    const plaintext = await globalThis.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: Buffer.from(iv, 'base64') },
+      key,
+      Buffer.from(encryptedValue, 'base64'),
+    )
+    return new TextDecoder().decode(plaintext)
+  } catch {
+    // AES-GCM auth-tag failure → the ciphertext can't be read with the current master
+    // key (orphaned: encrypted under a previous key). Surface a clear, actionable error
+    // instead of a raw 500 so the user knows exactly what to do.
+    throw new CredentialError(
+      "This saved credential couldn't be read — it was encrypted under a previous key. Open Connections, remove the affected connection or API key, and add it again.",
+    )
+  }
 }
 
 export async function createSecret(

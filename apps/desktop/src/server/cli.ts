@@ -77,7 +77,17 @@ async function api<T>(
     await signIn()
     return api<T>(path, init, false)
   }
-  if (!res.ok) throw new Error(`${init.method ?? 'GET'} ${path} → ${res.status}: ${await res.text()}`)
+  if (!res.ok) {
+    const text = await res.text()
+    let detail = text
+    try {
+      const body = JSON.parse(text) as { message?: string; error?: string }
+      detail = body.message ?? body.error ?? text
+    } catch {
+      // non-JSON body — show as-is
+    }
+    throw new Error(`${init.method ?? 'GET'} ${path} → ${res.status}: ${detail}`)
+  }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }

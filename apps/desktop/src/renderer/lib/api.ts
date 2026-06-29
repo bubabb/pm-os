@@ -45,8 +45,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }))
-    throw new ApiError(response.status, (body as { error?: string }).error ?? response.statusText)
+    const body = await response.json().catch(() => ({}))
+    // Prefer the human-readable `message` (Fastify puts actionable errors there, e.g. an
+    // unreadable credential), then a route's `{ error }`, then the bare status text.
+    const { message, error } = body as { message?: string; error?: string }
+    throw new ApiError(response.status, message ?? error ?? response.statusText)
   }
 
   if (response.status === 204) return undefined as T

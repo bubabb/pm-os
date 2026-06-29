@@ -47,6 +47,12 @@ and cross-task handoffs are `agent-state/handoffs/`.
     OAuth throws a clear "use a PAT in headless" at call-time instead of crashing on import. Only
     `index.ts` (the Electron-only entry, never in the headless chain) still imports electron eagerly.
     **VERIFIED:** fresh `--ignore-scripts` clone now boots + serves (health/web/asset 200, CLI works).
+  • **Clear credential errors (not raw 500s):** `decryptSecretAsync` (the single chokepoint for
+    every connector token AND the Claude API key) now throws a typed `CredentialError`
+    (`statusCode 422`, `code: credential_unreadable`) with an actionable message ("…Open Connections,
+    remove the affected connection or API key, and add it again."). 422 not 401 (401 auto-signs-out
+    the renderer). Renderer `api.ts` + CLI now prefer the `message` field. Fixes the orphaned-token
+    sync 500. VERIFIED live (sync → 422 + message in curl, CLI, and surfaced to the UI).
   • **Phase 4 — README** done: new "Run without Electron (headless web app + CLI)" section
     (`pnpm install --ignore-scripts && pnpm creare` → http://127.0.0.1:4321; `pnpm cli` reference;
     CREARE_PORT/CREARE_API), plus intro/prereq/scripts/tester-notes cross-links. Uncommitted.
