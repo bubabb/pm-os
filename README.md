@@ -20,7 +20,11 @@ TypeScript monorepo (Turborepo + pnpm). Everything runs locally — your data st
   ```bash
   corepack enable && corepack prepare pnpm@9.0.0 --activate
   ```
-- **macOS, Electron app only:** Xcode Command Line Tools — `xcode-select --install` (needed to compile the native SQLite module). The [headless web/CLI runtime](#run-without-electron-headless-web-app--cli) uses a prebuilt Node binary and doesn't need this.
+- **A C/C++ build toolchain** — the native SQLite module (`better-sqlite3`) is compiled **once on first run** (the `pnpm install --ignore-scripts` step skips the usual prebuilt-binary download, so it's built from source instead). First boot therefore takes ~30–60s while it compiles; every boot after is instant.
+  - **macOS:** Xcode Command Line Tools — `xcode-select --install`
+  - **Debian/Ubuntu/Kali:** `sudo apt install build-essential python3`
+  - **Windows:** the “Desktop development with C++” workload (Visual Studio Build Tools) + Python 3
+  > The Electron desktop app compiles the same module against Electron's ABI, so this toolchain is needed for either runtime.
 - Reasoning/AI features (dashboard auto-triage, digests) use the **Claude Code CLI** logged into a Claude membership. **Optional** — board sync works fully without it.
 
 ---
@@ -49,7 +53,9 @@ pnpm creare                          # builds packages + web UI, starts the serv
 
 Then open **http://127.0.0.1:4321** in any browser. That's the full app — same Boards, sync, dashboard, everything.
 
-- **Why `--ignore-scripts`:** it skips Electron's post-install binary download (the thing a corporate proxy usually kills). The headless runtime never needs the Electron binary, and the native SQLite module is built for the **Node** ABI automatically — no Electron headers, nothing fetched from `electronjs.org`.
+> **First run takes ~30–60s** while the native SQLite module compiles (needs a [C/C++ toolchain](#prerequisites)). You'll see build output, then `Creare is running` — wait for that line, then open the URL. Subsequent boots are instant.
+
+- **Why `--ignore-scripts`:** it skips Electron's post-install binary download (the thing a corporate proxy usually kills). The headless runtime never needs the Electron binary, and the native SQLite module is built from source for the **Node** ABI — no Electron headers, nothing fetched from `electronjs.org`.
 - **One runtime, one command.** `pnpm creare` = build the workspace packages → build the web UI (plain Vite) → start the Node server. Re-run it any time; rebuilds are cached.
 - **Custom port:** `CREARE_PORT=5000 pnpm creare`. The UI is served same-origin, so it follows the port automatically.
 - **Stop:** `Ctrl+C`. Your data lives in `~/.creare/` exactly as with the desktop app.
