@@ -2,10 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Kanban, Bot, Wrench, Eye, BarChart3, Plug, BrainCircuit, FolderOpen,
-  Check, ChevronDown, ChevronsUpDown, Command, LogOut, Plus, Settings,
+  Check, ChevronDown, ChevronsUpDown, Command, Plus, Settings, User,
   ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
-import { useAuthStore } from '../store/auth'
 import { NotificationsBell, NotificationsPanel } from '../components/notifications/NotificationsPanel'
 import { CommandPalette } from '../components/ui/CommandPalette'
 import { useProjectStore } from '../store/projects'
@@ -32,7 +31,6 @@ function initialOf(name: string | undefined): string {
 }
 
 export default function AppShell() {
-  const { user, signOut } = useAuthStore()
   const { projects, currentProject, setCurrentProject } = useProjectStore()
   const navigate = useNavigate()
   const location = useLocation()
@@ -65,10 +63,6 @@ export default function AppShell() {
     return projects.filter((p) => p.name.toLowerCase().includes(q))
   }, [projects, projectFilter])
 
-  async function handleSignOut() {
-    await signOut()
-    navigate('/auth')
-  }
 
   function openCommandPalette() {
     // CommandPalette listens for Cmd/Ctrl+K on document — replay that event.
@@ -221,17 +215,17 @@ export default function AppShell() {
         <div className="relative border-t border-border px-2 py-2">
           <button
             onClick={() => setUserMenuOpen((o) => !o)}
-            aria-label="User menu"
+            aria-label="Account menu"
             aria-expanded={userMenuOpen}
-            {...(collapsed ? { title: user?.name ?? 'User menu' } : {})}
+            {...(collapsed ? { title: 'Account' } : {})}
             className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
-              {user?.name?.[0]?.toUpperCase() ?? '?'}
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+              <User className="h-3.5 w-3.5" />
             </div>
             {!collapsed && (
               <>
-                <span className="flex-1 truncate text-left text-xs">{user?.name}</span>
+                <span className="flex-1 truncate text-left text-xs">Account</span>
                 <ChevronDown className="h-3 w-3" />
               </>
             )}
@@ -249,13 +243,6 @@ export default function AppShell() {
                   <Settings className="h-4 w-4" />
                   Settings
                 </NavLink>
-                <button
-                  onClick={handleSignOut}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <LogOut className="h-4 w-4" />
-                  Sign out
-                </button>
               </div>
             </>
           )}
