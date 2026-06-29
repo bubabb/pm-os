@@ -1,4 +1,4 @@
-# Session Log — 2026-06-29 — Headless web runtime (Phase 1 + 2 + 3)
+# Session Log — 2026-06-29 — Headless web runtime (Phase 1 + 2 + 3 + 4)
 
 ## Context / Why
 Tester feedback (corporate machine): **cannot run an Electron app** (company policy);
@@ -74,10 +74,18 @@ AND a thin CLI (CLI = next session). This session delivered Phase 1 + 2.
   **orphaned token** (pre-existing; re-add the connection once per the known stable-key note), NOT
   a CLI/headless bug.
 
+## Phase 4 — README (this session)
+- Added a prominent **"Run without Electron (headless web app + CLI)"** section: one-command
+  `pnpm install --ignore-scripts && pnpm creare` → http://127.0.0.1:4321, why `--ignore-scripts`
+  dodges the Electron-binary/native-compile blockers, custom `CREARE_PORT`, and a full `pnpm cli`
+  command reference (+ `CREARE_API`). Cross-linked from the intro, prerequisites (macOS CLT now
+  noted as Electron-only), useful-scripts, and tester-notes. Phases 1–3 committed as `ff9eabb`.
+
 ## Files Created or Modified
 - NEW `apps/desktop/src/server/headless.ts`
 - NEW `apps/desktop/src/server/cli.ts`
 - NEW `apps/desktop/vite.web.config.ts`
+- `README.md` (Phase 4 — "Run without Electron" section + cross-links)
 - NEW `docs/sessions/session-2026-06-29-headless-web-runtime.md` (this file)
 - `apps/desktop/src/main/server.ts` (static serving, opt-in gate)
 - `apps/desktop/src/renderer/lib/api.ts` (+`API_BASE_URL`)

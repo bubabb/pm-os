@@ -10,7 +10,7 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
-- **RESUME HERE (2026-06-29):** **Headless web runtime — Phase 1+2+3 DONE (uncommitted on `main`, gate GREEN).**
+- **RESUME HERE (2026-06-29):** **Headless web runtime — Phase 1-4 DONE (1-3 committed `ff9eabb`; Phase 4 README uncommitted; gate GREEN).**
   Driven by tester feedback: corporate policy bans Electron apps; they never reached the product
   (proxy killed the Electron binary download + better-sqlite3 Electron-ABI compile). Coupling audit:
   only **5 files import electron**, renderer uses **zero** Electron features → this is a packaging
@@ -36,10 +36,12 @@ and cross-task handoffs are `agent-state/handoffs/`.
     server-down error all work against the live API (the `sync` 500 = pre-existing **orphaned-token**
     decrypt, re-add the connection once — not a code bug). Gate GREEN **typecheck ✓ · lint ✓ · unit
     293/293 ✓**. Electron path untouched.
-  • **NEXT:** Phase 4 = README "Run without Electron" section + `pnpm creare`/`pnpm cli` docs; optional
-    CLI unit test (helpers not yet exported/guarded for import); OAuth-headless (BrowserWindow → loopback
-    Fastify route) deferred (connectors use PATs). Session log:
-    `docs/sessions/session-2026-06-29-headless-web-runtime.md`.
+  • **Phase 4 — README** done: new "Run without Electron (headless web app + CLI)" section
+    (`pnpm install --ignore-scripts && pnpm creare` → http://127.0.0.1:4321; `pnpm cli` reference;
+    CREARE_PORT/CREARE_API), plus intro/prereq/scripts/tester-notes cross-links. Uncommitted.
+  • **NEXT (optional):** CLI unit test (helpers not yet exported/guarded for import); OAuth-headless
+    (BrowserWindow → loopback Fastify route) deferred (connectors use PATs); package a one-shot
+    installer/`bin`. Session log: `docs/sessions/session-2026-06-29-headless-web-runtime.md`.
 - **(2026-06-12 EOD):** **Repo published + README + Mac packaging set up for an external tester.**
   Gate GREEN: typecheck 23/23 · unit **293/293** · lint 12/12 · desktop real `tsc -b`. `main` @ `93a717c`, 80 commits, tree clean.
   • **GitHub remote LIVE:** private repo **`https://github.com/bubabb/creare`** (`origin`/`main`, all 80 commits pushed).
