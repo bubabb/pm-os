@@ -1,4 +1,4 @@
-import { getToken } from './api'
+import { API_BASE_URL, getToken } from './api'
 
 type SseHandler = (payload: unknown) => void
 
@@ -19,7 +19,7 @@ export function connectSse(): void {
   if (es?.readyState === EventSource.OPEN) return
 
   // EventSource doesn't support custom headers — pass token as query param
-  es = new EventSource(`http://localhost:4321/events/stream?token=${encodeURIComponent(token)}`)
+  es = new EventSource(`${API_BASE_URL}/events/stream?token=${encodeURIComponent(token)}`)
 
   es.onmessage = (e) => {
     try {

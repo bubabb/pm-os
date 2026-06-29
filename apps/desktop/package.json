@@ -14,6 +14,10 @@
     "preview": "electron-vite preview",
     "pretest": "node ../../scripts/rebuild-better-sqlite3.mjs ensure node",
     "test": "vitest run",
+    "web:build": "vite build --config vite.web.config.ts",
+    "preserver": "node ../../scripts/rebuild-better-sqlite3.mjs ensure node",
+    "server": "tsx src/server/headless.ts",
+    "cli": "tsx src/server/cli.ts",
     "pree2e": "node ../../scripts/rebuild-better-sqlite3.mjs ensure electron",
     "e2e": "electron-vite build && playwright test",
     "lint": "eslint src",
@@ -33,6 +37,7 @@
     "@creare/shared": "workspace:*",
     "@creare/tool-registry": "workspace:*",
     "@fastify/cors": "^9.0.0",
+    "@fastify/static": "^7.0.0",
     "better-sqlite3": "^12.10.0",
     "@fastify/swagger": "^8.14.0",
     "@fastify/swagger-ui": "^3.0.0",
@@ -63,6 +68,7 @@
     "electron-vite": "^2.1.0",
     "playwright": "^1.43.0",
     "postcss": "^8.4.0",
+    "tsx": "^4.7.0",
     "vite": "^5.2.0",
     "vitest": "^1.4.0"
   }

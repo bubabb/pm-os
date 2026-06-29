@@ -5,13 +5,55 @@ This is the current-state pointer; the append-only detail log is
 `agent-state/agent-log.md`, per-domain state is `agent-state/domain-state/`,
 and cross-task handoffs are `agent-state/handoffs/`.
 
-**Updated:** 2026-06-11
+**Updated:** 2026-06-29
 
 ---
 
 ## STATUS NOW
-- **RESUME HERE (2026-06-12, NEWEST):** **All-connector access + correctness fixes, UI crash/focus fixes, import-by-URL.**
-  Gate GREEN: typecheck 23/23 · unit **293/293** · lint 12/12 · desktop real `tsc -b`. `main`, 77 commits, no GitHub remote yet.
+- **RESUME HERE (2026-06-29):** **Headless web runtime — Phase 1+2+3 DONE (uncommitted on `main`, gate GREEN).**
+  Driven by tester feedback: corporate policy bans Electron apps; they never reached the product
+  (proxy killed the Electron binary download + better-sqlite3 Electron-ABI compile). Coupling audit:
+  only **5 files import electron**, renderer uses **zero** Electron features → this is a packaging
+  change, not a rewrite. Built a **no-Electron "Creare Server"**: run the existing Fastify backend
+  headless (plain Node via `tsx`) and **serve the existing React SPA as a localhost web app**.
+  • **NEW** `apps/desktop/src/server/headless.ts` (runMigrations+startServer+scheduler+push-worker,
+    graceful shutdown, zero electron) · **NEW** `apps/desktop/vite.web.config.ts` (plain-Vite build of
+    the renderer → `out/web`, no electron at build) · `server.ts` serves `out/web` via `@fastify/static`
+    + SPA fallback, **opt-in `CREARE_SERVE_WEB=1`** so Electron is byte-for-byte unchanged · renderer
+    `API_BASE_URL` now same-origin over http, file:// fallback for Electron (**also fixes the ':4321
+    hardcode' P2**). Deps: `@fastify/static@^7` + `tsx@^4`. Scripts: `pnpm creare` = build packages →
+    build web → start (also `web:build`, `server`, `build:packages`).
+  • **One-command run (no Electron):** `pnpm install --ignore-scripts && pnpm creare` → open
+    `http://127.0.0.1:4321`. `--ignore-scripts` dodges the electron-binary download; `preserver`
+    ensures the **node** better-sqlite3 ABI.
+  • **Phase 3 — thin CLI** `apps/desktop/src/server/cli.ts` (run via `tsx`; `pnpm cli <cmd>`):
+    auth via /auth/sign-in dev-stub → JWT cached at `~/.creare/cli-token.json` (0600), 401 auto-reauth.
+    Commands: `health`, `projects [--all]`, `boards <p>`, `connections`, `sources <p>`, `status <p>`,
+    `sync <p> [source]`, `open`, `help`; `--json` raw output; friendly "server not running" on ECONNREFUSED.
+    Dependency-free (global fetch). No DB/ABI touch.
+  • **VERIFIED on Kali:** server boots, `/health` 200, web UI + assets served, SPA fallback 200,
+    API 404 stays JSON; CLI help/health/projects/connections/sources/boards/--json + token-cache +
+    server-down error all work against the live API (the `sync` 500 = pre-existing **orphaned-token**
+    decrypt, re-add the connection once — not a code bug). Gate GREEN **typecheck ✓ · lint ✓ · unit
+    293/293 ✓**. Electron path untouched.
+  • **NEXT:** Phase 4 = README "Run without Electron" section + `pnpm creare`/`pnpm cli` docs; optional
+    CLI unit test (helpers not yet exported/guarded for import); OAuth-headless (BrowserWindow → loopback
+    Fastify route) deferred (connectors use PATs). Session log:
+    `docs/sessions/session-2026-06-29-headless-web-runtime.md`.
+- **(2026-06-12 EOD):** **Repo published + README + Mac packaging set up for an external tester.**
+  Gate GREEN: typecheck 23/23 · unit **293/293** · lint 12/12 · desktop real `tsc -b`. `main` @ `93a717c`, 80 commits, tree clean.
+  • **GitHub remote LIVE:** private repo **`https://github.com/bubabb/creare`** (`origin`/`main`, all 80 commits pushed).
+    To share = invite collaborators in repo Settings. Git creds now global (`credential.helper store` → `~/.git-credentials`,
+    identity bubabb/bruna.gvasconcelos54@gmail.com) — pushing is prompt-free for any future repo.
+  • **README.md** at repo root (setup, `pnpm dev`, per-OS packaging, Gatekeeper notes, repo layout).
+  • **Packaging for the tester (brother-in-law, on macOS):** `apps/desktop/electron-builder.yml` mac target =
+    **universal dmg** (`arch: universal`) + `identity: null` (unsigned) → one `.dmg` runs on Apple Silicon AND Intel.
+    **NEXT STEP = on the Mac: `cd ~/projects/creare && pnpm install && pnpm --filter @creare/desktop package`** →
+    `apps/desktop/release/Creare-0.1.0-universal.dmg` → AirDrop to tester → he right-clicks→Open (Gatekeeper).
+    If the universal native-module (better-sqlite3) build fails: drop `arch: universal` to build for the local chip.
+    Mac prereq: `xcode-select --install`. Electron won't build/run in the agent sandbox — Mac build is the user's to run.
+  • (the connector + UI fixes below remain the substantive code state)
+- **(2026-06-12) All-connector access + correctness fixes, UI crash/focus fixes, import-by-URL.**
   • **Connector access (owned + shared/invited) + correctness deepreview (commit `f7aa17c`):** OneDrive now lists
     **shared-with-me** (was own-drive only) + real folder scoping; all listings paginate fully (were capped 100-200).
     **Jira P0:** migrated `/rest/api/3/search` (REMOVED from Jira Cloud → was silently syncing 0) → `/search/jql` w/

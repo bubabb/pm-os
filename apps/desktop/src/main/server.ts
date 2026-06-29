@@ -1,6 +1,9 @@
+import { existsSync } from 'fs'
+import { join } from 'path'
 import Fastify from 'fastify'
-import type { FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 import cors from '@fastify/cors'
+import fastifyStatic from '@fastify/static'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
 import { authRoutes } from './routes/auth'
@@ -31,6 +34,48 @@ const PORT = parseInt(process.env['CREARE_PORT'] ?? '4321', 10)
 // still leaks the full session token on every SSE connect in dev.
 function redactUrlToken(url: string): string {
   return url.replace(/([?&]token=)[^&]*/g, '$1[REDACTED]')
+}
+
+// Locate the built web UI (plain-Vite build → apps/desktop/out/web). Only the
+// headless "Creare Server" runtime serves the renderer over HTTP; the Electron
+// app loads it via loadFile and never hits this. Returns null when no build
+// exists (e.g. Electron-only checkout) so we register nothing and stay an API.
+function resolveWebDir(): string | null {
+  const override = process.env['CREARE_WEB_DIR']
+  const candidates = [
+    ...(override ? [override] : []),
+    join(__dirname, '../../out/web'), // running from src/main (tsx headless)
+    join(__dirname, '../web'), // running from out/main (bundled)
+  ]
+  return candidates.find((dir) => existsSync(join(dir, 'index.html'))) ?? null
+}
+
+// Serve the React SPA as static files with a fallback to index.html for any
+// non-API GET (the app uses HashRouter, so this is mostly belt-and-suspenders).
+// Registered AFTER the API routes, so every real route still wins; only unknown
+// paths fall through here.
+async function registerWebUi(app: FastifyInstance): Promise<void> {
+  // Opt-in: only the headless "Creare Server" runtime sets CREARE_SERVE_WEB.
+  // The Electron app loads the renderer via file:// and must NOT have static
+  // serving / a custom 404 handler grafted onto its API server.
+  if (process.env['CREARE_SERVE_WEB'] !== '1') return
+
+  const webDir = resolveWebDir()
+  if (!webDir) {
+    console.warn('[creare] CREARE_SERVE_WEB=1 but no web build found — run `pnpm web:build`')
+    return
+  }
+
+  await app.register(fastifyStatic, { root: webDir, prefix: '/', wildcard: false })
+
+  app.setNotFoundHandler((request, reply) => {
+    const wantsHtml =
+      request.method === 'GET' && (request.headers.accept ?? '').includes('text/html')
+    if (wantsHtml) return reply.sendFile('index.html')
+    return reply.code(404).send({ error: 'Not found' })
+  })
+
+  console.log(`[creare] serving web UI from ${webDir}`)
 }
 
 const app = Fastify({
@@ -107,6 +152,9 @@ export async function startServer(): Promise<void> {
   await app.register(toolsRoutes)
   await app.register(evalRoutes)
   await app.register(memoryRoutes)
+
+  // Serve the web UI last so every API route takes precedence (headless mode).
+  await registerWebUi(app)
 
   await app.listen({ port: PORT, host: '127.0.0.1' })
   console.log(`[creare] API server running on http://127.0.0.1:${PORT}`)

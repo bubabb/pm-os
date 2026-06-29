@@ -1,4 +1,12 @@
-const BASE_URL = 'http://localhost:4321'
+// When the UI is served over HTTP (the headless "Creare Server" web runtime),
+// talk to the same origin it was loaded from — so the port is whatever the
+// server used, not a hardcoded 4321. Under Electron the renderer loads from
+// file://, which has no usable origin, so fall back to the local API port.
+export const API_BASE_URL =
+  typeof window !== 'undefined' && window.location.protocol.startsWith('http')
+    ? window.location.origin
+    : 'http://localhost:4321'
+const BASE_URL = API_BASE_URL
 const TOKEN_KEY = 'creare_auth_token'
 
 export function getToken(): string | null {

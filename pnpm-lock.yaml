@@ -71,6 +71,9 @@ importers:
       '@fastify/cors':
         specifier: ^9.0.0
         version: 9.0.1
+      '@fastify/static':
+        specifier: ^7.0.0
+        version: 7.0.4
       '@fastify/swagger':
         specifier: ^8.14.0
         version: 8.15.0
@@ -156,6 +159,9 @@ importers:
       postcss:
         specifier: ^8.4.0
         version: 8.5.15
+      tsx:
+        specifier: ^4.7.0
+        version: 4.22.4
       vite:
         specifier: ^5.2.0
         version: 5.4.21(@types/node@20.19.41)
