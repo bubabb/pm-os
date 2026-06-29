@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import { getBrowserWindowCtor } from '../electron-optional'
 import { randomBytes, createHash } from 'crypto'
 
 // Real OAuth (browser-window flow) for app sign-in. GitHub + Microsoft Entra.
@@ -95,6 +95,17 @@ function authorize(cfg: OAuthConfig, state: string, codeChallenge: string): Prom
     code_challenge_method: 'S256',
   })
   const authUrl = `${cfg.authUrl}?${params.toString()}`
+
+  // OAuth sign-in needs an Electron window to intercept the loopback redirect.
+  // The headless server has no Electron — fail clearly instead of crashing on import.
+  const BrowserWindow = getBrowserWindowCtor()
+  if (!BrowserWindow) {
+    return Promise.reject(
+      new Error(
+        'OAuth sign-in requires the Creare desktop app (Electron). In headless mode, authenticate connectors with a Personal Access Token instead.',
+      ),
+    )
+  }
 
   const win = new BrowserWindow({
     width: 520,

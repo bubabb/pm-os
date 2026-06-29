@@ -1,5 +1,5 @@
-import { safeStorage } from 'electron'
 import { SignJWT, jwtVerify } from 'jose'
+import { getSafeStorage } from '../electron-optional'
 import { getDb } from '@creare/database'
 import { users } from '@creare/database'
 import { generateId } from '@creare/shared'
@@ -67,7 +67,8 @@ export function getJwtSecret(): Uint8Array {
 
   // 2. Legacy keyring-wrapped secret — migrate the SAME value to stable raw storage so
   //    a future keyring hiccup can't lose it (existing sessions keep validating).
-  if (keys.jwtSecretBlob && safeStorage.isEncryptionAvailable()) {
+  const safeStorage = getSafeStorage()
+  if (keys.jwtSecretBlob && safeStorage?.isEncryptionAvailable()) {
     try {
       const raw = safeStorage.decryptString(Buffer.from(keys.jwtSecretBlob, 'base64'))
       if (raw.length === 64) {

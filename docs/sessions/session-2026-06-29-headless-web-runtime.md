@@ -81,10 +81,37 @@ AND a thin CLI (CLI = next session). This session delivered Phase 1 + 2.
   command reference (+ `CREARE_API`). Cross-linked from the intro, prerequisites (macOS CLT now
   noted as Electron-only), useful-scripts, and tester-notes. Phases 1–3 committed as `ff9eabb`.
 
+## Fresh-clone verification — caught + fixed a real bug
+Ran the tester's exact path: `git clone` from origin → `pnpm install --ignore-scripts`
+→ `pnpm creare`. Install (7.8s, no Electron download), `build:packages` (11/11, 0 cached),
+`web:build`, and the first-boot `better-sqlite3` Node-ABI compile all succeeded — **then the
+server crashed**:
+`Error: Electron failed to install correctly` at `auth/auth-service.ts:1`.
+
+**Root cause:** `auth-service.ts`, `secrets/secrets-service.ts`, and `auth/oauth-service.ts`
+each did a top-level `import { … } from 'electron'`. With `--ignore-scripts` there's no Electron
+binary, so `require('electron')` throws at module load — and the headless server imports all
+three transitively (auth + secrets routes). The dev machine had Electron installed, which masked
+it entirely. This is exactly why a fresh clone matters.
+
+**Fix:** new `apps/desktop/src/main/electron-optional.ts` exposing `getSafeStorage()` and
+`getBrowserWindowCtor()` — lazy `require('electron')` in a try/catch, returning null when absent
+(`import type` only, so no eager load). `safeStorage` usage (one-time legacy key migration) now
+no-ops headless; the OAuth flow throws a clear "use a PAT in headless" at call-time instead of
+crashing on import. Only `main/index.ts` (the Electron-only entry, never in the headless chain)
+still imports electron eagerly.
+
+**Re-verified** under the real condition (fix copied into the `--ignore-scripts` clone, no Electron
+binary): server boots, `/health` 200, web UI + assets served, CLI `health`/`projects` work. Gate
+green: typecheck · lint · unit 293/293.
+
 ## Files Created or Modified
 - NEW `apps/desktop/src/server/headless.ts`
 - NEW `apps/desktop/src/server/cli.ts`
+- NEW `apps/desktop/src/main/electron-optional.ts` (lazy/optional Electron for headless)
 - NEW `apps/desktop/vite.web.config.ts`
+- `apps/desktop/src/main/auth/auth-service.ts` · `secrets/secrets-service.ts` ·
+  `auth/oauth-service.ts` (top-level electron import → lazy via electron-optional)
 - `README.md` (Phase 4 — "Run without Electron" section + cross-links)
 - NEW `docs/sessions/session-2026-06-29-headless-web-runtime.md` (this file)
 - `apps/desktop/src/main/server.ts` (static serving, opt-in gate)

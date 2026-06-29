@@ -1,5 +1,5 @@
-import { safeStorage } from 'electron'
 import { getDb, secrets, connections, globalSettings } from '@creare/database'
+import { getSafeStorage } from '../electron-optional'
 import { generateId } from '@creare/shared'
 import { eq, and } from 'drizzle-orm'
 import { readKeysFile, writeKeysFile } from '../auth/auth-service'
@@ -47,7 +47,8 @@ function loadOrCreateMasterKeyBytes(): Uint8Array {
   // 2. Legacy keyring-wrapped key — migrate the SAME key to stable raw storage. This
   //    preserves every existing encrypted secret (it's the same key, just stored so a
   //    keyring hiccup can't lose it).
-  if (keys.masterKeyBlob && safeStorage.isEncryptionAvailable()) {
+  const safeStorage = getSafeStorage()
+  if (keys.masterKeyBlob && safeStorage?.isEncryptionAvailable()) {
     try {
       const decrypted = safeStorage.decryptString(Buffer.from(keys.masterKeyBlob, 'base64'))
       const candidate = Buffer.from(decrypted, 'base64')

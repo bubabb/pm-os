@@ -36,6 +36,17 @@ and cross-task handoffs are `agent-state/handoffs/`.
     server-down error all work against the live API (the `sync` 500 = pre-existing **orphaned-token**
     decrypt, re-add the connection once — not a code bug). Gate GREEN **typecheck ✓ · lint ✓ · unit
     293/293 ✓**. Electron path untouched.
+  • **FRESH-CLONE BUG FOUND + FIXED (critical for the no-Electron promise):** a clean
+    `git clone` + `pnpm install --ignore-scripts` + `pnpm creare` **crashed** — `auth-service.ts`,
+    `secrets-service.ts`, `oauth-service.ts` did a top-level `import … from 'electron'`, and with
+    no Electron binary installed `require('electron')` throws "Electron failed to install correctly"
+    at module load (the headless server imports these via the auth/secrets routes). Dev box masked
+    it (Electron was installed). **Fix:** new `apps/desktop/src/main/electron-optional.ts`
+    (`getSafeStorage()`/`getBrowserWindowCtor()` — lazy `require` in try/catch, null when absent;
+    `import type` only). safeStorage now optional (skips one-time legacy key migration headless);
+    OAuth throws a clear "use a PAT in headless" at call-time instead of crashing on import. Only
+    `index.ts` (the Electron-only entry, never in the headless chain) still imports electron eagerly.
+    **VERIFIED:** fresh `--ignore-scripts` clone now boots + serves (health/web/asset 200, CLI works).
   • **Phase 4 — README** done: new "Run without Electron (headless web app + CLI)" section
     (`pnpm install --ignore-scripts && pnpm creare` → http://127.0.0.1:4321; `pnpm cli` reference;
     CREARE_PORT/CREARE_API), plus intro/prereq/scripts/tester-notes cross-links. Uncommitted.
