@@ -8,9 +8,11 @@ import { eq } from 'drizzle-orm'
 interface SignInBody { provider: 'github' | 'entra' }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
-  // Sign-in: real OAuth browser-window flow when the provider is configured via
-  // env vars (PMOS_<PROVIDER>_CLIENT_ID/SECRET); otherwise falls back to the
-  // Phase 1 dev-user stub so development works without registered OAuth apps.
+  // Sign-in. Headless Pm.Os signs in via the dev-stub (interactive OAuth needs a
+  // desktop browser window — see oauth-service). The dev-stub mints an ADMIN JWT with
+  // no credential, so it is gated behind an explicit PMOS_DEV_AUTH=1 opt-in and takes
+  // PRECEDENCE — a stray PMOS_<PROVIDER>_CLIENT_ID env var can't lock out local sign-in
+  // by routing to an OAuth flow that can't complete headless.
   app.post<{ Body: SignInBody }>(
     '/auth/sign-in',
     async (request: FastifyRequest<{ Body: SignInBody }>, reply) => {
@@ -19,10 +21,20 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Invalid provider' })
       }
 
-      const oauthConfig = getOAuthConfig(provider)
       let user: User
       let method: 'oauth' | 'dev-stub'
-      if (oauthConfig) {
+      if (process.env['PMOS_DEV_AUTH'] === '1') {
+        user = await signIn(provider)
+        method = 'dev-stub'
+      } else {
+        const oauthConfig = getOAuthConfig(provider)
+        if (!oauthConfig) {
+          return reply.code(401).send({
+            error: 'auth_not_configured',
+            message:
+              'Sign-in is not configured. Set PMOS_DEV_AUTH=1 for local dev sign-in, or authenticate connectors with a Personal Access Token.',
+          })
+        }
         try {
           const profile = await performOAuthFlow(provider, oauthConfig)
           user = await upsertOAuthUser(profile)
@@ -31,18 +43,6 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           const message = err instanceof Error ? err.message : 'OAuth sign-in failed'
           return reply.code(401).send({ error: message })
         }
-      } else {
-        // No OAuth app configured. The dev-stub mints an ADMIN JWT with no
-        // credential, so it is gated behind an explicit opt-in env var and must
-        // never be reachable in a real deployment.
-        if (process.env['PMOS_DEV_AUTH'] !== '1') {
-          return reply.code(401).send({
-            error: 'auth_not_configured',
-            message: 'OAuth is not configured. Set PMOS_DEV_AUTH=1 for local dev sign-in.',
-          })
-        }
-        user = await signIn(provider)
-        method = 'dev-stub'
       }
 
       const token = await createSessionToken(user.id)

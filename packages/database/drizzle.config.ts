@@ -1,8 +1,11 @@
 import type { Config } from 'drizzle-kit'
 import { join } from 'path'
-import { homedir } from 'os'
+import { ensurePmosDataDir } from '@pm-os/shared'
 
-const dbPath = join(homedir(), '.pmos', 'pmos.db')
+// Migrate a legacy ~/.creare install (and ensure ~/.pmos exists) BEFORE drizzle-kit
+// opens the DB — otherwise db:generate/migrate/push on a not-yet-migrated machine would
+// operate on a fresh empty pmos.db alongside the orphaned legacy data.
+const dbPath = join(ensurePmosDataDir(), 'pmos.db')
 
 export default {
   schema: './src/schema.ts',
