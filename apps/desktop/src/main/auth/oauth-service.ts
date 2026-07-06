@@ -11,9 +11,9 @@ import { randomBytes, createHash } from 'crypto'
 //   Entra:  PMOS_ENTRA_CLIENT_ID, PMOS_ENTRA_CLIENT_SECRET, [PMOS_ENTRA_TENANT_ID=common]
 //   Optional: PMOS_OAUTH_REDIRECT_URI (default http://localhost:4321/auth/oauth/callback)
 //
-// The redirect URI must exactly match the one registered on the OAuth app. We do
-// not run an HTTP listener for it — the Electron BrowserWindow's navigation to the
-// loopback URL is intercepted in-process before the request is ever sent.
+// NOTE: interactive sign-in (capturing the redirect) is unavailable headless — see
+// authorize() below. getOAuthConfig + the token/profile helpers are kept for a future
+// non-interactive code source; today, connectors use PATs and app sign-in uses the dev-stub.
 
 export type OAuthProvider = 'github' | 'entra'
 
@@ -165,8 +165,9 @@ async function fetchEntraProfile(accessToken: string): Promise<OAuthProfile> {
   return { email, name: me.displayName ?? email, avatarUrl: null }
 }
 
-// Runs the full browser-window OAuth flow and returns the authenticated profile.
-// Must be called from the main process (uses BrowserWindow).
+// Runs the OAuth code flow and returns the authenticated profile. The interactive
+// `authorize()` step is unavailable headless (see its note) and rejects, so this only
+// completes if a non-interactive code source is ever wired in.
 export async function performOAuthFlow(provider: OAuthProvider, cfg: OAuthConfig): Promise<OAuthProfile> {
   const state = randomBytes(16).toString('hex')
   const { verifier, challenge } = pkcePair()
