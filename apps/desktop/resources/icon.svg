@@ -6,9 +6,13 @@
     </linearGradient>
   </defs>
   <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#bg)"/>
-  <!-- TODO(branding): glyph below is still the legacy "C" — redesign the mark for Pm.Os -->
-  <path d="M176 92
-           a56 56 0 1 0 0 72"
-        fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round"/>
-  <circle cx="180" cy="128" r="13" fill="#a5b4fc"/>
+  <!-- Pm.Os monogram: a "P" (stem + bowl) with the accent dot standing in for the "." -->
+  <g fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <!-- stem -->
+    <path d="M84 186 L84 72"/>
+    <!-- bowl -->
+    <path d="M84 72 A38 33 0 0 1 84 138"/>
+  </g>
+  <!-- accent dot = the "." in Pm.Os -->
+  <circle cx="176" cy="176" r="15" fill="#a5b4fc"/>
 </svg>
