@@ -30,11 +30,19 @@ const TEMPLATE_TO_PMOS: Record<TemplateStatus, PmosStatus> = {
   doing: 'in_progress',
   review: 'waiting_approval',
   done: 'completed',
-  blocked: 'pending',
+  // `blocked` maps to `waiting_approval`, NOT `pending`: getReadyTasks() only
+  // returns `pending` tasks, so a blocked task must never be represented as
+  // pending (that would surface it as runnable). `waiting_approval` is
+  // non-runnable and semantically "waiting on something".
+  blocked: 'waiting_approval',
 }
 
 // Reverse, best-effort — the pmos vocabulary is wider than the template's, so
-// several pmos statuses collapse onto a single template status.
+// several pmos statuses collapse onto a single template status. Note both
+// `blocked` and `review` map TO `waiting_approval`; reconcileTemplateStatus keeps
+// an existing file's own status (blocked↔blocked, review↔review) when it still
+// round-trips, so only a brand-new file from a `waiting_approval` task uses this
+// default — `review` (the more common "ready for a look" case).
 const PMOS_TO_TEMPLATE: Record<PmosStatus, TemplateStatus> = {
   pending: 'todo',
   in_progress: 'doing',

@@ -174,8 +174,24 @@ interface ApiTask {
   description: string | null
   status: PmosStatus
   dueDate: string | null
+  assigneeId: string | null
 }
 interface ApiProject { id: string; name: string }
+interface ApiUser { id: string; name: string; email: string }
+
+// Best-effort, SAFE owner→assignee linkage. There is NO user list / search /
+// project-members endpoint (only GET /users/me), so the ONLY user we can resolve
+// a freeform `owner` string to is the authenticated user. We match `owner`
+// exactly against that user's name or email and, on a hit, ALSO set assigneeId
+// (a real users FK) — never creating a user, never guessing an id. Any other
+// owner (including `unassigned` and agent ids) leaves assigneeId untouched.
+// Broader linkage is deferred until a members/user-lookup endpoint exists.
+function resolveAssignee(owner: string, me: ApiUser | null): string | null {
+  if (!me) return null
+  const o = owner.trim()
+  if (o.length === 0 || o === 'unassigned') return null
+  return o === me.name || o === me.email ? me.id : null
+}
 
 // Resolves the pmos project for a directory: honour an existing .pmos-project.json,
 // else find-or-create a project by name and persist the pointer. Never writes a
@@ -257,6 +273,11 @@ async function tasksImport(projectDir: string, nameFlag: string | undefined): Pr
     if (sid) bySource.set(sid, t)
   }
 
+  // The authenticated user — the only user we can safely resolve an owner to
+  // (no members/user-list endpoint). Best-effort: skip linkage if unavailable.
+  let me: ApiUser | null = null
+  try { me = await api<ApiUser>('/users/me') } catch { me = null }
+
   let created = 0
   let updated = 0
   let unchanged = 0
@@ -264,6 +285,7 @@ async function tasksImport(projectDir: string, nameFlag: string | undefined): Pr
     const description = buildDescription(md)
     const incomingStatus = templateStatusToPmos(md.status)
     const due = resolveDue(md.sourceId, md.due, (m) => console.error(m))
+    const assigneeId = resolveAssignee(md.owner, me) // null unless owner == the auth user
     const match = bySource.get(md.sourceId)
 
     if (match) {
@@ -271,6 +293,7 @@ async function tasksImport(projectDir: string, nameFlag: string | undefined): Pr
       // re-run neither emits an event nor resets startedAt/completedAt.
       const patch: {
         status?: PmosStatus; title?: string; description?: string; dueDate?: string | null
+        assigneeId?: string
       } = {}
       if (match.status !== incomingStatus) {
         if (statusChangeAllowed(match.status, incomingStatus)) {
@@ -285,6 +308,9 @@ async function tasksImport(projectDir: string, nameFlag: string | undefined): Pr
       if (match.description !== description) patch.description = description
       if (due.kind === 'set' && match.dueDate !== due.value) patch.dueDate = due.value
       else if (due.kind === 'clear' && match.dueDate !== null) patch.dueDate = null
+      // Additive only: link when the owner resolves and differs; never CLEAR an
+      // existing assignee just because this owner didn't resolve.
+      if (assigneeId !== null && match.assigneeId !== assigneeId) patch.assigneeId = assigneeId
 
       if (Object.keys(patch).length === 0) {
         unchanged++
@@ -296,12 +322,15 @@ async function tasksImport(projectDir: string, nameFlag: string | undefined): Pr
         updated++
       }
     } else {
-      const body: { title: string; description: string; type: 'human'; dueDate?: string } = {
+      const body: {
+        title: string; description: string; type: 'human'; dueDate?: string; assigneeId?: string
+      } = {
         title: md.title,
         description,
         type: 'human',
       }
       if (due.kind === 'set') body.dueDate = due.value
+      if (assigneeId !== null) body.assigneeId = assigneeId
       const task = await api<ApiTask>(`/projects/${projectId}/tasks`, {
         method: 'POST',
         body: JSON.stringify(body),
@@ -321,6 +350,7 @@ async function tasksImport(projectDir: string, nameFlag: string | undefined): Pr
         description,
         status: incomingStatus,
         dueDate: due.kind === 'set' ? due.value : null,
+        assigneeId,
       })
       created++
     }
