@@ -1,5 +1,4 @@
 import { SignJWT, jwtVerify } from 'jose'
-import { getSafeStorage } from '../electron-optional'
 import { getDb } from '@pm-os/database'
 import { users } from '@pm-os/database'
 import { generateId } from '@pm-os/shared'
@@ -65,36 +64,14 @@ export function getJwtSecret(): Uint8Array {
     }
   }
 
-  // 2. Legacy keyring-wrapped secret — migrate the SAME value to stable raw storage so
-  //    a future keyring hiccup can't lose it (existing sessions keep validating).
-  const safeStorage = getSafeStorage()
-  if (keys.jwtSecretBlob && safeStorage?.isEncryptionAvailable()) {
-    try {
-      const raw = safeStorage.decryptString(Buffer.from(keys.jwtSecretBlob, 'base64'))
-      if (raw.length === 64) {
-        writeKeysFile({ jwtSecretRaw: Buffer.from(raw, 'utf8').toString('base64') })
-        _jwtSecret = new TextEncoder().encode(raw)
-        return _jwtSecret
-      }
-    } catch {
-      // fall through to generate — no recoverable secret
-    }
-  }
-
-  // Headless data-loss guard: a legacy safeStorage-wrapped secret exists but there is
-  // no raw secret and no safeStorage to unwrap it (running headless, without Electron).
-  // Generating a new secret here would silently invalidate every outstanding session.
-  // Refuse instead — the desktop app can migrate the blob, or the operator can opt into
-  // discarding it (and signing everyone out) with PMOS_ALLOW_KEY_REGEN=1.
-  if (
-    keys.jwtSecretBlob &&
-    !(safeStorage?.isEncryptionAvailable()) &&
-    process.env['PMOS_ALLOW_KEY_REGEN'] !== '1'
-  ) {
+  // Legacy data-loss guard: an old keyring-wrapped secret exists but there is no raw
+  // secret. Pm.Os is headless-only (no Electron/OS-keyring), so the blob can no longer be
+  // unwrapped, and generating a new secret would silently invalidate every outstanding
+  // session. Refuse unless the operator opts into discarding it with PMOS_ALLOW_KEY_REGEN=1.
+  if (keys.jwtSecretBlob && process.env['PMOS_ALLOW_KEY_REGEN'] !== '1') {
     throw new Error(
-      '[pm-os] Legacy encrypted JWT secret cannot be unwrapped without the OS keyring ' +
-        '(safeStorage unavailable — running headless). Run the desktop app once to migrate ' +
-        'it, or set PMOS_ALLOW_KEY_REGEN=1 to discard the old secret and all sessions.',
+      '[pm-os] Legacy keyring-wrapped JWT secret found but no raw secret, and headless Pm.Os ' +
+        'cannot unwrap it. Set PMOS_ALLOW_KEY_REGEN=1 to discard the old secret and all sessions.',
     )
   }
 

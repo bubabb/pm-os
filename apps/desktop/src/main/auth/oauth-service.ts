@@ -1,4 +1,3 @@
-import { getBrowserWindowCtor } from '../electron-optional'
 import { randomBytes, createHash } from 'crypto'
 
 // Real OAuth (browser-window flow) for app sign-in. GitHub + Microsoft Entra.
@@ -81,99 +80,22 @@ function pkcePair(): { verifier: string; challenge: string } {
   return { verifier, challenge }
 }
 
-// Opens a modal OAuth window, intercepts the loopback redirect, and returns the
-// authorization code. Rejects if the user closes the window or the provider
-// returns an error / mismatched state.
+// Interactive authorization-code capture. The original flow intercepted the loopback
+// redirect inside an Electron BrowserWindow; Pm.Os is now headless-only (no Electron),
+// so there is no in-process window to intercept the redirect. This flow is therefore
+// unavailable — connectors authenticate with a Personal Access Token, and app sign-in
+// uses the dev-stub (PMOS_DEV_AUTH=1). Kept as a clear, throwing stub so a misconfigured
+// OAuth env fails with an actionable message instead of a crash.
 function authorize(cfg: OAuthConfig, state: string, codeChallenge: string): Promise<string> {
-  const params = new URLSearchParams({
-    client_id: cfg.clientId,
-    redirect_uri: cfg.redirectUri,
-    response_type: 'code',
-    scope: cfg.scopes,
-    state,
-    code_challenge: codeChallenge,
-    code_challenge_method: 'S256',
-  })
-  const authUrl = `${cfg.authUrl}?${params.toString()}`
-
-  // OAuth sign-in needs an Electron window to intercept the loopback redirect.
-  // The headless server has no Electron — fail clearly instead of crashing on import.
-  const BrowserWindow = getBrowserWindowCtor()
-  if (!BrowserWindow) {
-    return Promise.reject(
-      new Error(
-        'OAuth sign-in requires the Pm.Os desktop app (Electron). In headless mode, authenticate connectors with a Personal Access Token instead.',
-      ),
-    )
-  }
-
-  const win = new BrowserWindow({
-    width: 520,
-    height: 720,
-    show: true,
-    autoHideMenuBar: true,
-    title: 'Sign in',
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-    },
-  })
-
-  return new Promise<string>((resolve, reject) => {
-    let settled = false
-
-    const finish = (fn: () => void) => {
-      if (settled) return
-      settled = true
-      win.removeAllListeners('closed')
-      if (!win.isDestroyed()) win.close()
-      fn()
-    }
-
-    const handleRedirect = (url: string, preventDefault: () => void): void => {
-      let parsed: URL
-      try { parsed = new URL(url) } catch { return }
-      const target = new URL(cfg.redirectUri)
-      // Exact origin + path match (not a prefix) so a provider-controlled URL like
-      // <redirectUri>.evil.example can't satisfy the check.
-      if (parsed.origin !== target.origin || parsed.pathname !== target.pathname) return
-      // will-redirect and will-navigate can both fire for the same callback URL; once
-      // settled, ignore the second so we don't preventDefault on an already-closing window.
-      if (settled) return
-      preventDefault()
-      const error = parsed.searchParams.get('error')
-      if (error) {
-        const desc = parsed.searchParams.get('error_description') ?? error
-        finish(() => reject(new Error(`OAuth error: ${desc}`)))
-        return
-      }
-      const code = parsed.searchParams.get('code')
-      const returnedState = parsed.searchParams.get('state')
-      if (returnedState !== state) {
-        finish(() => reject(new Error('OAuth state mismatch — possible CSRF')))
-        return
-      }
-      if (!code) {
-        finish(() => reject(new Error('OAuth response missing authorization code')))
-        return
-      }
-      finish(() => resolve(code))
-    }
-
-    win.webContents.on('will-redirect', (event, url) => handleRedirect(url, () => event.preventDefault()))
-    win.webContents.on('will-navigate', (event, url) => handleRedirect(url, () => event.preventDefault()))
-    win.on('closed', () => {
-      if (!settled) {
-        settled = true
-        reject(new Error('Sign-in window was closed'))
-      }
-    })
-
-    win.loadURL(authUrl).catch((err) => {
-      finish(() => reject(err instanceof Error ? err : new Error(String(err))))
-    })
-  })
+  void cfg
+  void state
+  void codeChallenge
+  return Promise.reject(
+    new Error(
+      'Interactive OAuth sign-in is not available in headless Pm.Os (no desktop browser window to ' +
+        'intercept the redirect). Use a Personal Access Token for connectors, or the dev sign-in (PMOS_DEV_AUTH=1).',
+    ),
+  )
 }
 
 async function exchangeCode(cfg: OAuthConfig, code: string, codeVerifier: string): Promise<string> {

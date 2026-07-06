@@ -1,7 +1,7 @@
 # Pm.Os — Root Claude Instructions
 
 ## About This Project
-**Pm.Os** is an agentic DevOps platform for AI-native software teams. Local-first Electron desktop app. Latin: "to create."
+**Pm.Os** is an agentic DevOps platform for AI-native software teams. Local-first, **headless** — a Fastify localhost API + a React SPA served as a local web app, plus a CLI. (Electron was removed 2026-07-06; no desktop shell.)
 
 **Master reference:** Always read `project-scope.md` before making any architectural, feature, or UX decision.  
 **Glossary:** Read `docs/GLOSSARY.md` before writing any code — all domain terms must match canonical definitions.  
@@ -12,7 +12,7 @@
 ## Monorepo Structure
 
 ```
-apps/desktop/          → Electron app (main, preload, renderer)
+apps/desktop/          → Headless runtime (main = Fastify API + SQLite; server = headless entry + CLI; renderer = React SPA served as a local web app)
 packages/
   agent-orchestration/ → Domain 1: DAG task engine, agent workspaces
   tool-registry/       → Domain 2: versioned AI tool artifacts
@@ -32,12 +32,12 @@ agent-state/           → Inter-agent communication, append-only log
 ## Tech Stack (Approved 2026-06-02)
 - **Language:** TypeScript everywhere
 - **Monorepo:** Turborepo + pnpm
-- **Desktop:** Electron + electron-vite + Electron Forge
+- **Runtime:** Headless Node (`tsx`) — Fastify API + a Vite-built React SPA served over localhost (`@fastify/static`); thin CLI. (No Electron — removed 2026-07-06.)
 - **UI:** React + Tailwind CSS + shadcn/ui
 - **State:** Zustand + TanStack Query
 - **API:** Fastify (localhost HTTP, v1)
 - **Real-time:** Server-Sent Events (SSE)
-- **Agent execution:** Electron Utility Processes
+- **Agent execution:** (planned) Node worker/child processes
 - **Database:** SQLite + Drizzle ORM
 - **Event log:** Append-only SQLite table
 - **AI:** Model-agnostic wrapper (packages/ai-sdk)

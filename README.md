@@ -1,8 +1,8 @@
 # Pm.Os
 
-**Local-first agentic DevOps platform** — a desktop app for managing software work, with **two-way board sync** to GitHub Projects, Jira, and Notion ("Azure DevOps, but better"). Import a remote board, then create / move / edit / close / comment on cards *from Pm.Os* and have the changes push back to the source.
+**Local-first agentic DevOps platform** — a local app for managing software work, with **two-way board sync** to GitHub Projects, Jira, and Notion ("Azure DevOps, but better"). Import a remote board, then create / move / edit / close / comment on cards *from Pm.Os* and have the changes push back to the source.
 
-TypeScript monorepo (Turborepo + pnpm). Everything runs locally — your data stays on your machine. Run it as an **Electron desktop app** or, on machines where Electron isn't allowed, as a **headless local web app + CLI** ([jump to setup](#run-without-electron-headless-web-app--cli)) — same backend either way.
+TypeScript monorepo (Turborepo + pnpm). Everything runs locally — your data stays on your machine. Pm.Os runs **headless**: a Fastify localhost API serving a React SPA as a local web app, plus a CLI. No Electron, no desktop binary — just a browser tab.
 
 ---
 
@@ -24,41 +24,26 @@ TypeScript monorepo (Turborepo + pnpm). Everything runs locally — your data st
   - **macOS:** Xcode Command Line Tools — `xcode-select --install`
   - **Debian/Ubuntu/Kali:** `sudo apt install build-essential python3`
   - **Windows:** the “Desktop development with C++” workload (Visual Studio Build Tools) + Python 3
-  > The Electron desktop app compiles the same module against Electron's ABI, so this toolchain is needed for either runtime.
 - Reasoning/AI features (dashboard auto-triage, digests) use the **Claude Code CLI** logged into a Claude membership. **Optional** — board sync works fully without it.
 
 ---
 
-## Run in development
+## Run it locally
 ```bash
 git clone https://github.com/bubabb/pm-os.git
 cd pm-os
 pnpm install
-pnpm dev          # launches the Electron app (Fastify API on 127.0.0.1:4321)
-```
-First run auto-signs-in a local user. Add a token on the **Connections** page to start syncing.
-
----
-
-## Run without Electron (headless web app + CLI)
-
-**Can't run an Electron app** (corporate policy, locked-down VM, or a proxy that blocks the Electron binary download / native-module compile)? Run the **exact same product** as a local web app — the backend is a plain localhost API and the UI is a normal browser SPA, so no Electron is involved.
-
-```bash
-git clone https://github.com/bubabb/pm-os.git
-cd pm-os
-pnpm install --ignore-scripts        # skips the Electron binary download
-pnpm pm-os                          # builds packages + web UI, starts the server
+pnpm pm-os        # builds the packages + web UI, then starts the server
 ```
 
-Then open **http://127.0.0.1:4321** in any browser. That's the full app — same Boards, sync, dashboard, everything.
+Then open **http://127.0.0.1:4321** in any browser — that's the full app (Boards, sync, dashboard, everything). First run auto-signs-in a local user; add a token on the **Connections** page to start syncing.
 
 > **First run takes ~30–60s** while the native SQLite module compiles (needs a [C/C++ toolchain](#prerequisites)). You'll see build output, then `Pm.Os is running` — wait for that line, then open the URL. Subsequent boots are instant.
 
-- **Why `--ignore-scripts`:** it skips Electron's post-install binary download (the thing a corporate proxy usually kills). The headless runtime never needs the Electron binary, and the native SQLite module is built from source for the **Node** ABI — no Electron headers, nothing fetched from `electronjs.org`.
-- **One runtime, one command.** `pnpm pm-os` = build the workspace packages → build the web UI (plain Vite) → start the Node server. Re-run it any time; rebuilds are cached.
+- **One command.** `pnpm pm-os` = build the workspace packages → build the web UI (Vite) → start the Node server. Re-run it any time; rebuilds are cached.
+- **Behind a strict proxy?** `pnpm install --ignore-scripts` skips the native-module prebuilt download; the SQLite module then compiles from source on first `pnpm pm-os`.
 - **Custom port:** `PMOS_PORT=5000 pnpm pm-os`. The UI is served same-origin, so it follows the port automatically.
-- **Stop:** `Ctrl+C`. Your data lives in `~/.pmos/` exactly as with the desktop app.
+- **Stop:** `Ctrl+C`. Your data lives in `~/.pmos/`.
 
 ### CLI
 
@@ -78,44 +63,11 @@ pnpm cli <command> --json          # raw JSON instead of a table (for scripting)
 
 Point it at a non-default server with `PMOS_PORT=5000 pnpm cli …` or a full URL via `PMOS_API=http://host:port`.
 
-> The Electron desktop app and this headless runtime are the **same backend** — pick whichever your environment allows. Running headless does not change or disable any feature.
-
----
-
-## Build a desktop installer
-
-> Built with [electron-builder](https://www.electron.build/). Each installer is produced **on the matching OS** (a Mac `.dmg` must be built on a Mac, a Windows installer on Windows). Installers are **unsigned** (no developer certificate) — fine for internal testing; see the Gatekeeper/SmartScreen notes below.
-
-### macOS (`.dmg`) — universal (Apple Silicon **and** Intel)
-```bash
-cd pm-os
-pnpm install
-pnpm --filter @pm-os/desktop package
-```
-- Output: **`apps/desktop/release/Pm.Os-0.1.0-universal.dmg`**
-- The Mac build is **universal by default** — the one `.dmg` runs on any Mac, so it doesn't need to match the tester's chip.
-- **Installing it (unsigned):** open the `.dmg`, drag **Pm.Os** to Applications. On first launch macOS will block it → **right-click Pm.Os.app → Open → Open** (once). If it's stubborn: `xattr -cr /Applications/Pm.Os.app`.
-
-### Linux (`.AppImage` + `.deb`)
-```bash
-pnpm --filter @pm-os/desktop package
-# → apps/desktop/release/Pm.Os-0.1.0.AppImage  (chmod +x, then run)
-```
-
-### Windows (`.exe` installer) — run on Windows
-```bash
-pnpm --filter @pm-os/desktop package
-# → apps/desktop/release/Pm.Os Setup 0.1.0.exe
-```
-First launch shows SmartScreen → **More info → Run anyway** (once).
-
-> Faster smoke test (unpacked app dir, no installer): `pnpm --filter @pm-os/desktop package:dir`
-
 ---
 
 ## Repo layout
 ```
-apps/desktop/          Electron app (main = Fastify API + SQLite; renderer = React UI)
+apps/desktop/          Headless runtime (main = Fastify API + SQLite; server = headless entry + CLI; renderer = React SPA web UI)
 packages/
   agent-orchestration/ DAG task engine, agent workspaces
   tool-registry/       versioned AI tool artifacts
@@ -131,20 +83,18 @@ docs/                  architecture, ADRs, glossary, session logs
 
 ## Useful scripts (repo root)
 ```bash
-pnpm dev          # run the Electron app
-pnpm pm-os       # run headless (web UI at http://127.0.0.1:4321, no Electron)
+pnpm pm-os        # run the app (web UI at http://127.0.0.1:4321)
 pnpm cli <cmd>    # CLI client over the local API
 pnpm web:build    # build just the web UI -> apps/desktop/out/web
 pnpm test         # unit tests (vitest)
 pnpm run typecheck
 pnpm run lint
-pnpm --filter @pm-os/desktop e2e   # Playwright E2E (needs a display)
 ```
 
 ---
 
 ## Notes for testers
-- **Can't install Electron apps?** Use the [headless web app + CLI](#run-without-electron-headless-web-app--cli) — `pnpm install --ignore-scripts && pnpm pm-os`, then open http://127.0.0.1:4321. Same product, no Electron binary, nothing for a proxy to block.
+- **Setup is just** `pnpm install && pnpm pm-os`, then open http://127.0.0.1:4321 — no desktop install, no Electron binary, nothing for a corporate proxy to block (add `--ignore-scripts` to the install if the proxy blocks native-module prebuilts).
 - Connect **your own** accounts/tokens on the Connections page — nothing from anyone else ships in the app. Your local data lives in `~/.pmos/` (outside the repo).
 - For GitHub Projects two-way sync, use a **classic PAT with `repo` + `project` scopes**.
 - Known limits today: the **agent execution runtime** is not built yet (agent tasks are tracked, not auto-run); connector write/mirror flows are well-tested but the GitHub path is the one verified against live APIs.

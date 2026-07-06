@@ -1,5 +1,4 @@
 import { getDb, secrets, connections, globalSettings } from '@pm-os/database'
-import { getSafeStorage } from '../electron-optional'
 import { generateId } from '@pm-os/shared'
 import { eq, and } from 'drizzle-orm'
 import { readKeysFile, writeKeysFile } from '../auth/auth-service'
@@ -60,37 +59,14 @@ function loadOrCreateMasterKeyBytes(): Uint8Array {
     if (buf.length === 32) return new Uint8Array(buf)
   }
 
-  // 2. Legacy keyring-wrapped key — migrate the SAME key to stable raw storage. This
-  //    preserves every existing encrypted secret (it's the same key, just stored so a
-  //    keyring hiccup can't lose it).
-  const safeStorage = getSafeStorage()
-  if (keys.masterKeyBlob && safeStorage?.isEncryptionAvailable()) {
-    try {
-      const decrypted = safeStorage.decryptString(Buffer.from(keys.masterKeyBlob, 'base64'))
-      const candidate = Buffer.from(decrypted, 'base64')
-      if (candidate.length === 32) {
-        writeKeysFile({ masterKeyRaw: candidate.toString('base64') })
-        return new Uint8Array(candidate)
-      }
-    } catch {
-      // fall through to generate — no recoverable key (prior secrets are already lost)
-    }
-  }
-
-  // Headless data-loss guard: a legacy safeStorage-wrapped key exists but there is
-  // no raw key and no safeStorage to unwrap it (running headless, without Electron).
-  // Generating a new key here would silently orphan every previously-encrypted secret.
-  // Refuse instead — the desktop app can migrate the blob to a raw key, or the operator
-  // can opt into discarding it with PMOS_ALLOW_KEY_REGEN=1.
-  if (
-    keys.masterKeyBlob &&
-    !(safeStorage?.isEncryptionAvailable()) &&
-    process.env['PMOS_ALLOW_KEY_REGEN'] !== '1'
-  ) {
+  // Legacy data-loss guard: an old keyring-wrapped key exists but there is no raw key.
+  // Pm.Os is headless-only (no Electron/OS-keyring), so the blob can no longer be
+  // unwrapped, and generating a new key would silently orphan every previously-encrypted
+  // secret. Refuse unless the operator opts into discarding it with PMOS_ALLOW_KEY_REGEN=1.
+  if (keys.masterKeyBlob && process.env['PMOS_ALLOW_KEY_REGEN'] !== '1') {
     throw new Error(
-      '[pm-os] Legacy encrypted master key cannot be unwrapped without the OS keyring ' +
-        '(safeStorage unavailable — running headless). Run the desktop app once to migrate ' +
-        'it, or set PMOS_ALLOW_KEY_REGEN=1 to discard the old key and all encrypted secrets.',
+      '[pm-os] Legacy keyring-wrapped master key found but no raw key, and headless Pm.Os ' +
+        'cannot unwrap it. Set PMOS_ALLOW_KEY_REGEN=1 to discard the old key and all encrypted secrets.',
     )
   }
 

@@ -10,7 +10,16 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ---
 
 ## STATUS NOW
-- **RESUME HERE (2026-07-06):** **Renamed Creare → Pm.Os + whole-project deepreview remediation — BOTH MERGED to `main`; gate GREEN (typecheck 23/23 · lint 12/12 · unit 311/311).**
+- **RESUME HERE (2026-07-06) — ELECTRON REMOVED, headless-only.** Deleted `electron`/`electron-builder`/
+  `electron-vite`/`electron-updater` + `main/index.ts`, `preload/`, `electron.vite.config.ts`,
+  `electron-builder.yml`, `e2e/`, the desktop-launcher scripts, and `electron-optional.ts`. Gutted the
+  dead Electron-only paths: `oauth-service` interactive BrowserWindow flow → throws a clear "use a PAT /
+  dev-stub" error; `safeStorage` key-wrapping removed from secrets/auth (raw keys only; legacy-blob guard
+  kept). **The ONLY run mode is now `pnpm pm-os` → http://127.0.0.1:4321** (Fastify API + Vite React SPA +
+  CLI). Web favicon added. Verified: electron 0 refs in lockfile / gone from node_modules; gate GREEN
+  (typecheck 23/23 · lint 12/12 · unit 311/311); live server security checks all pass; web app renders in
+  a headless browser (SignIn, no page errors). ADR-001 marked superseded. Docs (README, CLAUDE ×2) updated.
+- **(2026-07-06):** **Renamed Creare → Pm.Os + whole-project deepreview remediation — BOTH MERGED to `main`; gate GREEN (typecheck 23/23 · lint 12/12 · unit 311/311).**
   Repo is now **`github.com/bubabb/pm-os`**, working copy **`~/projects/pm-os`**, `main` @ `efec9ec`.
   • **RENAME (PR #2, merge `78865b7`):** npm scope `@creare/*`→**`@pm-os/*`**; env `CREARE_*`→**`PMOS_*`**;
     data dir `~/.creare`→**`~/.pmos`**, DB `creare.db`→**`pmos.db`**. New `ensurePmosDataDir()` in

@@ -1,12 +1,8 @@
 /**
- * Headless server entrypoint — runs the full Pm.Os backend (Fastify API +
- * sync scheduler + push worker) as a plain Node process, with NO Electron.
- *
- * This is the "Pm.Os Server" runtime: the same backend the Electron app hosts
- * in its main process, minus the desktop window. The web UI is served as static
- * files from the Fastify server (see server.ts), so a browser pointed at the
- * printed URL is a full client. Nothing here imports `electron`, so it installs
- * and runs without the Electron binary or its native-module ABI.
+ * Server entrypoint — runs the full Pm.Os backend (Fastify API + sync scheduler +
+ * push worker) as a plain Node process. This IS the runtime (Electron was removed
+ * 2026-07-06). The web UI is served as static files from the Fastify server (see
+ * server.ts), so a browser pointed at the printed URL is a full client.
  *
  * Run with:  tsx src/server/headless.ts   (see package.json "server" script)
  */
@@ -30,7 +26,7 @@ async function stopServices(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  // Tell server.ts to serve the built web UI over HTTP (Electron never sets this).
+  // Tell server.ts to serve the built web UI over HTTP.
   process.env['PMOS_SERVE_WEB'] = '1'
   runMigrations() // bring a fresh ~/.pmos/pmos.db up to date before serving
   await startServer()
@@ -38,7 +34,7 @@ async function main(): Promise<void> {
   startPushWorker()
 
   console.log('')
-  console.log('  Pm.Os is running (headless — no Electron).')
+  console.log('  Pm.Os is running.')
   console.log(`  Open the web UI:  http://127.0.0.1:${PORT}`)
   console.log(`  API + docs:       http://127.0.0.1:${PORT}/docs`)
   console.log('  Press Ctrl+C to stop.')
