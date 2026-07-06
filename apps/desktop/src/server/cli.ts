@@ -12,25 +12,26 @@ import { ensurePmosDataDir } from '@pm-os/shared'
 import { basename, dirname, join, resolve, sep } from 'path'
 import {
   buildDescription,
+  decodeDescription,
   defaultProjectName,
   ensureTasksDir,
-  extractAcceptance,
-  extractOwner,
   extractSourceId,
   indexTaskFilesById,
+  isSafeWriteTarget,
   isTerminalPmosStatus,
   isValidDue,
   parseFile,
-  pmosStatusToTemplate,
   readMarkdownTasks,
   readPmosProjectRef,
+  reconcileTemplateStatus,
   renderTaskFile,
   taskFileName,
   tasksDir,
   templateStatusToPmos,
+  toTemplateDue,
   writePmosProjectRef,
 } from './task-sync'
-import type { ExportTask, PmosStatus } from './task-sync'
+import type { ExportTask, MarkdownTask, PmosStatus } from './task-sync'
 
 // Validate PMOS_PORT: unset → 4321, but a set-but-invalid value must fail loudly
 // rather than build a nonsense URL. Ignored when PMOS_API overrides the base URL.
@@ -226,8 +227,21 @@ function resolveDue(sourceId: string, due: string, warn: (msg: string) => void):
 
 async function tasksImport(projectDir: string, nameFlag: string | undefined): Promise<void> {
   const dir = resolve(projectDir)
-  const { tasks: mdTasks, skipped: readSkipped } = readMarkdownTasks(dir)
+  const { tasks: readTasks, skipped: readSkipped } = readMarkdownTasks(dir)
   for (const s of readSkipped) console.error(`  skipped ${s.file}: ${s.reason}`)
+
+  // Dedupe markdown tasks by id BEFORE the upsert loop (last-file-wins) so two
+  // files sharing an id resolve to one deterministic task instead of flip-flopping
+  // the DB row on every run.
+  const byId = new Map<string, MarkdownTask>()
+  for (const md of readTasks) {
+    if (byId.has(md.sourceId)) {
+      console.error(`  duplicate id ${md.sourceId} — later file wins, earlier dropped`)
+    }
+    byId.set(md.sourceId, md)
+  }
+  const mdTasks = [...byId.values()]
+
   if (mdTasks.length === 0) {
     console.log(`No task files found in ${tasksDir(dir)} (nothing to import).`)
     return
@@ -258,8 +272,14 @@ async function tasksImport(projectDir: string, nameFlag: string | undefined): Pr
       const patch: {
         status?: PmosStatus; title?: string; description?: string; dueDate?: string | null
       } = {}
-      if (statusChangeAllowed(match.status, incomingStatus) && match.status !== incomingStatus) {
-        patch.status = incomingStatus
+      if (match.status !== incomingStatus) {
+        if (statusChangeAllowed(match.status, incomingStatus)) {
+          patch.status = incomingStatus
+        } else {
+          // Terminal task: content still syncs (markdown is canonical) but the
+          // status change is intentionally dropped — surface it, don't hide it.
+          console.error(`  ${md.sourceId}: keeping terminal status '${match.status}' — not applying '${incomingStatus}'`)
+        }
       }
       if (match.title !== md.title) patch.title = md.title
       if (match.description !== description) patch.description = description
@@ -323,32 +343,34 @@ async function tasksExport(projectDir: string): Promise<void> {
   }
 
   const tasks = await api<ApiTask[]>(`/projects/${ref.projectId}/tasks`)
-  const fileIndex = indexTaskFilesById(dir)
+  const { index: fileIndex, symlinks } = indexTaskFilesById(dir)
   const tdir = resolve(ensureTasksDir(dir))
 
   let written = 0
   let nativeSkipped = 0
   const fileSkipped: string[] = []
+  for (const s of symlinks) fileSkipped.push(`${s}: symlink — refusing to index/write`)
+
   for (const t of tasks) {
-    const sid = extractSourceId(t.description)
+    const decoded = decodeDescription(t.description)
+    const sid = decoded.sourceId
     if (!sid) {
       // A pmos-native task (no markdown origin) — not written back.
       nativeSkipped++
       continue
     }
-    const exportTask: ExportTask = {
-      sourceId: sid,
-      title: t.title,
-      status: pmosStatusToTemplate(t.status),
-      owner: extractOwner(t.description),
-      due: t.dueDate ?? '-',
-      acceptance: extractAcceptance(t.description),
-    }
+    // The pmos description's free text: first line is the one-line acceptance
+    // observable; anything after it is rich context routed into the Notes body.
+    const bodyLines = decoded.body.length > 0 ? decoded.body.split('\n') : ['']
+    const acceptance = (bodyLines[0] ?? '').trim()
+    const extraNotes = bodyLines.slice(1).join('\n').trim()
+
     // Prefer the file already carrying this id; else a fresh, sanitized filename.
-    const targetPath = resolve(fileIndex.get(sid) ?? join(tdir, taskFileName(exportTask)))
-    // Clamp: never let a hostile source id steer a write outside the tasks dir.
-    if (targetPath !== tdir && !targetPath.startsWith(tdir + sep)) {
-      fileSkipped.push(`${sid}: resolved path escapes ${tdir}`)
+    const targetPath = resolve(fileIndex.get(sid) ?? join(tdir, taskFileName(sid, t.title)))
+    // String clamp first (cheap), then the real symlink-aware guard.
+    if ((targetPath !== tdir && !targetPath.startsWith(tdir + sep))
+        || !isSafeWriteTarget(tdir, targetPath)) {
+      fileSkipped.push(`${sid}: unsafe write target (escapes tasks dir or symlink) — refused`)
       continue
     }
     // Never clobber a file we can't cleanly parse (a missing closing fence would
@@ -361,7 +383,16 @@ async function tasksExport(projectDir: string): Promise<void> {
         continue
       }
     }
-    writeFileSync(targetPath, renderTaskFile(existing, exportTask))
+    const exportTask: ExportTask = {
+      sourceId: sid,
+      title: t.title,
+      // Preserve claimed/blocked etc when still consistent (avoid lossy downgrade).
+      status: reconcileTemplateStatus(existing, t.status),
+      owner: decoded.owner,
+      due: toTemplateDue(t.dueDate),
+      acceptance,
+    }
+    writeFileSync(targetPath, renderTaskFile(existing, exportTask, extraNotes))
     written++
   }
 
