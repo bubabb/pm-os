@@ -229,7 +229,7 @@ async function runTask(taskId: string, workspace: AgentWorkspace, opts: ExecuteT
       throw new Error(`No LLM available for provider '${provider}' (missing API key or the claude CLI is not logged in).`)
     }
 
-    const ctx: ToolContext = { projectId: task.projectId, actorId: workspace.id, allowedTools: parseAllowedTools(workspace.permissionScope) }
+    const ctx: ToolContext = { projectId: task.projectId, actorId: workspace.id, allowedTools: parseAllowedTools(workspace.permissionScope), parentTaskId: taskId }
     const tools = supportsTools(provider) ? listAgentTools(ctx) : []
 
     const messages: Message[] = [{ role: 'user', content: buildTaskPrompt(task) }]

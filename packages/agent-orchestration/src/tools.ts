@@ -16,6 +16,10 @@ export interface ToolContext {
   projectId: string
   actorId: string // the agent workspace id (used as event actorId, actorType 'agent')
   allowedTools: string[] | '*' // from workspace.permissionScope.tools; deny-by-default; '*' = all built-ins
+  // The id of the PARENT task this tool run belongs to (the agent task currently executing).
+  // Stable across a crash-and-retry of that task, so mutating tools use it as the anchor of an
+  // idempotency key (see create_followup_task) — a re-run can't create duplicate side effects.
+  parentTaskId: string
 }
 
 // JSON-Schema-shaped tool descriptor. Matches the ai-sdk tool shape so the
@@ -85,6 +89,40 @@ function optionalEnum<T extends string>(
     throw new ToolInputError(`'${key}' must be one of: ${allowed.join(', ')}`)
   }
   return v as T
+}
+
+// ── Follow-up idempotency ─────────────────────────────────────────────────────
+//
+// A follow-up's identity is the (parent task, normalized title) pair — both stable
+// across a crash-and-retry of the parent agent task. We stamp a marker carrying the
+// parent id into the created task's description and match on it before creating, so a
+// re-run that re-emits the same create_followup_task returns the existing task instead
+// of a duplicate. Delivery is at-least-once; this makes the *effect* exactly-once.
+
+// Normalize a title into the comparable form used for dedup: trimmed + lowercased +
+// internal whitespace collapsed (so "Fix   Bug" and "fix bug" are the same follow-up).
+function normalizeTitle(title: string): string {
+  return title.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+// The stable marker embedded in a follow-up's description, keyed by the parent task id.
+function followupMarker(parentTaskId: string): string {
+  return `[followup-of:${parentTaskId}]`
+}
+
+// Find an existing follow-up in this project created by (and thus for a retry of) the same
+// parent task with the same normalized title. Returns it if present, else undefined.
+function findExistingFollowup(
+  projectId: string,
+  parentTaskId: string,
+  normalizedTitle: string,
+): Task | undefined {
+  const marker = followupMarker(parentTaskId)
+  return listTasks(projectId).find(
+    (t) =>
+      (t.description?.includes(marker) ?? false) &&
+      normalizeTitle(t.title) === normalizedTitle,
+  )
 }
 
 // Compact projection returned by task-listing tools.
@@ -210,9 +248,22 @@ const BUILT_IN_TOOLS: Record<string, BuiltInTool> = {
       const title = requireString(input, 'title')
       const description = optionalString(input, 'description')
       const priority = optionalEnum<Priority>(input, 'priority', PRIORITIES)
+
+      // Idempotency: if this parent task already created a follow-up with this (normalized)
+      // title — e.g. the agent crashed after creating it and is now re-running — return the
+      // existing task instead of creating a duplicate. Delivery is at-least-once; the effect
+      // is exactly-once.
+      const normalizedTitle = normalizeTitle(title)
+      const existing = findExistingFollowup(ctx.projectId, ctx.parentTaskId, normalizedTitle)
+      if (existing) {
+        return JSON.stringify({ taskId: existing.id, status: existing.status, alreadyExists: true })
+      }
+
+      // Stamp the parent marker into the description so a future retry can find this follow-up.
+      const marker = followupMarker(ctx.parentTaskId)
+      const stampedDescription = description !== undefined ? `${description}\n\n${marker}` : marker
       // Build params without undefined keys (exactOptionalPropertyTypes is on).
-      const params: CreateTaskParams = { title, type: 'human' }
-      if (description !== undefined) params.description = description
+      const params: CreateTaskParams = { title, type: 'human', description: stampedDescription }
       if (priority !== undefined) params.priority = priority
       // createTask emits its own task.created event; the agent workspace is the actor.
       const task = createTask(ctx.projectId, params, ctx.actorId, 'agent')

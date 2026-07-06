@@ -6,6 +6,7 @@ import { listAgentTools, executeAgentTool, type ToolContext } from './tools'
 let userId: string
 let projectId: string
 let agentId: string
+const PARENT_TASK_ID = 'parent-task-1'
 
 beforeEach(() => {
   ;({ userId, projectId } = seedWorkspace())
@@ -13,10 +14,14 @@ beforeEach(() => {
 })
 afterEach(() => destroyTestDb())
 
-const ctx = (allowedTools: string[] | '*'): ToolContext => ({
+const ctx = (
+  allowedTools: string[] | '*',
+  parentTaskId: string = PARENT_TASK_ID,
+): ToolContext => ({
   projectId,
   actorId: agentId,
   allowedTools,
+  parentTaskId,
 })
 
 const ALL_BUILT_INS = ['list_tasks', 'get_task', 'get_project_summary', 'create_followup_task']
@@ -98,6 +103,50 @@ describe('executeAgentTool — happy paths, scoped to the project', () => {
     expect(created?.type).toBe('human')
     expect(created?.priority).toBe('high')
     expect(created?.status).toBe('pending')
+  })
+})
+
+describe('create_followup_task — idempotent across crash-and-retry', () => {
+  const create = (title: string, parentTaskId?: string) =>
+    executeAgentTool('create_followup_task', { title }, ctx('*', parentTaskId))
+
+  it('twice with the same parent + title creates exactly ONE task (second returns existing)', async () => {
+    const first = await create('Deploy the fix')
+    expect(first.isError).toBe(false)
+    const firstOut = JSON.parse(first.content) as { taskId: string; alreadyExists?: boolean }
+    expect(firstOut.alreadyExists).toBeUndefined()
+
+    // Simulates the crash-and-retry: same parent task re-emits the same tool call.
+    const second = await create('Deploy the fix')
+    expect(second.isError).toBe(false)
+    const secondOut = JSON.parse(second.content) as { taskId: string; alreadyExists?: boolean }
+    expect(secondOut.taskId).toBe(firstOut.taskId) // same task returned
+    expect(secondOut.alreadyExists).toBe(true)
+
+    // Exactly one follow-up exists in the project.
+    expect(listTasks(projectId).length).toBe(1)
+  })
+
+  it('dedup is insensitive to title case + surrounding whitespace', async () => {
+    const first = await create('Deploy the fix')
+    const second = await create('  DEPLOY the FIX  ')
+    expect(JSON.parse(second.content).taskId).toBe(JSON.parse(first.content).taskId)
+    expect(listTasks(projectId).length).toBe(1)
+  })
+
+  it('a different title → a new task', async () => {
+    await create('Deploy the fix')
+    const other = await create('Write the changelog')
+    expect(JSON.parse(other.content).alreadyExists).toBeUndefined()
+    expect(listTasks(projectId).length).toBe(2)
+  })
+
+  it('a different parent task → a new task (no cross-parent dedup)', async () => {
+    const first = await create('Deploy the fix', 'parent-A')
+    const second = await create('Deploy the fix', 'parent-B')
+    expect(JSON.parse(second.content).taskId).not.toBe(JSON.parse(first.content).taskId)
+    expect(JSON.parse(second.content).alreadyExists).toBeUndefined()
+    expect(listTasks(projectId).length).toBe(2)
   })
 })
 
