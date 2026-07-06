@@ -4,7 +4,15 @@ import { completeGemini } from './providers/gemini'
 import { completeClaudeCli } from './providers/claude-cli'
 import type { CompletionRequest, CompletionResponse, ModelProvider } from './types'
 
-export type { CompletionRequest, CompletionResponse, Message, ModelProvider } from './types'
+export type {
+  CompletionRequest,
+  CompletionResponse,
+  Message,
+  ModelProvider,
+  ToolSchema,
+  ToolCall,
+  ToolResult,
+} from './types'
 export { checkClaudeCli } from './providers/claude-cli'
 export type { ClaudeCliHealth } from './providers/claude-cli'
 
@@ -12,6 +20,14 @@ export type { ClaudeCliHealth } from './providers/claude-cli'
 // exception — it uses the local Claude membership login and needs no key.
 export function providerNeedsKey(provider: ModelProvider): boolean {
   return provider !== 'claude-cli'
+}
+
+// Whether a provider supports native tool use (function calling) through this SDK.
+// Only 'anthropic' does today; the runtime uses this to decide between a tool loop
+// and a single-shot text call. Passing `tools` to any other provider is ignored,
+// not an error.
+export function supportsTools(provider: ModelProvider): boolean {
+  return provider === 'anthropic'
 }
 
 // Parse JSON out of a model response, tolerating the formatting models add even when

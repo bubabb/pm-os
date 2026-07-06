@@ -64,6 +64,13 @@
       "when": 1781214156543,
       "tag": "0008_keen_naoko",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1783313827753,
+      "tag": "0009_shocking_mastermind",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,7 @@ import { runMigrations } from '@pm-os/database'
 import { startServer, stopServer, resolvePort } from '../main/server'
 import { startSyncScheduler, stopSyncScheduler } from '../main/scheduler/sync-scheduler'
 import { startPushWorker, stopPushWorker } from '../main/sync/push-worker'
+import { startTaskWorker, stopTaskWorker } from '../main/agent/task-worker'
 
 // Validates PMOS_PORT (throws on a bad value) — shares server.ts's parser so the
 // printed URL always matches the port the server actually binds.
@@ -20,6 +21,7 @@ let servicesStopped = false
 async function stopServices(): Promise<void> {
   if (servicesStopped) return
   servicesStopped = true
+  stopTaskWorker()
   stopPushWorker()
   await stopSyncScheduler()
   await stopServer()
@@ -32,6 +34,7 @@ async function main(): Promise<void> {
   await startServer()
   startSyncScheduler()
   startPushWorker()
+  startTaskWorker()
 
   console.log('')
   console.log('  Pm.Os is running.')

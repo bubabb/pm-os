@@ -107,6 +107,10 @@ export const tasks = sqliteTable('tasks', {
   dueDate:          text('due_date'),
   startedAt:        text('started_at'),
   completedAt:      text('completed_at'),
+  // The agent's produced deliverable (final output text) when an agent task runs.
+  // Null for human tasks and not-yet-run agent tasks. Also mirrored into the run's
+  // trace as a checkpoint event; this column is the convenient per-task copy.
+  result:           text('result'),
   ...timestamps,
 }, (table) => ({
   projectStatusIdx: index('tasks_project_status_idx').on(table.projectId, table.status),

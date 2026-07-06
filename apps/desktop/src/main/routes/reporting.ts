@@ -5,6 +5,7 @@ import { getLatestDigest, generatePmDigest, getActiveEvents, classifyItems } fro
 import { resolveReasoningConfig, providerNeedsKey } from '../secrets'
 import { assertProjectAccess } from '../utils/project-access'
 import { createTask } from '@pm-os/agent-orchestration'
+import { kickTaskWorker } from '../agent/task-worker'
 import { createNotification } from '../notifications/notification-service'
 import type { AuthenticatedRequest } from '../auth'
 import type { ReasoningConfig } from '../secrets'
@@ -101,6 +102,9 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
           },
           user.id,
         )
+        // Nudge the agent worker so the delegated task starts running now instead of
+        // waiting for the next periodic scan.
+        kickTaskWorker()
         // Fire-and-forget — the bell lights up, but a notification failure
         // never blocks or breaks the delegate response.
         createNotification({

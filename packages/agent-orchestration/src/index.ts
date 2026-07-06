@@ -10,6 +10,14 @@ export type Task           = InferSelectModel<typeof tasks>
 export type TaskEdge       = InferSelectModel<typeof taskEdges>
 export type ApprovalGate   = InferSelectModel<typeof approvalGates>
 
+// ── Agent tool executor ─────────────────────────────────────────────────────
+
+export type { ToolContext, AgentToolSchema, ToolResult } from './tools'
+export { listAgentTools, executeAgentTool } from './tools'
+// Execution runtime — actually runs an agent task (the CONTRACT's startTask/cancelTask).
+export { startTask, cancelTask, recoverStaleAgentTasks } from './executor'
+export type { ExecuteTaskOptions } from './executor'
+
 // ── Workspace management ──────────────────────────────────────────────────────
 
 export interface CreateWorkspaceParams {
@@ -153,7 +161,7 @@ export function createTask(projectId: string, params: CreateTaskParams, actorId?
 
 export function updateTask(
   id: string,
-  update: Partial<Pick<Task, 'status' | 'assigneeId' | 'agentWorkspaceId' | 'priority' | 'description' | 'startDate' | 'dueDate'>>,
+  update: Partial<Pick<Task, 'status' | 'assigneeId' | 'agentWorkspaceId' | 'priority' | 'description' | 'startDate' | 'dueDate' | 'result'>>,
   actorId?: string,
 ): Task | null {
   const task = getTask(id)
@@ -179,6 +187,7 @@ export function updateTask(
   if (update.description !== undefined)      patch['description'] = update.description
   if (update.startDate !== undefined)        patch['startDate'] = update.startDate
   if (update.dueDate !== undefined)          patch['dueDate'] = update.dueDate
+  if (update.result !== undefined)           patch['result'] = update.result
 
   getDb().update(tasks).set(patch).where(eq(tasks.id, id)).run()
 

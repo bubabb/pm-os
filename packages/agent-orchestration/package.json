@@ -12,7 +12,9 @@
     "lint": "eslint src"
   },
   "dependencies": {
+    "@pm-os/ai-sdk": "workspace:*",
     "@pm-os/database": "workspace:*",
+    "@pm-os/observability": "workspace:*",
     "@pm-os/shared": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },

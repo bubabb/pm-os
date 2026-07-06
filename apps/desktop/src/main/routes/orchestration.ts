@@ -7,9 +7,11 @@ import {
   listTasks, getTask, createTask, updateTask,
   addEdge, getTaskEdges, getReadyTasks, listEdges,
   listApprovalGates, getApprovalGate, resolveApprovalGate,
+  startTask, cancelTask,
 } from '@pm-os/agent-orchestration'
 import type { AgentWorkspace, Task } from '@pm-os/agent-orchestration'
 import { listSprints, listMilestones } from '@pm-os/boards'
+import { resolveApiKey } from '../agent/task-worker'
 
 // Sub-resource guard — the gate must belong (via its task) to the project in the URL.
 function gateInProject(gateId: string, projectId: string): boolean {
@@ -186,6 +188,39 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
       const updated = updateTask(request.params.taskId, request.body, user.id)
       if (!updated) return reply.code(404).send({ error: 'Task not found' })
       return updated
+    },
+  )
+
+  // Run an agent task now (explicit user action). Fire-and-forget: the runtime claims the
+  // task atomically and executes it in the background; the client polls for status/result.
+  app.post<{ Params: TaskParams }>(
+    '/projects/:id/tasks/:taskId/run',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest<{ Params: TaskParams }>, reply) => {
+      const user = (request as AuthenticatedRequest).user
+      if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
+      const task = getTask(request.params.taskId)
+      if (!task || task.projectId !== request.params.id) return reply.code(404).send({ error: 'Task not found' })
+      if (task.type !== 'agent') return reply.code(400).send({ error: 'Only agent tasks can be run' })
+      if (task.status !== 'pending') return reply.code(409).send({ error: `Task is '${task.status}', not runnable` })
+      // Do not await — a run can take many seconds (an LLM call). The runtime updates the
+      // task/trace as it progresses; a failure is recorded there, never thrown here.
+      void startTask(request.params.taskId, { resolveApiKey })
+      return reply.code(202).send({ ok: true, taskId: task.id, status: 'starting' })
+    },
+  )
+
+  // Cancel a queued or running agent task.
+  app.post<{ Params: TaskParams }>(
+    '/projects/:id/tasks/:taskId/cancel',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest<{ Params: TaskParams }>, reply) => {
+      const user = (request as AuthenticatedRequest).user
+      if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
+      if (!taskInProject(request.params.taskId, request.params.id)) return reply.code(404).send({ error: 'Task not found' })
+      const task = cancelTask(request.params.taskId)
+      if (!task) return reply.code(404).send({ error: 'Task not found' })
+      return task
     },
   )
 

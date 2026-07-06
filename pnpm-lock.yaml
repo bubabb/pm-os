@@ -153,9 +153,15 @@ importers:
 
   packages/agent-orchestration:
     dependencies:
+      '@pm-os/ai-sdk':
+        specifier: workspace:*
+        version: link:../ai-sdk
       '@pm-os/database':
         specifier: workspace:*
         version: link:../database
+      '@pm-os/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@pm-os/shared':
         specifier: workspace:*
         version: link:../shared
