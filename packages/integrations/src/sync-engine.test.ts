@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { seedWorkspace, seedCredential, destroyTestDb } from '@creare/database/testing'
-import { getDb, externalEventCache, integrationCredentials } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { seedWorkspace, seedCredential, destroyTestDb } from '@pm-os/database/testing'
+import { getDb, externalEventCache, integrationCredentials } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { eq, isNotNull, and } from 'drizzle-orm'
 import { triggerSync, getSyncStatus, getActiveEvents } from './index'
-import type { IntegrationCredential } from '@creare/database'
+import type { IntegrationCredential } from '@pm-os/database'
 import type { NormalizedEntity } from './types'
 
 // Replace the GitHub connector with a controllable stub — sync() must never hit

@@ -6,7 +6,7 @@
   - `pullMirror(credential, token, boardId)` — incremental pull: resolve board link → snapshot → `planReconcile(snapshot, links, pendingOps)` → apply newItems + remoteUpdates + remoteDeletes; conflicts are skipped and counted only; stamps `lastPulledAt` on touched links.
   - `getMirrorStatus(boardId)` — `{ linked, source, remoteUrl, lastPulledAt, pendingPushes, openConflicts }`; unlinked board returns `linked:false` with zeros, never errors.
 - Emits `mirror.pull.started/completed/failed` events (sync-engine.ts pattern); connector errors propagate after the failed event.
-- Added `@creare/boards` workspace dep to `packages/integrations/package.json` (integrations→boards, allowed direction) + lockfile update.
+- Added `@pm-os/boards` workspace dep to `packages/integrations/package.json` (integrations→boards, allowed direction) + lockfile update.
 
 ## Decisions Made
 - Link scoping per board via `remote_links.containerRemoteId = board.remoteId` (applyMirrorSnapshot stamps it on item AND column links) — prevents cross-board false "remote deletes" when one credential mirrors several projects.
@@ -16,12 +16,12 @@
 
 ## Files Created or Modified
 - `packages/integrations/src/mirror/mirror-sync.ts` (new)
-- `packages/integrations/package.json` (+@creare/boards)
+- `packages/integrations/package.json` (+@pm-os/boards)
 - `pnpm-lock.yaml` (install)
 
 ## Verification
-- `pnpm --filter @creare/integrations typecheck` — green (after `pnpm --filter @creare/boards build` so the new dist types resolve).
-- `pnpm --filter @creare/integrations lint` — green.
+- `pnpm --filter @pm-os/integrations typecheck` — green (after `pnpm --filter @pm-os/boards build` so the new dist types resolve).
+- `pnpm --filter @pm-os/integrations lint` — green.
 
 ## Open Questions
 - Whether pull-side conflicts should eventually persist to `sync_conflicts` (Phase 2 conflict UI will need rows; currently only counted).

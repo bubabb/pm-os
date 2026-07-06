@@ -2,7 +2,7 @@
 
 ## What Was Done
 - Wrote phase2-domain5-reporting.md task file with full DashboardResponse contract
-- Built @creare/reporting package (6 source files):
+- Built @pm-os/reporting package (6 source files):
   - sprint-reader: active sprint context, at-risk milestones, overnight delta
   - agent-activity: running/completed-today/failed traces from DB
   - pm-command-center: orchestrates all sources into DashboardResponse, partitions items
@@ -23,7 +23,7 @@
 - Delegation in Phase 2 creates a notification (mention type) as audit log stub. Domain 1 (agent-orchestration) will replace with real agent task creation in Phase 3.
 - "Handle it" on Risk Radar acknowledges the item from the risk view (removes from radar). Future: creates a human PM task via Domain 1.
 - Default app route changed to /reports — PM Command Center is the home screen.
-- Domain 4 (Boards) not yet built — sprint/milestone data read directly from DB in Phase 2. Phase 3 will wire through @creare/boards public API.
+- Domain 4 (Boards) not yet built — sprint/milestone data read directly from DB in Phase 2. Phase 3 will wire through @pm-os/boards public API.
 
 ## Files Created or Modified
 - docs/agents/tasks/phase2-domain5-reporting.md
@@ -33,7 +33,7 @@
 - packages/reporting/src/cost-tracking.ts
 - packages/reporting/src/nl-queries.ts
 - packages/reporting/src/index.ts
-- packages/reporting/package.json (added @creare/integrations + drizzle-orm deps)
+- packages/reporting/package.json (added @pm-os/integrations + drizzle-orm deps)
 - apps/desktop/src/main/routes/reporting.ts
 - apps/desktop/src/main/server.ts (added reportingRoutes)
 - apps/desktop/src/renderer/store/dashboard.ts

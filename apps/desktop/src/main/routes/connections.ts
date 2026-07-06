@@ -2,9 +2,9 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
 import { listConnections, storeConnection, updateConnection, deleteConnection, getConnection, getConnectionToken } from '../secrets'
 import { CredentialError } from '../secrets/secrets-service'
-import { listConnectorResources } from '@creare/integrations'
-import type { ConnectorConfig } from '@creare/integrations'
-import type { Connection } from '@creare/database'
+import { listConnectorResources } from '@pm-os/integrations'
+import type { ConnectorConfig } from '@pm-os/integrations'
+import type { Connection } from '@pm-os/database'
 
 // Workspace-level (GLOBAL) tool connections — requireAuth, but NOT project-scoped.
 

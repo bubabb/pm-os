@@ -6,7 +6,7 @@ last-updated: 2026-06-02
 ---
 
 ## What This Package Does
-The single source of truth for all data in Creare. SQLite + Drizzle ORM. Owns all schema definitions, migrations, and the append-only event log. Every domain reads and writes through this package.
+The single source of truth for all data in Pm.Os. SQLite + Drizzle ORM. Owns all schema definitions, migrations, and the append-only event log. Every domain reads and writes through this package.
 
 ## Critical Rules
 - **schema.ts is the law** — all domains use these types. Never define competing types.

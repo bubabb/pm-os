@@ -1,5 +1,5 @@
-import { generateId } from '@creare/shared'
-import type { NewExternalEventCache } from '@creare/database'
+import { generateId } from '@pm-os/shared'
+import type { NewExternalEventCache } from '@pm-os/database'
 import type { NormalizedEntity } from './types'
 
 export function toExternalEventCacheRow(

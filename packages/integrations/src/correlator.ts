@@ -1,6 +1,6 @@
-import { getDb, externalEventCache } from '@creare/database'
+import { getDb, externalEventCache } from '@pm-os/database'
 import { eq, and, isNull, like, or } from 'drizzle-orm'
-import type { ExternalEventCache } from '@creare/database'
+import type { ExternalEventCache } from '@pm-os/database'
 import type { IntegrationSource } from './types'
 
 // Cross-source entity correlation — MVP: Jira ↔ GitHub only.

@@ -14,5 +14,5 @@
 - Every mutation emits an event with `domain: 'tool-registry'`.
 
 ## Outstanding
-- Run `tsc --noEmit` for `@creare/tool-registry` and `@creare/desktop` on the Mac.
+- Run `tsc --noEmit` for `@pm-os/tool-registry` and `@pm-os/desktop` on the Mac.
 - `tool.deployment.failed` event reserved but unused (atomic local deploys).

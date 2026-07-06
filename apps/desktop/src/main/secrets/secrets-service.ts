@@ -1,12 +1,12 @@
-import { getDb, secrets, connections, globalSettings } from '@creare/database'
+import { getDb, secrets, connections, globalSettings } from '@pm-os/database'
 import { getSafeStorage } from '../electron-optional'
-import { generateId } from '@creare/shared'
+import { generateId } from '@pm-os/shared'
 import { eq, and } from 'drizzle-orm'
 import { readKeysFile, writeKeysFile } from '../auth/auth-service'
-import type { Secret } from '@creare/database'
+import type { Secret } from '@pm-os/database'
 
 // AES-256-GCM via Web Crypto (Node.js ≥15, globalThis.crypto).
-// Master key is a stable raw 32-byte key stored base64 in ~/.creare/keys.json
+// Master key is a stable raw 32-byte key stored base64 in ~/.pmos/keys.json
 // (mode 0600) — see the KeysFile comments in auth-service.ts for the rationale
 // (stability over at-rest secrecy; the prior safeStorage-wrapped scheme silently
 // destroyed data on any OS-keyring hiccup). On first boot a new key is generated
@@ -81,16 +81,16 @@ function loadOrCreateMasterKeyBytes(): Uint8Array {
   // no raw key and no safeStorage to unwrap it (running headless, without Electron).
   // Generating a new key here would silently orphan every previously-encrypted secret.
   // Refuse instead — the desktop app can migrate the blob to a raw key, or the operator
-  // can opt into discarding it with CREARE_ALLOW_KEY_REGEN=1.
+  // can opt into discarding it with PMOS_ALLOW_KEY_REGEN=1.
   if (
     keys.masterKeyBlob &&
     !(safeStorage?.isEncryptionAvailable()) &&
-    process.env['CREARE_ALLOW_KEY_REGEN'] !== '1'
+    process.env['PMOS_ALLOW_KEY_REGEN'] !== '1'
   ) {
     throw new Error(
-      '[creare] Legacy encrypted master key cannot be unwrapped without the OS keyring ' +
+      '[pm-os] Legacy encrypted master key cannot be unwrapped without the OS keyring ' +
         '(safeStorage unavailable — running headless). Run the desktop app once to migrate ' +
-        'it, or set CREARE_ALLOW_KEY_REGEN=1 to discard the old key and all encrypted secrets.',
+        'it, or set PMOS_ALLOW_KEY_REGEN=1 to discard the old key and all encrypted secrets.',
     )
   }
 
@@ -100,7 +100,7 @@ function loadOrCreateMasterKeyBytes(): Uint8Array {
   //    is bricking startup over data that is already unrecoverable).
   if (encryptedDataExists()) {
     console.error(
-      '[creare] WARNING: generating a new master key while encrypted data exists — previously stored tokens/keys can no longer be decrypted and must be re-entered',
+      '[pm-os] WARNING: generating a new master key while encrypted data exists — previously stored tokens/keys can no longer be decrypted and must be re-entered',
     )
   }
   const bytes = new Uint8Array(32)

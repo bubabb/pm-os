@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { seedWorkspace, seedTask, seedCredential, destroyTestDb } from '@creare/database/testing'
-import { getDb, remoteLinks, tasks, events } from '@creare/database'
+import { seedWorkspace, seedTask, seedCredential, destroyTestDb } from '@pm-os/database/testing'
+import { getDb, remoteLinks, tasks, events } from '@pm-os/database'
 import { eq, and } from 'drizzle-orm'
 import {
   createBoard, listColumns, getColumn, updateColumn,

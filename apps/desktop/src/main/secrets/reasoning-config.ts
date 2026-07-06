@@ -1,6 +1,6 @@
 import { getGlobalSetting } from './global-settings-service'
-import { providerNeedsKey } from '@creare/ai-sdk'
-import type { ModelProvider } from '@creare/ai-sdk'
+import { providerNeedsKey } from '@pm-os/ai-sdk'
+import type { ModelProvider } from '@pm-os/ai-sdk'
 
 // Resolves the workspace-level reasoning model + auth used by the reporting and
 // eval routes. The default is the membership-backed `claude-cli` provider, which
@@ -8,7 +8,7 @@ import type { ModelProvider } from '@creare/ai-sdk'
 // workspace works out of the box without any key configured. An admin can still
 // override DEFAULT_REASONING_PROVIDER to a keyed provider (anthropic/openai/gemini).
 
-export { providerNeedsKey } from '@creare/ai-sdk'
+export { providerNeedsKey } from '@pm-os/ai-sdk'
 
 export const VALID_PROVIDERS: ModelProvider[] = ['claude-cli', 'anthropic', 'openai', 'gemini']
 export const DEFAULT_REASONING_PROVIDER: ModelProvider = 'claude-cli'

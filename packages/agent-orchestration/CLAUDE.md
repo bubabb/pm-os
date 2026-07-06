@@ -6,7 +6,7 @@ last-updated: 2026-06-02
 ---
 
 ## What This Domain Does
-The core differentiator of Creare. Replaces flat backlogs with a DAG-based task engine where agents are first-class executors. Manages agent workspaces, execution lifecycle, approval gates, and cost guardrails.
+The core differentiator of Pm.Os. Replaces flat backlogs with a DAG-based task engine where agents are first-class executors. Manages agent workspaces, execution lifecycle, approval gates, and cost guardrails.
 
 ## Your Task Instructions
 Read `/docs/agents/tasks/` for the specific task file assigned to this session.

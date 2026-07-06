@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { seedWorkspace, seedCredential, destroyTestDb } from '@creare/database/testing'
+import { seedWorkspace, seedCredential, destroyTestDb } from '@pm-os/database/testing'
 import {
   getDb,
   integrationCredentials,
@@ -7,14 +7,14 @@ import {
   remoteLinks,
   syncConflicts,
   tasks,
-} from '@creare/database'
-import { generateId } from '@creare/shared'
-import { getBoardItem, getColumn } from '@creare/boards'
+} from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
+import { getBoardItem, getColumn } from '@pm-os/boards'
 import { and, eq } from 'drizzle-orm'
 import { vi } from 'vitest'
 import { createMirror, pullMirror } from './mirror-sync'
 import { listOpenConflicts, resolveConflict } from './conflicts'
-import type { IntegrationCredential, RemoteLink } from '@creare/database'
+import type { IntegrationCredential, RemoteLink } from '@pm-os/database'
 import type { MirrorBoardSnapshot, MirrorItemSnapshot } from '../types'
 
 // Stub the GitHub Projects client — same wholesale module replacement as

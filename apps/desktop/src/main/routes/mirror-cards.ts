@@ -2,18 +2,18 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
 import { assertProjectAccess } from '../utils/project-access'
 import type { AuthenticatedRequest } from '../auth'
-import { getBoard, getBoardItem, getColumn, listColumns, addBoardItem } from '@creare/boards'
-import { createTask, updateTask } from '@creare/agent-orchestration'
+import { getBoard, getBoardItem, getColumn, listColumns, addBoardItem } from '@pm-os/boards'
+import { createTask, updateTask } from '@pm-os/agent-orchestration'
 import {
   enqueueItemCreate,
   enqueueItemUpdate,
   enqueueItemClose,
   enqueueItemComment,
-} from '@creare/integrations'
+} from '@pm-os/integrations'
 import { kickPushWorker } from '../sync/push-worker'
-import { getDb, remoteLinks, tasks, events } from '@creare/database'
+import { getDb, remoteLinks, tasks, events } from '@pm-os/database'
 import { and, eq, isNull } from 'drizzle-orm'
-import { generateId } from '@creare/shared'
+import { generateId } from '@pm-os/shared'
 
 // Bidirectional card LIFECYCLE — create / edit / close / comment on a mirrored
 // board, applied locally first (local-first), then pushed to the remote

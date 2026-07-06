@@ -1,5 +1,5 @@
-import { complete } from '@creare/ai-sdk'
-import type { ModelProvider } from '@creare/ai-sdk'
+import { complete } from '@pm-os/ai-sdk'
+import type { ModelProvider } from '@pm-os/ai-sdk'
 import type { ModelRunner, Scorer } from './types'
 
 // Builds a ModelRunner that sends each case input as a single user message through

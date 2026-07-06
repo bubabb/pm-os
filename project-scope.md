@@ -1,11 +1,11 @@
-# Creare — Project Scope
-**Product Name:** Creare  
-**Domain:** creare.dev  
+# Pm.Os — Project Scope
+**Product Name:** Pm.Os  
+**Domain:** pm-os.dev  
 **Version:** 1.2  
 **Date:** 2026-06-02  
 **Status:** Active — Master Reference Document
 
-> *Creare — Latin: "to create." The platform where AI-native software teams build, ship, and operate their work.*
+> *Pm.Os — Latin: "to create." The platform where AI-native software teams build, ship, and operate their work.*
 
 ## Change Log
 | Version | Date | Change | Impact |
@@ -21,7 +21,7 @@
 
 Build the definitive DevOps platform for the AI-agent era — combining everything Azure DevOps and GitHub Copilot do well, eliminating their most complained-about failures, and adding a layer of agentic intelligence that neither platform was designed to support.
 
-Creare is not an incremental improvement. It is a ground-up redesign of the software delivery lifecycle with AI agents as first-class participants alongside human engineers, PMs, and stakeholders.
+Pm.Os is not an incremental improvement. It is a ground-up redesign of the software delivery lifecycle with AI agents as first-class participants alongside human engineers, PMs, and stakeholders.
 
 ---
 
@@ -153,10 +153,10 @@ Turns engineering activity into executive-readable intelligence automatically.
 - AI-powered retrospectives: auto-summarize what went well and poorly per sprint
 - Predictive sprint completion using historical velocity and AI
 - **Usage & cost tracking** — per-project, per-agent breakdown of model API calls and spend. Teams can budget, audit, and cap AI costs from within the platform.
-- **PM Command Center** — the first Phase 2 deliverable. A triage dashboard that aggregates internal Creare data (sprints, milestones, traces) with external source data from Domain 6 (Integrations) to give the PM a single surface for daily action. Four zones: Morning Brief (DO NOW panel), Sprint Health, Decisions & Docs, and Risk Radar. Every risk item has a one-click response: [Handle it] (routes to DO NOW) or [Delegate▶] (creates an agent task via Domain 1). Built on top of Domain 6's sync layer — Domain 5 reads, Domain 6 fetches.
+- **PM Command Center** — the first Phase 2 deliverable. A triage dashboard that aggregates internal Pm.Os data (sprints, milestones, traces) with external source data from Domain 6 (Integrations) to give the PM a single surface for daily action. Four zones: Morning Brief (DO NOW panel), Sprint Health, Decisions & Docs, and Risk Radar. Every risk item has a one-click response: [Handle it] (routes to DO NOW) or [Delegate▶] (creates an agent task via Domain 1). Built on top of Domain 6's sync layer — Domain 5 reads, Domain 6 fetches.
 
 ### Domain 6: Integrations
-The external connectivity layer. Fetches, normalizes, and caches data from external DevOps and productivity tools. Enables Creare to be the PM's single surface without requiring teams to migrate away from their existing stack.
+The external connectivity layer. Fetches, normalizes, and caches data from external DevOps and productivity tools. Enables Pm.Os to be the PM's single surface without requiring teams to migrate away from their existing stack.
 
 - **External source connectors** — Jira (MCP), GitHub (MCP), Confluence (Atlassian REST v2), Notion (REST), OneDrive (Microsoft Graph / MSAL). Each connector is a self-contained module with its own auth, pagination, and normalization logic.
 - **OAuth 2.0 credential management** — stores and refreshes OAuth tokens per source per project. Uses the Phase 1 secrets layer (AES-256-GCM encryption) — tokens are never stored in plaintext.

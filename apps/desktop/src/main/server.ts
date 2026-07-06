@@ -25,17 +25,17 @@ import { observabilityRoutes } from './routes/observability'
 import { toolsRoutes } from './routes/tools'
 import { evalRoutes } from './routes/eval'
 import { memoryRoutes } from './routes/memory'
-import { checkClaudeCli } from '@creare/ai-sdk'
+import { checkClaudeCli } from '@pm-os/ai-sdk'
 
-// Parse CREARE_PORT strictly: an unset value defaults to 4321, but a *set* but
+// Parse PMOS_PORT strictly: an unset value defaults to 4321, but a *set* but
 // invalid value (non-numeric, negative, non-integer, out of range) must fail loudly
 // at startup rather than silently binding a random port with a misleading URL.
 export function resolvePort(): number {
-  const raw = process.env['CREARE_PORT']
+  const raw = process.env['PMOS_PORT']
   if (raw === undefined || raw === '') return 4321
   const port = Number(raw)
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(`Invalid CREARE_PORT: "${raw}" — must be an integer between 1 and 65535`)
+    throw new Error(`Invalid PMOS_PORT: "${raw}" — must be an integer between 1 and 65535`)
   }
   return port
 }
@@ -50,11 +50,11 @@ function redactUrlToken(url: string): string {
 }
 
 // Locate the built web UI (plain-Vite build → apps/desktop/out/web). Only the
-// headless "Creare Server" runtime serves the renderer over HTTP; the Electron
+// headless "Pm.Os Server" runtime serves the renderer over HTTP; the Electron
 // app loads it via loadFile and never hits this. Returns null when no build
 // exists (e.g. Electron-only checkout) so we register nothing and stay an API.
 function resolveWebDir(): string | null {
-  const override = process.env['CREARE_WEB_DIR']
+  const override = process.env['PMOS_WEB_DIR']
   const candidates = [
     ...(override ? [override] : []),
     join(__dirname, '../../out/web'), // running from src/main (tsx headless)
@@ -68,14 +68,14 @@ function resolveWebDir(): string | null {
 // Registered AFTER the API routes, so every real route still wins; only unknown
 // paths fall through here.
 async function registerWebUi(app: FastifyInstance): Promise<void> {
-  // Opt-in: only the headless "Creare Server" runtime sets CREARE_SERVE_WEB.
+  // Opt-in: only the headless "Pm.Os Server" runtime sets PMOS_SERVE_WEB.
   // The Electron app loads the renderer via file:// and must NOT have static
   // serving / a custom 404 handler grafted onto its API server.
-  if (process.env['CREARE_SERVE_WEB'] !== '1') return
+  if (process.env['PMOS_SERVE_WEB'] !== '1') return
 
   const webDir = resolveWebDir()
   if (!webDir) {
-    console.warn('[creare] CREARE_SERVE_WEB=1 but no web build found — run `pnpm web:build`')
+    console.warn('[pm-os] PMOS_SERVE_WEB=1 but no web build found — run `pnpm web:build`')
     return
   }
 
@@ -88,7 +88,7 @@ async function registerWebUi(app: FastifyInstance): Promise<void> {
     return reply.code(404).send({ error: 'Not found' })
   })
 
-  console.log(`[creare] serving web UI from ${webDir}`)
+  console.log(`[pm-os] serving web UI from ${webDir}`)
 }
 
 const app = Fastify({
@@ -139,7 +139,7 @@ export async function startServer(): Promise<void> {
 
   await app.register(swagger, {
     openapi: {
-      info: { title: 'Creare API', version: '1.0.0', description: 'Creare local API' },
+      info: { title: 'Pm.Os API', version: '1.0.0', description: 'Pm.Os local API' },
       servers: [{ url: `http://localhost:${PORT}` }],
       components: {
         securitySchemes: {
@@ -182,14 +182,14 @@ export async function startServer(): Promise<void> {
   await registerWebUi(app)
 
   await app.listen({ port: PORT, host: '127.0.0.1' })
-  console.log(`[creare] API server running on http://127.0.0.1:${PORT}`)
+  console.log(`[pm-os] API server running on http://127.0.0.1:${PORT}`)
 
   // Reasoning defaults to the membership-backed claude-cli provider — verify it's
   // installed and signed in, and surface a clear line in the terminal if not.
   // Non-blocking: never delays or fails server startup.
   void checkClaudeCli()
     .then((h) => {
-      const tag = '[creare] reasoning (claude-cli):'
+      const tag = '[pm-os] reasoning (claude-cli):'
       if (h.ok) console.log(`${tag} ${h.message}`)
       else console.warn(`${tag} ${h.message}`)
     })

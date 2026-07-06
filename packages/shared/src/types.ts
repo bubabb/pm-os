@@ -1,4 +1,4 @@
-// Base types shared across all Creare packages
+// Base types shared across all Pm.Os packages
 // See docs/GLOSSARY.md for canonical definitions of all terms
 
 export type ID = string // UUID v4

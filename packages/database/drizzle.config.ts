@@ -2,7 +2,7 @@ import type { Config } from 'drizzle-kit'
 import { join } from 'path'
 import { homedir } from 'os'
 
-const dbPath = join(homedir(), '.creare', 'creare.db')
+const dbPath = join(homedir(), '.pmos', 'pmos.db')
 
 export default {
   schema: './src/schema.ts',

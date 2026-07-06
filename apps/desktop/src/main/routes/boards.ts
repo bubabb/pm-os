@@ -8,10 +8,10 @@ import {
   listSprints, getActiveSprint, getSprint, createSprint, updateSprint, startSprint, completeSprint,
   listBoardItems, getBoardItem, addBoardItem, moveBoardItem, removeBoardItem,
   listMilestones, getMilestone, createMilestone, updateMilestone, addMilestoneTask, listMilestoneTasks,
-} from '@creare/boards'
-import { enqueueBoardItemMove } from '@creare/integrations'
+} from '@pm-os/boards'
+import { enqueueBoardItemMove } from '@pm-os/integrations'
 import { kickPushWorker } from '../sync/push-worker'
-import type { Board, Sprint, Milestone } from '@creare/boards'
+import type { Board, Sprint, Milestone } from '@pm-os/boards'
 
 interface ProjectParams   { id: string }
 interface BoardParams     { id: string; boardId: string }

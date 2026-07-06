@@ -1,8 +1,8 @@
-import { getDb, connections, integrationCredentials } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { getDb, connections, integrationCredentials } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { eq } from 'drizzle-orm'
 import { encryptSecretAsync, decryptSecretAsync } from './secrets-service'
-import type { Connection } from '@creare/database'
+import type { Connection } from '@pm-os/database'
 
 // Workspace-level (GLOBAL) tool connections — not project-scoped.
 // Tokens are encrypted with the same AES-256-GCM helpers as `secrets`.

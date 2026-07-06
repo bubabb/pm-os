@@ -8,7 +8,7 @@
   - `POST /projects/:id/boards/:boardId/pull` — remote_links lookup (localType 'board') → credential row → token → pullMirror → `{ pulled, conflicts }`; 404 if not mirrored / wrong project; 502 upstream.
   - `GET /projects/:id/boards/:boardId/sync-status` — getMirrorStatus(boardId).
 - MODIFIED `routes/boards.ts` item-move PATCH: after successful moveBoardItem, fire-and-forget `enqueueBoardItemMove(itemId, columnId).then(opId => opId && kickPushWorker()).catch(log)` — never blocks/fails the response.
-- NEW `apps/desktop/src/main/sync/push-worker.ts`: `startPushWorker(intervalMs?)` (default 5s, `CREARE_PUSH_INTERVAL_MS` override, 0 disables), `kickPushWorker()` (250ms debounced immediate drain), `stopPushWorker()`. Single-flight drain guard with one queued follow-up pass; getCredential resolves credential row + plaintext token via secrets layer.
+- NEW `apps/desktop/src/main/sync/push-worker.ts`: `startPushWorker(intervalMs?)` (default 5s, `PMOS_PUSH_INTERVAL_MS` override, 0 disables), `kickPushWorker()` (250ms debounced immediate drain), `stopPushWorker()`. Single-flight drain guard with one queued follow-up pass; getCredential resolves credential row + plaintext token via secrets layer.
 - Registered `mirrorsRoutes` in `server.ts` (after boardsRoutes); `startPushWorker()` in `index.ts` whenReady (after startSyncScheduler), `stopPushWorker()` on window-all-closed.
 
 ## Decisions Made
@@ -32,6 +32,6 @@
 - Build the renderer surface for mirrors (remote-board picker + sync-status chip + pull button), then E2E the move→push path against a live GitHub ProjectV2.
 
 ## Verification
-- `pnpm --filter @creare/integrations typecheck` ✅, `build` ✅
-- `pnpm --filter @creare/desktop typecheck` ✅
+- `pnpm --filter @pm-os/integrations typecheck` ✅, `build` ✅
+- `pnpm --filter @pm-os/desktop typecheck` ✅
 - `eslint src` clean on both packages ✅

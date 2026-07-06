@@ -60,7 +60,7 @@ source, then applied the complete fix set. ~24 files changed.
 ## On the Mac before committing
 ```
 pnpm install
-pnpm -r exec tsc --noEmit     # or per-package: @creare/<domain> and @creare/desktop
+pnpm -r exec tsc --noEmit     # or per-package: @pm-os/<domain> and @pm-os/desktop
 pnpm -r test                  # vitest
 ```
 Then commit (no Co-Authored-By):

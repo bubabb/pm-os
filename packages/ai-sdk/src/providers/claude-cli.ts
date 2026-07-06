@@ -51,7 +51,7 @@ function renderPrompt(messages: CompletionRequest['messages']): string {
 // EMPTY temp directory whose parents have no CLAUDE.md. (We can't use the CLI's
 // "simple" mode to skip discovery — it also forces ANTHROPIC_API_KEY auth and
 // ignores the membership login, defeating the whole provider.)
-const isolatedCwd = join(tmpdir(), 'creare-ai-sdk-claude-cli')
+const isolatedCwd = join(tmpdir(), 'pm-os-ai-sdk-claude-cli')
 let isolatedCwdReady: Promise<string> | null = null
 function ensureIsolatedCwd(): Promise<string> {
   if (!isolatedCwdReady) {

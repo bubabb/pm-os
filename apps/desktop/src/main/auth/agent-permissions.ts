@@ -1,4 +1,4 @@
-import type { AgentWorkspace } from '@creare/database'
+import type { AgentWorkspace } from '@pm-os/database'
 
 interface PermissionScope {
   tools: string[]

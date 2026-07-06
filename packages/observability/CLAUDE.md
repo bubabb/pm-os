@@ -6,7 +6,7 @@ last-updated: 2026-06-02
 ---
 
 ## What This Domain Does
-Makes Creare trustworthy. Full cross-agent visibility — trace viewer, decision log, replay engine, anomaly detection, and immutable audit log for compliance.
+Makes Pm.Os trustworthy. Full cross-agent visibility — trace viewer, decision log, replay engine, anomaly detection, and immutable audit log for compliance.
 
 ## Your Task Instructions
 Read `/docs/agents/tasks/` for the specific task file assigned to this session.

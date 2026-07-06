@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { stableHash } from '@creare/shared'
+import { stableHash } from '@pm-os/shared'
 import { NotionConnector } from './notion'
 import type { ConnectorConfig, MutationEnvelope, MutationOp } from '../types'
 

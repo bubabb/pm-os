@@ -1,6 +1,6 @@
-import { getDb, agentWorkspaces, tasks, taskEdges, approvalGates, events } from '@creare/database'
+import { getDb, agentWorkspaces, tasks, taskEdges, approvalGates, events } from '@pm-os/database'
 import { eq, and, inArray, ne } from 'drizzle-orm'
-import { generateId } from '@creare/shared'
+import { generateId } from '@pm-os/shared'
 import type { InferSelectModel } from 'drizzle-orm'
 
 // ── Re-exported types ─────────────────────────────────────────────────────────

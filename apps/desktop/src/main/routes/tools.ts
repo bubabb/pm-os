@@ -6,7 +6,7 @@ import {
   listTools, getTool, createTool,
   listVersions, getToolVersion, publishVersion,
   listDeployments, getActiveDeployment, deploy, rollback,
-} from '@creare/tool-registry'
+} from '@pm-os/tool-registry'
 
 interface ProjectParams { id: string }
 interface ToolParams    { id: string; toolId: string }

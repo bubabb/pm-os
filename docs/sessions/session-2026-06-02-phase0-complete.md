@@ -7,7 +7,7 @@
 - **Task #2** — Full monorepo scaffold: 84 files, git initialized on `main` branch
 - **Task #3** — Core data models: 20 tables, 10 indexes, 3 append-only tables, client.ts
 - **Task #16** — Project scope document v1.2 with changelog
-- **Task #19** — Product name: Creare (creare.dev)
+- **Task #19** — Product name: Pm.Os (pm-os.dev)
 
 ### Two Review Passes on Scaffold (Task #2)
 Fixed 11 issues including: broken `id()` helper, wrong `mkdirSync` import, missing tsconfigs, missing src/index.ts stubs, missing index.css, no Tailwind config, no ESLint config, no Drizzle config, `randomUUID` browser compatibility, `@electron-forge/cli` removed, branch renamed to `main`
@@ -28,14 +28,14 @@ Fixed 11 issues including: broken `id()` helper, `mkdirSync` wrong module, lazy 
 - Updated agent-registry.md with accurate outputs
 
 ## Git History (5 commits on main)
-1. `c7b7618` feat: scaffold Creare monorepo — Phase 0 complete
+1. `c7b7618` feat: scaffold Pm.Os monorepo — Phase 0 complete
 2. `4693d6b` fix: resolve all 11 scaffold issues from Phase 0 review
 3. `b22cf23` feat: define core data models — Phase 0 Task #3
 4. `9b4c974` fix: resolve all 11 data model review issues
 5. `91bd7ff` fix: resolve all 10 Phase 0 review issues
 
 ## Decisions Made
-- **Product name:** Creare (Latin: to create) — creare.dev
+- **Product name:** Pm.Os (Latin: to create) — pm-os.dev
 - **Deployment:** Local-first Electron, SQLite, fully offline v1; ElectricSQL sync v2
 - **Tech stack:** TypeScript everywhere, Turborepo+pnpm, Electron+electron-vite, React+Tailwind+shadcn/ui, Zustand+TanStack Query, Fastify localhost HTTP, SSE real-time, Electron Utility Processes for agents, SQLite+Drizzle, model-agnostic AI SDK wrapper
 - **Architecture:** 5 domain packages + 3 shared packages + Electron desktop app

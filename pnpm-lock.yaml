@@ -35,39 +35,6 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@creare/agent-orchestration':
-        specifier: workspace:*
-        version: link:../../packages/agent-orchestration
-      '@creare/ai-sdk':
-        specifier: workspace:*
-        version: link:../../packages/ai-sdk
-      '@creare/boards':
-        specifier: workspace:*
-        version: link:../../packages/boards
-      '@creare/database':
-        specifier: workspace:*
-        version: link:../../packages/database
-      '@creare/eval':
-        specifier: workspace:*
-        version: link:../../packages/eval
-      '@creare/integrations':
-        specifier: workspace:*
-        version: link:../../packages/integrations
-      '@creare/memory':
-        specifier: workspace:*
-        version: link:../../packages/memory
-      '@creare/observability':
-        specifier: workspace:*
-        version: link:../../packages/observability
-      '@creare/reporting':
-        specifier: workspace:*
-        version: link:../../packages/reporting
-      '@creare/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
-      '@creare/tool-registry':
-        specifier: workspace:*
-        version: link:../../packages/tool-registry
       '@fastify/cors':
         specifier: ^9.0.0
         version: 9.0.1
@@ -80,6 +47,39 @@ importers:
       '@fastify/swagger-ui':
         specifier: ^3.0.0
         version: 3.1.0
+      '@pm-os/agent-orchestration':
+        specifier: workspace:*
+        version: link:../../packages/agent-orchestration
+      '@pm-os/ai-sdk':
+        specifier: workspace:*
+        version: link:../../packages/ai-sdk
+      '@pm-os/boards':
+        specifier: workspace:*
+        version: link:../../packages/boards
+      '@pm-os/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@pm-os/eval':
+        specifier: workspace:*
+        version: link:../../packages/eval
+      '@pm-os/integrations':
+        specifier: workspace:*
+        version: link:../../packages/integrations
+      '@pm-os/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
+      '@pm-os/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@pm-os/reporting':
+        specifier: workspace:*
+        version: link:../../packages/reporting
+      '@pm-os/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@pm-os/tool-registry':
+        specifier: workspace:*
+        version: link:../../packages/tool-registry
       '@tanstack/react-query':
         specifier: ^5.28.0
         version: 5.101.0(react@18.3.1)
@@ -171,10 +171,10 @@ importers:
 
   packages/agent-orchestration:
     dependencies:
-      '@creare/database':
+      '@pm-os/database':
         specifier: workspace:*
         version: link:../database
-      '@creare/shared':
+      '@pm-os/shared':
         specifier: workspace:*
         version: link:../shared
       drizzle-orm:
@@ -193,15 +193,15 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.100.1
         version: 0.100.1(zod@3.25.76)
-      '@creare/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@google/generative-ai':
         specifier: ^0.3.0
         version: 0.3.1
       '@modelcontextprotocol/sdk':
         specifier: ^0.6.0
         version: 0.6.1
+      '@pm-os/shared':
+        specifier: workspace:*
+        version: link:../shared
       openai:
         specifier: ^4.28.0
         version: 4.104.0(zod@3.25.76)
@@ -215,10 +215,10 @@ importers:
 
   packages/boards:
     dependencies:
-      '@creare/database':
+      '@pm-os/database':
         specifier: workspace:*
         version: link:../database
-      '@creare/shared':
+      '@pm-os/shared':
         specifier: workspace:*
         version: link:../shared
       drizzle-orm:
@@ -234,7 +234,7 @@ importers:
 
   packages/database:
     dependencies:
-      '@creare/shared':
+      '@pm-os/shared':
         specifier: workspace:*
         version: link:../shared
       better-sqlite3:
@@ -259,13 +259,13 @@ importers:
 
   packages/eval:
     dependencies:
-      '@creare/ai-sdk':
+      '@pm-os/ai-sdk':
         specifier: workspace:*
         version: link:../ai-sdk
-      '@creare/database':
+      '@pm-os/database':
         specifier: workspace:*
         version: link:../database
-      '@creare/shared':
+      '@pm-os/shared':
         specifier: workspace:*
         version: link:../shared
       drizzle-orm:
@@ -281,16 +281,16 @@ importers:
 
   packages/integrations:
     dependencies:
-      '@creare/ai-sdk':
+      '@pm-os/ai-sdk':
         specifier: workspace:*
         version: link:../ai-sdk
-      '@creare/boards':
+      '@pm-os/boards':
         specifier: workspace:*
         version: link:../boards
-      '@creare/database':
+      '@pm-os/database':
         specifier: workspace:*
         version: link:../database
-      '@creare/shared':
+      '@pm-os/shared':
         specifier: workspace:*
         version: link:../shared
       drizzle-orm:
@@ -306,10 +306,10 @@ importers:
 
   packages/memory:
     dependencies:
-      '@creare/database':
+      '@pm-os/database':
         specifier: workspace:*
         version: link:../database
-      '@creare/shared':
+      '@pm-os/shared':
         specifier: workspace:*
         version: link:../shared
       drizzle-orm:
@@ -325,10 +325,10 @@ importers:
 
   packages/observability:
     dependencies:
-      '@creare/database':
+      '@pm-os/database':
         specifier: workspace:*
         version: link:../database
-      '@creare/shared':
+      '@pm-os/shared':
         specifier: workspace:*
         version: link:../shared
       drizzle-orm:
@@ -344,19 +344,19 @@ importers:
 
   packages/reporting:
     dependencies:
-      '@creare/ai-sdk':
+      '@pm-os/ai-sdk':
         specifier: workspace:*
         version: link:../ai-sdk
-      '@creare/boards':
+      '@pm-os/boards':
         specifier: workspace:*
         version: link:../boards
-      '@creare/database':
+      '@pm-os/database':
         specifier: workspace:*
         version: link:../database
-      '@creare/integrations':
+      '@pm-os/integrations':
         specifier: workspace:*
         version: link:../integrations
-      '@creare/shared':
+      '@pm-os/shared':
         specifier: workspace:*
         version: link:../shared
       drizzle-orm:
@@ -384,10 +384,10 @@ importers:
 
   packages/tool-registry:
     dependencies:
-      '@creare/database':
+      '@pm-os/database':
         specifier: workspace:*
         version: link:../database
-      '@creare/shared':
+      '@pm-os/shared':
         specifier: workspace:*
         version: link:../shared
       drizzle-orm:

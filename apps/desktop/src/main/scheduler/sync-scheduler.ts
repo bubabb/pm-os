@@ -1,8 +1,8 @@
-import { getDb, projects, integrationCredentials, events } from '@creare/database'
-import type { IntegrationCredential } from '@creare/database'
+import { getDb, projects, integrationCredentials, events } from '@pm-os/database'
+import type { IntegrationCredential } from '@pm-os/database'
 import { eq, isNull } from 'drizzle-orm'
-import { generateId } from '@creare/shared'
-import { triggerSync } from '@creare/integrations'
+import { generateId } from '@pm-os/shared'
+import { triggerSync } from '@pm-os/integrations'
 import { getIntegrationToken, isTokenExpired, withMergedConnectionMetadata } from '../secrets'
 import { pruneOldRecords } from '../maintenance/prune'
 
@@ -15,7 +15,7 @@ import { pruneOldRecords } from '../maintenance/prune'
 // after startup, then every 24 h — independent of the sync cycle, and it still
 // runs when sync is disabled.
 //
-// Tuning: CREARE_SYNC_INTERVAL_MS (default 15 min). Set to 0 to disable sync.
+// Tuning: PMOS_SYNC_INTERVAL_MS (default 15 min). Set to 0 to disable sync.
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000
 const PRUNE_STARTUP_DELAY_MS = 60 * 1000
@@ -36,7 +36,7 @@ function runPruneSafely(): void {
   try {
     pruneOldRecords()
   } catch (err) {
-    console.error('[creare] Retention prune failed:', err instanceof Error ? err.message : err)
+    console.error('[pm-os] Retention prune failed:', err instanceof Error ? err.message : err)
   }
 }
 
@@ -52,7 +52,7 @@ function startPruneSchedule(): void {
 }
 
 function intervalMs(): number {
-  const raw = process.env['CREARE_SYNC_INTERVAL_MS']
+  const raw = process.env['PMOS_SYNC_INTERVAL_MS']
   if (raw === undefined) return DEFAULT_INTERVAL_MS
   const parsed = parseInt(raw, 10)
   return Number.isFinite(parsed) ? parsed : DEFAULT_INTERVAL_MS
@@ -64,7 +64,7 @@ function intervalMs(): number {
 // await the real work; the overlap-skip returns without touching it.
 export async function runSyncCycle(): Promise<void> {
   if (cycleRunning) {
-    console.log('[creare] Sync cycle skipped — previous cycle still running')
+    console.log('[pm-os] Sync cycle skipped — previous cycle still running')
     return
   }
   cycleRunning = true
@@ -120,7 +120,7 @@ async function runSyncCycleBody(): Promise<void> {
         .map((r) => r.value)
       settled.forEach((r, i) => {
         if (r.status === 'rejected') {
-          console.error(`[creare] Token decryption failed for credential ${usable[i]?.id}:`, r.reason)
+          console.error(`[pm-os] Token decryption failed for credential ${usable[i]?.id}:`, r.reason)
         }
       })
       if (pairs.length === 0) continue
@@ -131,7 +131,7 @@ async function runSyncCycleBody(): Promise<void> {
     } catch (err) {
       // Isolate failures — one bad project must not abort the whole cycle.
       console.error(
-        `[creare] Scheduled sync failed for project ${project.id}:`,
+        `[pm-os] Scheduled sync failed for project ${project.id}:`,
         err instanceof Error ? err.message : err,
       )
     }
@@ -148,7 +148,7 @@ async function runSyncCycleBody(): Promise<void> {
       resourceType: 'integration_sync',
       resourceId: null,
       payload: JSON.stringify({ projectsSynced, credentialsSynced }),
-    }).catch((err) => console.error('[creare] Event log write failed:', err))
+    }).catch((err) => console.error('[pm-os] Event log write failed:', err))
   }
 }
 
@@ -158,7 +158,7 @@ export function startSyncScheduler(): void {
   startPruneSchedule()
   const ms = intervalMs()
   if (ms <= 0) {
-    console.log('[creare] Background sync scheduler disabled (CREARE_SYNC_INTERVAL_MS=0)')
+    console.log('[pm-os] Background sync scheduler disabled (PMOS_SYNC_INTERVAL_MS=0)')
     return
   }
   // Don't run immediately on boot — let the app settle, then sync on the interval.
@@ -167,10 +167,10 @@ export function startSyncScheduler(): void {
   // (an overlap-skip returns instantly and would hide a still-running cycle).
   timer = setInterval(() => {
     void runSyncCycle().catch((err) =>
-      console.error('[creare] Sync cycle error:', err instanceof Error ? err.message : err),
+      console.error('[pm-os] Sync cycle error:', err instanceof Error ? err.message : err),
     )
   }, ms)
-  console.log(`[creare] Background sync scheduler started (every ${Math.round(ms / 1000)}s)`)
+  console.log(`[pm-os] Background sync scheduler started (every ${Math.round(ms / 1000)}s)`)
 }
 
 export async function stopSyncScheduler(): Promise<void> {

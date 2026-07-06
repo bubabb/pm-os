@@ -7,12 +7,12 @@
 
 ### Database
 - All 25 tables migrated. Migration file: `packages/database/src/migrations/0000_damp_madame_hydra.sql`
-- DB lives at `~/.creare/creare.db` (created on first run)
+- DB lives at `~/.pmos/pmos.db` (created on first run)
 - Schema circular ref fixed: `tools.latestVersionId` now uses `references((): AnySQLiteColumn => toolVersions.id)`
 - `drizzle-kit` updated to v0.31.10 — scripts in `packages/database/package.json` updated to use direct node path
 
 ### Fastify Server
-- `apps/desktop/src/main/server.ts` — starts on `http://127.0.0.1:4321` (configurable via `CREARE_PORT`)
+- `apps/desktop/src/main/server.ts` — starts on `http://127.0.0.1:4321` (configurable via `PMOS_PORT`)
 - CORS restricted to localhost origins only
 - `@fastify/swagger` + `@fastify/swagger-ui` — OpenAPI spec at `/docs`
 - `startServer()` / `stopServer()` called from `apps/desktop/src/main/index.ts`

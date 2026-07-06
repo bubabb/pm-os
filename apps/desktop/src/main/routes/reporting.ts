@@ -1,15 +1,15 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
-import { getDashboard, queryProject } from '@creare/reporting'
-import { getLatestDigest, generatePmDigest, getActiveEvents, classifyItems } from '@creare/integrations'
+import { getDashboard, queryProject } from '@pm-os/reporting'
+import { getLatestDigest, generatePmDigest, getActiveEvents, classifyItems } from '@pm-os/integrations'
 import { resolveReasoningConfig, providerNeedsKey } from '../secrets'
 import { assertProjectAccess } from '../utils/project-access'
-import { createTask } from '@creare/agent-orchestration'
+import { createTask } from '@pm-os/agent-orchestration'
 import { createNotification } from '../notifications/notification-service'
 import type { AuthenticatedRequest } from '../auth'
 import type { ReasoningConfig } from '../secrets'
-import type { ClassifiedItem } from '@creare/integrations'
-import type { PmDigestCache } from '@creare/database'
+import type { ClassifiedItem } from '@pm-os/integrations'
+import type { PmDigestCache } from '@pm-os/database'
 
 interface ProjectParams { id: string }
 interface DigestParams { id: string; type: string }

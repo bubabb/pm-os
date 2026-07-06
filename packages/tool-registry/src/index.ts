@@ -3,9 +3,9 @@
 // deploy a version to "active", and roll back to the previous deployed version.
 // Every state change emits an event to the append-only event log (see CONTRACT.md).
 
-import { getDb, tools, toolVersions, toolDeployments, events } from '@creare/database'
+import { getDb, tools, toolVersions, toolDeployments, events } from '@pm-os/database'
 import { eq, and, desc } from 'drizzle-orm'
-import { generateId } from '@creare/shared'
+import { generateId } from '@pm-os/shared'
 import type { InferSelectModel } from 'drizzle-orm'
 
 // ── Re-exported types ─────────────────────────────────────────────────────────

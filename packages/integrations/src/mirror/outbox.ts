@@ -33,8 +33,8 @@ import {
   remoteLinks,
   syncConflicts,
   tasks,
-} from '@creare/database'
-import { generateId, stableHash } from '@creare/shared'
+} from '@pm-os/database'
+import { generateId, stableHash } from '@pm-os/shared'
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import { UnsupportedMutationError } from '../connectors/base'
 import { GitHubConnector } from '../connectors/github'
@@ -44,7 +44,7 @@ import { NotionConnector } from '../connectors/notion'
 import { OneDriveConnector } from '../connectors/onedrive'
 import { GitHubNotFoundError, GitHubScopeError } from '../connectors/github-projects'
 import type { BaseConnector } from '../connectors/base'
-import type { IntegrationCredential, MutationQueueRow, RemoteLink } from '@creare/database'
+import type { IntegrationCredential, MutationQueueRow, RemoteLink } from '@pm-os/database'
 import type {
   ConnectorConfig,
   CreatedItemBaseline,

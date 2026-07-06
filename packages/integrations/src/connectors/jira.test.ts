@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { stableHash } from '@creare/shared'
+import { stableHash } from '@pm-os/shared'
 import { JiraConnector, JIRA_STATUS_FIELD } from './jira'
 import type { ConnectorConfig, MutationEnvelope, MutationOp } from '../types'
 
@@ -61,7 +61,7 @@ describe('JiraConnector — listRemoteBoards', () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         values: [
-          { id: '10001', key: 'CRE', name: 'Creare' },
+          { id: '10001', key: 'CRE', name: 'Pm.Os' },
           { id: '10002', key: 'OPS', name: 'Platform Ops' },
         ],
         isLast: true,
@@ -71,7 +71,7 @@ describe('JiraConnector — listRemoteBoards', () => {
     const boards = await connector().listRemoteBoards()
 
     expect(boards).toEqual([
-      { id: 'CRE', label: 'Creare', sublabel: 'CRE', url: `${BASE}/browse/CRE` },
+      { id: 'CRE', label: 'Pm.Os', sublabel: 'CRE', url: `${BASE}/browse/CRE` },
       { id: 'OPS', label: 'Platform Ops', sublabel: 'OPS', url: `${BASE}/browse/OPS` },
     ])
 
@@ -122,7 +122,7 @@ describe('JiraConnector — fetchBoardSnapshot', () => {
   it('builds columns from statuses (deduped, category-ordered, done=terminal) and items from issues', async () => {
     fetchMock
       // 1. project lookup
-      .mockResolvedValueOnce(jsonResponse({ id: '10001', key: 'CRE', name: 'Creare' }))
+      .mockResolvedValueOnce(jsonResponse({ id: '10001', key: 'CRE', name: 'Pm.Os' }))
       // 2. statuses per issue type — scrambled order + a duplicate across types
       .mockResolvedValueOnce(
         jsonResponse([
@@ -171,7 +171,7 @@ describe('JiraConnector — fetchBoardSnapshot', () => {
     const snapshot = await connector().fetchBoardSnapshot('CRE')
 
     expect(snapshot.remoteId).toBe('CRE')
-    expect(snapshot.title).toBe('Creare')
+    expect(snapshot.title).toBe('Pm.Os')
     expect(snapshot.url).toBe(`${BASE}/browse/CRE`)
     expect(snapshot.statusFieldRemoteId).toBe(JIRA_STATUS_FIELD)
     // Board version = newest issue update (Jira projects have no updatedAt)
@@ -234,7 +234,7 @@ describe('JiraConnector — fetchBoardSnapshot', () => {
     }))
 
     fetchMock
-      .mockResolvedValueOnce(jsonResponse({ id: '10001', key: 'CRE', name: 'Creare' }))
+      .mockResolvedValueOnce(jsonResponse({ id: '10001', key: 'CRE', name: 'Pm.Os' }))
       .mockResolvedValueOnce(jsonResponse([{ name: 'Task', statuses: [{ id: '1', name: 'To Do', statusCategory: { key: 'new' } }] }]))
       .mockResolvedValueOnce(jsonResponse({ issues: fullPage, nextPageToken: 'tok-page-2', isLast: false }))
       .mockResolvedValueOnce(

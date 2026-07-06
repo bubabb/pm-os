@@ -1,30 +1,31 @@
 /**
- * Creare CLI — a thin, scriptable client over the same localhost API the web UI
+ * Pm.Os CLI — a thin, scriptable client over the same localhost API the web UI
  * and Electron app use. No Electron, no browser: authenticates via the
  * /auth/sign-in dev-stub, caches the JWT, and prints tables (or --json).
  *
  * Run:  tsx src/server/cli.ts <command> [args]   (see package.json "cli" script)
- * Point at a non-default port with CREARE_PORT, or a full URL with CREARE_API.
+ * Point at a non-default port with PMOS_PORT, or a full URL with PMOS_API.
  */
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
+import { ensurePmosDataDir } from '@pm-os/shared'
 import { dirname, join } from 'path'
 
-// Validate CREARE_PORT: unset → 4321, but a set-but-invalid value must fail loudly
-// rather than build a nonsense URL. Ignored when CREARE_API overrides the base URL.
+// Validate PMOS_PORT: unset → 4321, but a set-but-invalid value must fail loudly
+// rather than build a nonsense URL. Ignored when PMOS_API overrides the base URL.
 function resolvePort(): string {
-  const raw = process.env['CREARE_PORT']
+  const raw = process.env['PMOS_PORT']
   if (raw === undefined || raw === '') return '4321'
   const port = Number(raw)
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(`Invalid CREARE_PORT: "${raw}" — must be an integer between 1 and 65535`)
+    throw new Error(`Invalid PMOS_PORT: "${raw}" — must be an integer between 1 and 65535`)
   }
   return String(port)
 }
 
-const PORT = process.env['CREARE_API'] ? '' : resolvePort()
-const BASE = process.env['CREARE_API'] ?? `http://127.0.0.1:${PORT}`
-const TOKEN_FILE = join(homedir(), '.creare', 'cli-token.json')
+const PORT = process.env['PMOS_API'] ? '' : resolvePort()
+const BASE = process.env['PMOS_API'] ?? `http://127.0.0.1:${PORT}`
+const TOKEN_FILE = join(homedir(), '.pmos', 'cli-token.json')
 const JSON_OUT = process.argv.includes('--json')
 
 // ---- auth (dev-stub) -------------------------------------------------------
@@ -41,6 +42,7 @@ function writeToken(token: string): void {
   // The mode option only applies when the file is *created*; an existing token file
   // keeps its old perms. Create the dir 0700 and chmod the file 0600 after writing so
   // the cached JWT is always owner-only, even on rewrite.
+  ensurePmosDataDir() // migrate a legacy ~/.creare install if present
   mkdirSync(dirname(TOKEN_FILE), { recursive: true, mode: 0o700 })
   writeFileSync(TOKEN_FILE, JSON.stringify({ token }), { mode: 0o600 })
   chmodSync(TOKEN_FILE, 0o600)
@@ -82,7 +84,7 @@ async function api<T>(
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('ECONNREFUSED') || msg.includes('fetch failed')) {
       throw new Error(
-        `Cannot reach Creare at ${BASE}. Is the server running?  Start it with:  pnpm creare`,
+        `Cannot reach Pm.Os at ${BASE}. Is the server running?  Start it with:  pnpm pm-os`,
       )
     }
     throw err
@@ -143,9 +145,9 @@ function printObject(obj: Record<string, unknown>): void {
 
 // ---- commands --------------------------------------------------------------
 
-const USAGE = `Creare CLI — scriptable client for the local Creare server (${BASE})
+const USAGE = `Pm.Os CLI — scriptable client for the local Pm.Os server (${BASE})
 
-Usage: creare <command> [args] [--json]
+Usage: pm-os <command> [args] [--json]
 
 Commands:
   health                       Server health check (no auth)
@@ -161,7 +163,7 @@ Commands:
 Flags:
   --json                       Output raw JSON instead of a table
 Env:
-  CREARE_PORT (default 4321)   Server port        CREARE_API   Full base URL override`
+  PMOS_PORT (default 4321)   Server port        PMOS_API   Full base URL override`
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2).filter((a) => a !== '--json')
@@ -179,13 +181,13 @@ async function main(): Promise<void> {
       return
 
     case 'health': {
-      // Health needs no auth — hit it directly so `creare health` works even
+      // Health needs no auth — hit it directly so `pm-os health` works even
       // before sign-in and surfaces a clean "is it up?" answer.
       try {
         const res = await fetch(`${BASE}/health`)
         printObject((await res.json()) as Record<string, unknown>)
       } catch {
-        throw new Error(`Cannot reach Creare at ${BASE}. Start it with:  pnpm creare`)
+        throw new Error(`Cannot reach Pm.Os at ${BASE}. Start it with:  pnpm pm-os`)
       }
       return
     }
@@ -201,7 +203,7 @@ async function main(): Promise<void> {
 
     case 'boards': {
       const projectId = args[1]
-      if (!projectId) throw new Error('usage: creare boards <projectId>')
+      if (!projectId) throw new Error('usage: pm-os boards <projectId>')
       const rows = await api<Array<Record<string, unknown>>>(`/projects/${projectId}/boards`)
       printTable(rows, ['id', 'name', 'type'])
       return
@@ -215,7 +217,7 @@ async function main(): Promise<void> {
 
     case 'sources': {
       const projectId = args[1]
-      if (!projectId) throw new Error('usage: creare sources <projectId>')
+      if (!projectId) throw new Error('usage: pm-os sources <projectId>')
       const rows = await api<Array<Record<string, unknown>>>(
         `/projects/${projectId}/integrations`,
       )
@@ -225,7 +227,7 @@ async function main(): Promise<void> {
 
     case 'status': {
       const projectId = args[1]
-      if (!projectId) throw new Error('usage: creare status <projectId>')
+      if (!projectId) throw new Error('usage: pm-os status <projectId>')
       const out = await api<Record<string, unknown>>(`/projects/${projectId}/integrations/status`)
       if (JSON_OUT) console.log(JSON.stringify(out, null, 2))
       else if (Array.isArray(out)) printTable(out as Array<Record<string, unknown>>, Object.keys((out[0] as object) ?? {}))
@@ -235,7 +237,7 @@ async function main(): Promise<void> {
 
     case 'sync': {
       const projectId = args[1]
-      if (!projectId) throw new Error('usage: creare sync <projectId> [source]')
+      if (!projectId) throw new Error('usage: pm-os sync <projectId> [source]')
       const source = args[2]
       const out = await api<Record<string, unknown>>(
         `/projects/${projectId}/integrations/sync`,

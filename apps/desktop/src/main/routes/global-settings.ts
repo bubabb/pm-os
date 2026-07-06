@@ -4,7 +4,7 @@ import {
   listGlobalSettingKeys, setGlobalSetting, deleteGlobalSetting, getGlobalSetting,
   DEFAULT_REASONING_PROVIDER, DEFAULT_REASONING_MODEL,
 } from '../secrets'
-import { checkClaudeCli } from '@creare/ai-sdk'
+import { checkClaudeCli } from '@pm-os/ai-sdk'
 
 // Workspace-level (GLOBAL) encrypted settings — requireAuth, but NOT project-scoped.
 // Values are never returned — only the keys present.

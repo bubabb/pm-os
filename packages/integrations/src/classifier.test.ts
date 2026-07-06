@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { seedWorkspace, seedCredential, destroyTestDb } from '@creare/database/testing'
-import { getDb, externalEventCache } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { seedWorkspace, seedCredential, destroyTestDb } from '@pm-os/database/testing'
+import { getDb, externalEventCache } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { eq } from 'drizzle-orm'
 import { classifyItems } from './index'
-import type * as AiSdk from '@creare/ai-sdk'
+import type * as AiSdk from '@pm-os/ai-sdk'
 import type { NormalizedEntity } from './types'
 
 // Mock the AI SDK so no test ever reaches the network. The rule engine and the
@@ -22,7 +22,7 @@ const llm = vi.hoisted(() => ({
 }))
 // Override only `complete`; keep the real helpers (extractJson) so the classifier's
 // JSON parsing is exercised for real, including the ```json fence case below.
-vi.mock('@creare/ai-sdk', async (importActual) => ({
+vi.mock('@pm-os/ai-sdk', async (importActual) => ({
   ...(await importActual<typeof AiSdk>()),
   complete: llm.complete,
 }))

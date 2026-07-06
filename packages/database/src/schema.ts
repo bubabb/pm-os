@@ -1,7 +1,7 @@
 /**
- * Creare — Canonical Database Schema
+ * Pm.Os — Canonical Database Schema
  *
- * This file is the single source of truth for all data in Creare.
+ * This file is the single source of truth for all data in Pm.Os.
  * Rules (enforced by AGENT-PROTOCOL.md):
  *   - All primary keys are UUIDs — never auto-increment integers
  *   - The `events` table is append-only — no UPDATE or DELETE ever

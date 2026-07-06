@@ -4,7 +4,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import type { Plugin } from 'vite'
 
-// @creare/* workspace packages are pnpm symlinks — they do not survive
+// @pm-os/* workspace packages are pnpm symlinks — they do not survive
 // electron-builder packaging, so they must be BUNDLED into the main/preload
 // output instead of externalized. Everything else in dependencies (including
 // the native better-sqlite3) stays external. The list is derived from
@@ -13,7 +13,7 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')
   dependencies?: Record<string, string>
 }
 const workspacePackages = Object.keys(pkg.dependencies ?? {}).filter((dep) =>
-  dep.startsWith('@creare/'),
+  dep.startsWith('@pm-os/'),
 )
 
 // Bundle the workspace packages from their TypeScript SOURCE, not the built
@@ -22,11 +22,11 @@ const workspacePackages = Object.keys(pkg.dependencies ?? {}).filter((dep) =>
 // source resolution also removes the stale-dist failure mode. Exact-name
 // match only — subpath imports (none today) would fall through to dist.
 const workspaceSourceAlias = {
-  find: /^@creare\/([a-z0-9-]+)$/,
+  find: /^@pm-os\/([a-z0-9-]+)$/,
   replacement: resolve(__dirname, '../../packages') + '/$1/src/index.ts',
 }
 
-// @creare/database's runMigrations() probes `join(__dirname, 'migrations')`.
+// @pm-os/database's runMigrations() probes `join(__dirname, 'migrations')`.
 // When the package was externalized, __dirname was packages/database/dist
 // (which ships migrations); now that it is bundled, __dirname is out/main —
 // so copy the SQL migrations next to the bundle. Keeps `pnpm dev` and E2E
@@ -34,7 +34,7 @@ const workspaceSourceAlias = {
 // canonical packaged path is process.resourcesPath/migrations, shipped via
 // extraResources in electron-builder.yml).
 const copyMigrationsPlugin: Plugin = {
-  name: 'creare:copy-database-migrations',
+  name: 'pm-os:copy-database-migrations',
   writeBundle() {
     cpSync(
       resolve(__dirname, '../../packages/database/src/migrations'),
@@ -59,7 +59,7 @@ export default defineConfig({
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/main/index.ts') },
         // better-sqlite3 is a NATIVE module pulled in by the (now bundled)
-        // @creare/database — it must never be bundled. It is also a direct
+        // @pm-os/database — it must never be bundled. It is also a direct
         // dependency (so externalizeDepsPlugin externalizes it), but keep the
         // explicit external as a guard.
         external: ['better-sqlite3'],

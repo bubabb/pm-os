@@ -5,12 +5,12 @@
 
 ## What Was Built
 
-### @creare/ai-sdk
+### @pm-os/ai-sdk
 - `src/types.ts` — CompletionRequest, CompletionResponse, Message, ModelProvider
 - `src/providers/anthropic.ts` — Anthropic SDK wrapper with per-model cost calculation (Sonnet/Opus/Haiku)
 - `src/index.ts` — `complete(request, apiKey)` — provider-routing public API
 
-### @creare/integrations — Domain 6
+### @pm-os/integrations — Domain 6
 - `src/types.ts` — IntegrationSource, NormalizedEntity, ClassifiedItem, SyncStatus, ConnectorConfig, FetchResult
 - `src/connectors/base.ts` — BaseConnector abstract class with 3-attempt exponential backoff fetchWithRetry
 - `src/connectors/github.ts` — GitHub REST API, open PRs + issues, extracts Jira ticket IDs for correlation
@@ -27,7 +27,7 @@
 
 ### Desktop app
 - `src/main/routes/integrations.ts` — 6 routes: list/create/delete credentials, trigger sync, get status, get events
-- `@creare/integrations` added to desktop app dependencies
+- `@pm-os/integrations` added to desktop app dependencies
 
 ## Token Injection Pattern
 `packages/integrations` does NOT import from `apps/desktop` — no circular dep.

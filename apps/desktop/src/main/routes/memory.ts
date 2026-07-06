@@ -2,8 +2,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
 import { assertProjectAccess } from '../utils/project-access'
 import type { AuthenticatedRequest } from '../auth'
-import { recordLearning, listLearnings, recallLearnings } from '@creare/memory'
-import type { LearningSource, RecordLearningParams, RecallQuery } from '@creare/memory'
+import { recordLearning, listLearnings, recallLearnings } from '@pm-os/memory'
+import type { LearningSource, RecordLearningParams, RecallQuery } from '@pm-os/memory'
 
 interface ProjectParams { id: string }
 

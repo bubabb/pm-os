@@ -73,7 +73,7 @@ function avatarFor(id: string): { color: string; emoji: string } {
 
 // ── Favorites (persisted in localStorage) ─────────────────────────────────────
 
-const FAV_KEY = 'creare_fav_projects'
+const FAV_KEY = 'pmos_fav_projects'
 
 function loadFavorites(): Set<string> {
   try {

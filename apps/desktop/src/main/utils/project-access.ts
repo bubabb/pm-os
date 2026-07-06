@@ -1,4 +1,4 @@
-import { getDb, projects } from '@creare/database'
+import { getDb, projects } from '@pm-os/database'
 import { and, eq } from 'drizzle-orm'
 
 export async function assertProjectAccess(

@@ -1,5 +1,5 @@
 {
-  "name": "@creare/database",
+  "name": "@pm-os/database",
   "version": "0.1.0",
   "private": true,
   "main": "dist/index.js",
@@ -15,7 +15,7 @@
     "db:push": "node ../../node_modules/.pnpm/drizzle-kit@0.31.10/node_modules/drizzle-kit/bin.cjs push"
   },
   "dependencies": {
-    "@creare/shared": "workspace:*",
+    "@pm-os/shared": "workspace:*",
     "better-sqlite3": "^12.10.0",
     "drizzle-orm": "^0.45.2"
   },

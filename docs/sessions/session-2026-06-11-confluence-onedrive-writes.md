@@ -25,7 +25,7 @@
 - `packages/integrations/src/connectors/onedrive.test.ts` (new)
 
 ## Verification
-- `pnpm --filter @creare/integrations typecheck` — clean.
+- `pnpm --filter @pm-os/integrations typecheck` — clean.
 - New tests 15/15 green; full integrations suite 132/132 green (12 files).
 
 ## Open Questions

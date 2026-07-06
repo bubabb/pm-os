@@ -2,8 +2,8 @@
 
 ## What Was Done
 - Wrote Phase 2 task files: phase2-task-aisdk.md, phase2-domain6-integrations.md
-- Built @creare/ai-sdk: Anthropic provider wrapper, cost calculation per model, complete() public API
-- Scaffolded @creare/integrations: package.json, tsconfig.json
+- Built @pm-os/ai-sdk: Anthropic provider wrapper, cost calculation per model, complete() public API
+- Scaffolded @pm-os/integrations: package.json, tsconfig.json
 - Built all 5 source connectors (GitHub, Jira, Confluence, Notion, OneDrive) with exponential backoff
 - Built sync engine with full lifecycle: soft-purge stale, paginated fetch, DB write, sync state, event log
 - Built normalizer (NormalizedEntity → DB row)
@@ -45,7 +45,7 @@
 - packages/integrations/src/index.ts
 - apps/desktop/src/main/routes/integrations.ts
 - apps/desktop/src/main/server.ts (added integrationsRoutes)
-- apps/desktop/package.json (added @creare/integrations)
+- apps/desktop/package.json (added @pm-os/integrations)
 - agent-state/handoffs/phase2-domain6-output.md
 
 ## Open Questions

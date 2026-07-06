@@ -5,7 +5,7 @@
 - Entire snapshot apply runs in ONE `getDb().transaction()` (same pattern as `createBoard`): board create (or reuse) + `remote_links` row, column ensure/update with `lastSyncedHash`, item upsert (backing `task` per item — `board_items.taskId` is NOT NULL), moves, deletes (board_item removed, task kept, link `deletedAt` tombstone), tombstone resurrection if a deleted remote item reappears.
 - Events: `board.mirror.created` (import), `board.item.moved` (per move), `board.mirror.synced` (re-sync), all actorType `system`.
 - Updated `packages/boards/CONTRACT.md`: new events, MirrorApply shapes, declared writes to `tasks` + `remote_links`.
-- Added 5 tests to `packages/boards/src/index.test.ts` (initial import, idempotent re-apply, move, delete, column added) using `@creare/database/testing` + `seedCredential`.
+- Added 5 tests to `packages/boards/src/index.test.ts` (initial import, idempotent re-apply, move, delete, column added) using `@pm-os/database/testing` + `seedCredential`.
 
 ## Decisions Made
 - Types defined IN boards (not integrations) to avoid a circular dependency — integrations' mirror-sync translates its ReconcilePlan into `MirrorApply`.
@@ -23,4 +23,4 @@
 - Whether `board.mirror.synced` should also fire on the initial import (currently import emits only `board.mirror.created`).
 
 ## Next Session Should Start With
-- Wire `@creare/integrations` mirror-sync ReconcilePlan → `MirrorApply` and call `applyMirrorSnapshot`. Verify gate: `pnpm --filter @creare/boards typecheck` and `pnpm vitest run packages/boards/src/index.test.ts` both green (10/10).
+- Wire `@pm-os/integrations` mirror-sync ReconcilePlan → `MirrorApply` and call `applyMirrorSnapshot`. Verify gate: `pnpm --filter @pm-os/boards typecheck` and `pnpm vitest run packages/boards/src/index.test.ts` both green (10/10).

@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { getDb, projects, events } from '@creare/database'
-import { generateId } from '@creare/shared'
-import { createBoard } from '@creare/boards'
-import { addEdge, createTask, createWorkspace } from '@creare/agent-orchestration'
+import { getDb, projects, events } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
+import { createBoard } from '@pm-os/boards'
+import { addEdge, createTask, createWorkspace } from '@pm-os/agent-orchestration'
 import { eq, and, isNull, isNotNull } from 'drizzle-orm'
 import { requireAuth } from '../auth'
 import type { AuthenticatedRequest } from '../auth'
@@ -86,7 +86,7 @@ function emitProjectEvent(
     resourceType: 'project',
     resourceId: projectId,
     payload: JSON.stringify(payload),
-  }).catch((err) => console.error('[creare] Event log write failed:', err))
+  }).catch((err) => console.error('[pm-os] Event log write failed:', err))
 }
 
 export async function projectsRoutes(app: FastifyInstance): Promise<void> {
@@ -141,7 +141,7 @@ export async function projectsRoutes(app: FastifyInstance): Promise<void> {
           scaffoldProject(project!.id, templateId, user.id)
           emitProjectEvent(db, 'project.scaffolded', project!.id, user.id, { templateId })
         } catch (err) {
-          console.error('[creare] Project scaffolding failed:', err)
+          console.error('[pm-os] Project scaffolding failed:', err)
         }
       }
 

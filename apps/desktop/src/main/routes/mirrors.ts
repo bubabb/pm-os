@@ -9,13 +9,13 @@ import {
   getConnection,
   getConnectionToken,
 } from '../secrets'
-import { getDb, integrationCredentials, remoteLinks, events } from '@creare/database'
+import { getDb, integrationCredentials, remoteLinks, events } from '@pm-os/database'
 import { and, eq, isNull } from 'drizzle-orm'
-import { generateId } from '@creare/shared'
-import { listRemoteBoards, resolveRemoteBoard, createMirror, pullMirror, getMirrorStatus } from '@creare/integrations'
-import type { ConnectorConfig } from '@creare/integrations'
+import { generateId } from '@pm-os/shared'
+import { listRemoteBoards, resolveRemoteBoard, createMirror, pullMirror, getMirrorStatus } from '@pm-os/integrations'
+import type { ConnectorConfig } from '@pm-os/integrations'
 import type { AuthenticatedRequest } from '../auth'
-import type { Connection } from '@creare/database'
+import type { Connection } from '@pm-os/database'
 
 // Bidirectional board mirrors (GitHub Projects v2, Phase 1) — remote-board
 // picker, mirror creation (import), manual pull, and sync status. The push
@@ -161,7 +161,7 @@ export async function mirrorsRoutes(app: FastifyInstance): Promise<void> {
         resourceType: 'integration_credential',
         resourceId: credential.id,
         payload: JSON.stringify({ source: credential.source, label: credential.label }),
-      }).catch((err) => console.error('[creare] Event log write failed:', err))
+      }).catch((err) => console.error('[pm-os] Event log write failed:', err))
 
       try {
         const merged = await withMergedConnectionMetadata(credential)
@@ -172,7 +172,7 @@ export async function mirrorsRoutes(app: FastifyInstance): Promise<void> {
         // Import failed AFTER the credential row was created — remove it so a
         // retry starts clean instead of accumulating orphaned credentials.
         await deleteIntegrationCredential(credential.id)
-          .catch((cleanupErr) => console.error('[creare] Orphaned credential cleanup failed:', cleanupErr))
+          .catch((cleanupErr) => console.error('[pm-os] Orphaned credential cleanup failed:', cleanupErr))
         const message = err instanceof Error ? err.message : String(err)
         return reply.code(502).send({ error: message })
       }

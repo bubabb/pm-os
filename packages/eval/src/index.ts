@@ -1,4 +1,4 @@
-// Creare — Eval & Intelligence (Phase 4)
+// Pm.Os — Eval & Intelligence (Phase 4)
 // AI eval harness + tool regression testing, with optional persistence for tracking
 // quality over time.
 

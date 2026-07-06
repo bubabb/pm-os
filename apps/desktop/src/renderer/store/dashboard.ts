@@ -1,9 +1,9 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
 import { toast } from '../components/ui/Toast'
-import type { ClassifiedItem } from '@creare/integrations'
+import type { ClassifiedItem } from '@pm-os/integrations'
 
-// Matches DashboardResponse from @creare/reporting
+// Matches DashboardResponse from @pm-os/reporting
 interface SprintContext {
   activeSprint: { name: string; dayNumber: number; totalDays: number; endsAt: string } | null
   atRiskMilestones: { title: string; daysUntilDue: number; status: string }[]
@@ -92,7 +92,7 @@ function sleep(ms: number): Promise<void> {
 // ── Acknowledged-id persistence ───────────────────────────────────────────────
 // Dismissals survive reloads: ids live in localStorage, keyed per project.
 
-const ACK_KEY_PREFIX = 'creare_ack_'
+const ACK_KEY_PREFIX = 'pmos_ack_'
 
 function loadAckIds(projectId: string): Set<string> {
   try {

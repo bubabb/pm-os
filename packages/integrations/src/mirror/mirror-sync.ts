@@ -24,12 +24,12 @@ import {
   mutationQueue,
   syncConflicts,
   integrationCredentials,
-} from '@creare/database'
-import { generateId } from '@creare/shared'
+} from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { and, asc, count, eq, inArray, isNull, sql } from 'drizzle-orm'
-import { applyMirrorSnapshot } from '@creare/boards'
-import type { MirrorApply, MirrorApplyColumn, MirrorApplyItem } from '@creare/boards'
-import type { IntegrationCredential, RemoteLink } from '@creare/database'
+import { applyMirrorSnapshot } from '@pm-os/boards'
+import type { MirrorApply, MirrorApplyColumn, MirrorApplyItem } from '@pm-os/boards'
+import type { IntegrationCredential, RemoteLink } from '@pm-os/database'
 import { buildConnector } from '../sync-engine'
 import {
   planReconcile,

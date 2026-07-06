@@ -6,14 +6,14 @@ last-updated: 2026-06-08
 ---
 
 ## Schema Types Consumed
-From `@creare/database`:
+From `@pm-os/database`:
 ```typescript
 import type {
   Tool, NewTool,
   ToolVersion, NewToolVersion,
   ToolDeployment, NewToolDeployment,
   Event, NewEvent,
-} from '@creare/database'
+} from '@pm-os/database'
 ```
 
 ## Events Emitted to Event Log
@@ -66,11 +66,11 @@ rollback(toolId: string, deployedById: string): ToolDeployment   // restores pre
 The `/projects/:id/tools/:toolId/deployments/active` route returns `{ deployment: ToolDeployment | null }`.
 
 ## Dependencies
-- `@creare/database` — read/write tools, tool_versions, tool_deployments, events
-- `@creare/shared` — `generateId()`
+- `@pm-os/database` — read/write tools, tool_versions, tool_deployments, events
+- `@pm-os/shared` — `generateId()`
 
 ## Consumed By
 - `apps/desktop` — tool registry UI, deploy/rollback controls
-- `@creare/agent-orchestration` — agents reference tools by ID + version
-- `@creare/observability` — reads tool deployment events
-- `@creare/reporting` — tool usage analytics
+- `@pm-os/agent-orchestration` — agents reference tools by ID + version
+- `@pm-os/observability` — reads tool deployment events
+- `@pm-os/reporting` — tool usage analytics

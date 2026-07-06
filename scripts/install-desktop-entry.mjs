@@ -1,10 +1,10 @@
-// Install a desktop/menu launcher for the Creare app. Wired into `predev`, so it
+// Install a desktop/menu launcher for the Pm.Os app. Wired into `predev`, so it
 // runs (idempotently) the first time someone runs `pnpm dev` on a machine.
 //
 // - Linux: installs a .desktop entry (app menu + desktop icon).
-// - macOS: installs a minimal ~/Applications/Creare.app bundle (the repo syncs to
+// - macOS: installs a minimal ~/Applications/Pm.Os.app bundle (the repo syncs to
 //   a Mac via Syncthing, where a Linux .desktop file is meaningless). Double-click
-//   launches scripts/launch-creare.sh with no terminal.
+//   launches scripts/launch-pm-os.sh with no terminal.
 // - Other platforms: exits quietly.
 // - References the committed icon at apps/desktop/resources/icon.png — no runtime
 //   SVG converter needed. (resources/, not build/, because Syncthing ignores build/.)
@@ -20,7 +20,7 @@ try {
   if (plat !== 'linux' && plat !== 'darwin') process.exit(0)
 
   const repo = join(dirname(fileURLToPath(import.meta.url)), '..')
-  const launcher = join(repo, 'scripts/launch-creare.sh')
+  const launcher = join(repo, 'scripts/launch-pm-os.sh')
   const png = join(repo, 'apps/desktop/resources/icon.png')
   const svg = join(repo, 'apps/desktop/resources/icon.svg')
   const icon = existsSync(png) ? png : svg
@@ -48,19 +48,19 @@ try {
     const entry = `[Desktop Entry]
 Type=Application
 Version=1.0
-Name=Creare
+Name=Pm.Os
 GenericName=Agentic DevOps Platform
-Comment=Launch the Creare desktop app
+Comment=Launch the Pm.Os desktop app
 Exec=${launcher}
 Icon=${icon}
 Terminal=false
 Categories=Development;
 StartupNotify=true
-StartupWMClass=Creare
+StartupWMClass=Pm.Os
 `
 
     const appsDir = join(home, '.local/share/applications')
-    const appsFile = join(appsDir, 'creare.desktop')
+    const appsFile = join(appsDir, 'pm-os.desktop')
     mkdirSync(appsDir, { recursive: true })
 
     // Menu entry: (re)write only when content differs, so the Exec/Icon paths stay
@@ -78,7 +78,7 @@ StartupWMClass=Creare
     try {
       deskDir = execFileSync('xdg-user-dir', ['DESKTOP'], { encoding: 'utf8' }).trim() || deskDir
     } catch {}
-    const deskFile = join(deskDir, 'creare.desktop')
+    const deskFile = join(deskDir, 'pm-os.desktop')
     if (existsSync(deskDir) && !existsSync(deskFile)) {
       writeFileSync(deskFile, entry)
       try {
@@ -90,12 +90,12 @@ StartupWMClass=Creare
       created = true
     }
 
-    if (created) console.log('Installed Creare launcher (app menu + desktop icon)')
+    if (created) console.log('Installed Pm.Os launcher (app menu + desktop icon)')
   } else {
     // macOS: minimal .app bundle in ~/Applications. Finder double-click runs the
     // stub below (no Terminal window), which exec's the repo's launch script via
     // an absolute path baked in at install time.
-    const appDir = join(home, 'Applications', 'Creare.app')
+    const appDir = join(home, 'Applications', 'Pm.Os.app')
     const macosDir = join(appDir, 'Contents', 'MacOS')
     const resDir = join(appDir, 'Contents', 'Resources')
     mkdirSync(macosDir, { recursive: true })
@@ -106,7 +106,7 @@ StartupWMClass=Creare
     // the icon; the app still launches with the generic icon.
     const icnsFile = join(resDir, 'icon.icns')
     if (!existsSync(icnsFile) && existsSync(png)) {
-      const iconset = join(tmpdir(), `creare-icon-${process.pid}.iconset`)
+      const iconset = join(tmpdir(), `pm-os-icon-${process.pid}.iconset`)
       try {
         mkdirSync(iconset, { recursive: true })
         for (const size of [16, 32, 128, 256, 512]) {
@@ -130,15 +130,15 @@ StartupWMClass=Creare
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key>
-  <string>Creare</string>
+  <string>Pm.Os</string>
   <key>CFBundleDisplayName</key>
-  <string>Creare</string>
+  <string>Pm.Os</string>
   <key>CFBundleIdentifier</key>
-  <string>dev.creare.app</string>
+  <string>dev.pmos.app</string>
   <key>CFBundleVersion</key>
   <string>1.0</string>
   <key>CFBundleExecutable</key>
-  <string>Creare</string>
+  <string>Pm.Os</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
 ${hasIcns ? '  <key>CFBundleIconFile</key>\n  <string>icon</string>\n' : ''}  <key>LSMinimumSystemVersion</key>
@@ -148,7 +148,7 @@ ${hasIcns ? '  <key>CFBundleIconFile</key>\n  <string>icon</string>\n' : ''}  <k
 `
 
     // The stub keeps no logic of its own: everything (PATH, build-if-missing,
-    // logging) lives in launch-creare.sh, so updates there take effect without
+    // logging) lives in launch-pm-os.sh, so updates there take effect without
     // reinstalling the .app.
     const stub = `#!/bin/bash
 exec "${launcher}"
@@ -157,13 +157,13 @@ exec "${launcher}"
     // (Re)write plist + stub each run so the baked-in repo path stays current.
     let created = false
     if (writeIfChanged(join(appDir, 'Contents', 'Info.plist'), plist)) created = true
-    if (writeIfChanged(join(macosDir, 'Creare'), stub, 0o755)) created = true
+    if (writeIfChanged(join(macosDir, 'Pm.Os'), stub, 0o755)) created = true
     // chmod even when unchanged — the executable bit can be lost independently.
     try {
-      chmodSync(join(macosDir, 'Creare'), 0o755)
+      chmodSync(join(macosDir, 'Pm.Os'), 0o755)
     } catch {}
 
-    if (created) console.log('Installed Creare launcher (macOS app in ~/Applications)')
+    if (created) console.log('Installed Pm.Os launcher (macOS app in ~/Applications)')
   }
 } catch {
   // Never block `pnpm dev` on launcher-install problems.

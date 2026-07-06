@@ -6,7 +6,7 @@ last-updated: 2026-06-02
 ---
 
 ## Schema Types Consumed
-From `@creare/database`:
+From `@pm-os/database`:
 ```typescript
 import type {
   AgentWorkspace, NewAgentWorkspace,
@@ -14,7 +14,7 @@ import type {
   TaskEdge, NewTaskEdge,
   ApprovalGate, NewApprovalGate,
   Event, NewEvent,
-} from '@creare/database'
+} from '@pm-os/database'
 ```
 
 ## Events Emitted to Event Log
@@ -54,13 +54,13 @@ resolveApprovalGate(gateId: string, status: 'approved' | 'rejected', note?: stri
 ```
 
 ## Dependencies (What This Domain Consumes)
-- `@creare/database` — read/write tasks, task_edges, agent_workspaces, approval_gates, events
-- `@creare/shared` — `generateId()`
-- `@creare/ai-sdk` — execute agent tasks via model-agnostic wrapper
+- `@pm-os/database` — read/write tasks, task_edges, agent_workspaces, approval_gates, events
+- `@pm-os/shared` — `generateId()`
+- `@pm-os/ai-sdk` — execute agent tasks via model-agnostic wrapper
 - Notifications service — `notifyApprovalNeeded()`, `checkCostThreshold()`
 
 ## Consumed By
 - `apps/desktop` — DAG UI, approval gate prompts, workspace status
-- `@creare/observability` — reads agent execution events from event log
-- `@creare/boards` — links board items to DAG task nodes
-- `@creare/reporting` — reads agent SLA/cost data
+- `@pm-os/observability` — reads agent execution events from event log
+- `@pm-os/boards` — links board items to DAG task nodes
+- `@pm-os/reporting` — reads agent SLA/cost data

@@ -1,24 +1,24 @@
-# Creare Bidirectional Sync — Architecture Blueprint
+# Pm.Os Bidirectional Sync — Architecture Blueprint
 
-> Designed 2026-06-11 (Fable 5 architecture pass). The plan to turn Creare from a
+> Designed 2026-06-11 (Fable 5 architecture pass). The plan to turn Pm.Os from a
 > read-only integration layer into a two-way management platform ("Azure DevOps but
 > better"): connect an account, mirror a remote board/project, and manage it from
-> Creare with git-pull/push-style two-way sync. This doc is the build spec; Phase 1
+> Pm.Os with git-pull/push-style two-way sync. This doc is the build spec; Phase 1
 > is executed first.
 
 ## Decision
 **Mirrored boards + durable push outbox + three-way pull reconciliation.**
-- Creare's existing Kanban becomes the editor; a Creare `board` links to one remote
+- Pm.Os's existing Kanban becomes the editor; a Pm.Os `board` links to one remote
   board (GitHub Projects v2 first). Columns mirror remote status options; cards mirror
   remote items (each backed by a real `task`, since `board_items.taskId` is NOT NULL —
-  remote items become agent-assignable Creare tasks).
+  remote items become agent-assignable Pm.Os tasks).
 - **Push** = durable `mutation_queue` outbox; local change applies instantly, a
   main-process worker drains FIFO per credential (the "git push").
 - **Pull** = snapshot + three-way diff against a `remote_links` shadow table holding
   `remoteVersion` + `lastSyncedHash` (the "git pull"); base/local/remote = conflict
   detection.
 - Domain ownership preserved: integrations owns connectors/GraphQL/outbox/reconciler;
-  it writes boards tables ONLY via a new `@creare/boards.applyMirrorSnapshot()` API.
+  it writes boards tables ONLY via a new `@pm-os/boards.applyMirrorSnapshot()` API.
 - The existing read-only pipeline (`external_event_cache`, classifier, digests) is
   untouched — mirror sync is a parallel pipeline.
 

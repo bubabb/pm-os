@@ -17,7 +17,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     // Surfaced in the dev console / main-process logs for diagnosis.
-    console.error('[creare] Unhandled render error:', error, info.componentStack)
+    console.error('[pm-os] Unhandled render error:', error, info.componentStack)
   }
 
   private handleDismiss = (): void => {

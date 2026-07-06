@@ -1,5 +1,5 @@
 import { Bot, ChevronRight } from 'lucide-react'
-import type { ClassifiedItem } from '@creare/integrations'
+import type { ClassifiedItem } from '@pm-os/integrations'
 
 const SOURCE_LABELS: Record<string, string> = {
   jira: 'Jira', github: 'GitHub', confluence: 'Confluence',

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { getDb, users } from '@creare/database'
+import { getDb, users } from '@pm-os/database'
 import { eq } from 'drizzle-orm'
 import { requireAuth } from '../auth'
 import type { AuthenticatedRequest } from '../auth'

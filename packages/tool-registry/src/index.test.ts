@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { seedWorkspace, destroyTestDb } from '@creare/database/testing'
+import { seedWorkspace, destroyTestDb } from '@pm-os/database/testing'
 import { createTool, publishVersion, getTool, listVersions, deploy, rollback, listDeployments } from './index'
 
 let userId: string

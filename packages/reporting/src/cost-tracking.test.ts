@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { seedWorkspace, seedAgentWorkspace, destroyTestDb } from '@creare/database/testing'
+import { seedWorkspace, seedAgentWorkspace, destroyTestDb } from '@pm-os/database/testing'
 import { recordCost, getProjectSpend } from './cost-tracking'
 
 let projectId: string

@@ -7,9 +7,9 @@ import {
   listTasks, getTask, createTask, updateTask,
   addEdge, getTaskEdges, getReadyTasks, listEdges,
   listApprovalGates, getApprovalGate, resolveApprovalGate,
-} from '@creare/agent-orchestration'
-import type { AgentWorkspace, Task } from '@creare/agent-orchestration'
-import { listSprints, listMilestones } from '@creare/boards'
+} from '@pm-os/agent-orchestration'
+import type { AgentWorkspace, Task } from '@pm-os/agent-orchestration'
+import { listSprints, listMilestones } from '@pm-os/boards'
 
 // Sub-resource guard — the gate must belong (via its task) to the project in the URL.
 function gateInProject(gateId: string, projectId: string): boolean {

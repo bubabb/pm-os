@@ -28,7 +28,7 @@ AND a thin CLI (CLI = next session). This session delivered Phase 1 + 2.
     renderer → `out/web`. No electron dependency at build time. `base: './'` for relative
     asset URLs.
   - `server.ts` — added `registerWebUi()` (serves `out/web` via `@fastify/static` + SPA
-    fallback to `index.html` for non-API GET requests). **Opt-in via `CREARE_SERVE_WEB=1`**
+    fallback to `index.html` for non-API GET requests). **Opt-in via `PMOS_SERVE_WEB=1`**
     (only `headless.ts` sets it) so the Electron path is byte-for-byte unchanged.
   - `renderer/lib/api.ts` + `sse.ts` — `API_BASE_URL` is now same-origin when served over
     http (`window.location.origin`), falling back to `http://localhost:4321` for Electron's
@@ -36,13 +36,13 @@ AND a thin CLI (CLI = next session). This session delivered Phase 1 + 2.
 - **Scripts / deps:** added `@fastify/static@^7` (fastify v4 line) + `tsx@^4` to
   `apps/desktop`; desktop scripts `web:build`, `server` (+ `preserver` ensures **node** ABI), `cli`;
   root scripts `build:packages` (turbo `--filter=./packages/*`, excludes the Electron build),
-  `web:build`, `server`, `cli`, and `creare` (build packages → build web → start server).
+  `web:build`, `server`, `cli`, and `pm-os` (build packages → build web → start server).
 - **Phase 3 — thin CLI:** `apps/desktop/src/server/cli.ts` (run via `tsx`; `pnpm cli <cmd>`).
   Dependency-free (global `fetch`). Auth via the `/auth/sign-in` dev-stub → JWT cached at
-  `~/.creare/cli-token.json` (mode 0600), with one automatic re-auth on 401. Commands: `health`
+  `~/.pmos/cli-token.json` (mode 0600), with one automatic re-auth on 401. Commands: `health`
   (no auth), `projects [--all]`, `boards <p>`, `connections`, `sources <p>`, `status <p>`,
   `sync <p> [source]`, `open`, `help`. Global `--json` for raw output; a small table renderer
-  otherwise. Friendly "server not running → pnpm creare" message on ECONNREFUSED. Does NOT touch
+  otherwise. Friendly "server not running → pnpm pm-os" message on ECONNREFUSED. Does NOT touch
   the DB or better-sqlite3 (pure HTTP), so it needs no ABI step.
 - **tsconfig fix:** `tsconfig.node.json` include now adds `src/server/**/*` — the new entry
   was initially *unchecked*; confirmed in the typecheck graph via `tsc -b --listFiles`.
@@ -53,7 +53,7 @@ AND a thin CLI (CLI = next session). This session delivered Phase 1 + 2.
 - HTTP exercised: `/health` 200 · `/` 200 `text/html` (real index.html w/ `#root` + bundled
   script) · `/assets/*.js` 200 · SPA fallback 200 · API 404 stays JSON (no HTML leak).
 - Gate **GREEN**: desktop typecheck (`tsc -b`) ✓ · lint ✓ · **unit 293/293** ✓.
-- Negative check: with `CREARE_SERVE_WEB` unset, `registerWebUi` returns early (no
+- Negative check: with `PMOS_SERVE_WEB` unset, `registerWebUi` returns early (no
   "serving web UI" log) → Electron path serves no web UI (unchanged).
 
 ## Decisions Made
@@ -62,7 +62,7 @@ AND a thin CLI (CLI = next session). This session delivered Phase 1 + 2.
 - **`tsx` to run + `--ignore-scripts` install** rather than moving electron to optionalDeps.
   Lower risk, reversible, matches the existing Kali workflow; `--ignore-scripts` is exactly
   what dodges the tester's electron-binary-download blocker.
-- **Web serving is opt-in** (`CREARE_SERVE_WEB=1`) so Electron behavior can't change.
+- **Web serving is opt-in** (`PMOS_SERVE_WEB=1`) so Electron behavior can't change.
 - Web UI = the existing React SPA (HashRouter → no server rewrite needed), NOT a Next.js
   rewrite and NOT a TUI. Reuses 100% of the hardened/a11y'd renderer.
 
@@ -76,14 +76,14 @@ AND a thin CLI (CLI = next session). This session delivered Phase 1 + 2.
 
 ## Phase 4 — README (this session)
 - Added a prominent **"Run without Electron (headless web app + CLI)"** section: one-command
-  `pnpm install --ignore-scripts && pnpm creare` → http://127.0.0.1:4321, why `--ignore-scripts`
-  dodges the Electron-binary/native-compile blockers, custom `CREARE_PORT`, and a full `pnpm cli`
-  command reference (+ `CREARE_API`). Cross-linked from the intro, prerequisites (macOS CLT now
+  `pnpm install --ignore-scripts && pnpm pm-os` → http://127.0.0.1:4321, why `--ignore-scripts`
+  dodges the Electron-binary/native-compile blockers, custom `PMOS_PORT`, and a full `pnpm cli`
+  command reference (+ `PMOS_API`). Cross-linked from the intro, prerequisites (macOS CLT now
   noted as Electron-only), useful-scripts, and tester-notes. Phases 1–3 committed as `ff9eabb`.
 
 ## Fresh-clone verification — caught + fixed a real bug
 Ran the tester's exact path: `git clone` from origin → `pnpm install --ignore-scripts`
-→ `pnpm creare`. Install (7.8s, no Electron download), `build:packages` (11/11, 0 cached),
+→ `pnpm pm-os`. Install (7.8s, no Electron download), `build:packages` (11/11, 0 cached),
 `web:build`, and the first-boot `better-sqlite3` Node-ABI compile all succeeded — **then the
 server crashed**:
 `Error: Electron failed to install correctly` at `auth/auth-service.ts:1`.
@@ -126,14 +126,14 @@ green: typecheck · lint · unit 293/293.
 - OAuth headless (BrowserWindow → loopback Fastify route + system browser) — deferred;
   not needed for the PAT-based connectors + dev-user stub, but required for app-level
   GitHub/Entra sign-in headless.
-- One-command install ergonomics: document `pnpm install --ignore-scripts && pnpm creare`.
+- One-command install ergonomics: document `pnpm install --ignore-scripts && pnpm pm-os`.
   Consider a `bin`/installer later. Native better-sqlite3 for Node ABI on the tester's
   machine should use prebuilt binaries (no Electron headers) — verify on their box.
 
 ## Next Session Should Start With
 - **Phase 4 — docs/one-command**: README "Run without Electron" section documenting
-  `pnpm install --ignore-scripts && pnpm creare` (web UI) and `pnpm cli <cmd>` (CLI), plus
-  `CREARE_PORT`/`CREARE_API`. Optionally a `bin`/installer.
+  `pnpm install --ignore-scripts && pnpm pm-os` (web UI) and `pnpm cli <cmd>` (CLI), plus
+  `PMOS_PORT`/`PMOS_API`. Optionally a `bin`/installer.
 - **Optional CLI unit test:** `cli.ts` currently runs `main()` on import; to unit-test the table
   renderer / arg parsing, guard `main()` behind a "run directly" check and export the pure helpers,
   then mock `fetch`. Low value (thoroughly e2e-verified), so deferred.

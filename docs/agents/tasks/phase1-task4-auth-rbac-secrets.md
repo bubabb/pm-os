@@ -38,7 +38,7 @@ Do not touch:
 ## What You Must Produce
 
 ### 1. Drizzle migrations for users and secrets tables
-Generate via `pnpm --filter @creare/database run db:generate` after any schema changes.
+Generate via `pnpm --filter @pm-os/database run db:generate` after any schema changes.
 Migrations live in `packages/database/src/migrations/`.
 
 ### 2. Auth service (`apps/desktop/src/main/auth/auth-service.ts`)
@@ -77,7 +77,7 @@ OAuth tokens for external sources (Jira, GitHub, Confluence, Notion, OneDrive) a
 - `isTokenExpired(credential: IntegrationCredential): boolean`
   — returns true if `expiresAt` is set and is in the past. Domain 6 uses this before every sync to detect credentials that need re-auth.
 
-**Important:** Import `IntegrationCredential`, `NewIntegrationCredential` from `@creare/database`. Never define local types for schema entities.
+**Important:** Import `IntegrationCredential`, `NewIntegrationCredential` from `@pm-os/database`. Never define local types for schema entities.
 
 ### 5. Agent permission validator (`apps/desktop/src/main/auth/agent-permissions.ts`)
 - `validateAgentPermission(workspace: AgentWorkspace, resource: 'tool' | 'repo' | 'secret', resourceId: string): boolean`

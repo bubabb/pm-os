@@ -1,8 +1,8 @@
 import {
   getDb, boards, boardColumns, sprints, boardItems, milestones, milestoneTasks, tasks, events, remoteLinks,
-} from '@creare/database'
+} from '@pm-os/database'
 import { eq, and, asc, ne, desc, getTableColumns, inArray, isNull } from 'drizzle-orm'
-import { generateId } from '@creare/shared'
+import { generateId } from '@pm-os/shared'
 import type { InferSelectModel } from 'drizzle-orm'
 
 // ── Re-exported types ─────────────────────────────────────────────────────────
@@ -436,7 +436,7 @@ export function listMilestoneTasks(milestoneId: string): MilestoneTask[] {
 // ── Mirror sync (apply a remote snapshot) ─────────────────────────────────────
 //
 // Plain-data instruction shapes defined HERE so the integrations mirror-sync
-// layer can depend on boards without boards importing @creare/integrations
+// layer can depend on boards without boards importing @pm-os/integrations
 // (which would create a circular dependency). Integrations translates its
 // ReconcilePlan into a MirrorApply and calls applyMirrorSnapshot.
 

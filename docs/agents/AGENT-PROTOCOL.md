@@ -1,11 +1,11 @@
-# Creare — Agent Protocol
+# Pm.Os — Agent Protocol
 ---
 status: active
 version: 1.0
 last-updated: 2026-06-02
 ---
 
-Every agent working on Creare must follow this protocol. No exceptions.
+Every agent working on Pm.Os must follow this protocol. No exceptions.
 
 ---
 
@@ -42,14 +42,14 @@ Do not write a single line of code until all five are read.
 - **Types/Interfaces:** `PascalCase`
 - **Functions/Variables:** `camelCase`
 - **Constants:** `SCREAMING_SNAKE_CASE`
-- **IDs:** always UUID v4 via `generateId()` from `@creare/shared`
-- **Package names:** `@creare/[domain-name]`
+- **IDs:** always UUID v4 via `generateId()` from `@pm-os/shared`
+- **Package names:** `@pm-os/[domain-name]`
 
 ---
 
 ## 4. Append-Only Tables Rule
 
-Three tables in Creare are append-only. **Never UPDATE or DELETE from any of them:**
+Three tables in Pm.Os are append-only. **Never UPDATE or DELETE from any of them:**
 - `events` — platform-wide event log (every domain writes here)
 - `trace_events` — individual steps within a trace (observability domain)
 - `audit_log` — compliance authorization record (observability domain)

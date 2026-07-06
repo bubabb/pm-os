@@ -5,7 +5,7 @@ date: 2026-06-02
 ---
 
 ## Context
-Creare needs to run locally for a single user in v1, with a path to team collaboration in v2 without a rewrite.
+Pm.Os needs to run locally for a single user in v1, with a path to team collaboration in v2 without a rewrite.
 
 ## Decision
 Build as an Electron desktop app with embedded SQLite. Local HTTP server (Fastify on localhost) from day one for web-compatibility in v2.

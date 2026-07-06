@@ -4,7 +4,7 @@
 - Installed pnpm globally (was missing from environment)
 - Upgraded better-sqlite3 to v12.10.0 (v9.x does not build on Node 24)
 - Upgraded drizzle-kit to v0.31.10 (v0.20 uses deprecated command syntax)
-- Ran Drizzle migrations — all 25 tables created at ~/.creare/creare.db
+- Ran Drizzle migrations — all 25 tables created at ~/.pmos/pmos.db
 - Built Task #4: auth-service, auth-middleware, agent-permissions, secrets-service, integration-credentials-service
 - Built Task #5: Fastify server (localhost:4321), health check, CRUD routes for projects/users/secrets, SSE stream endpoint, OpenAPI docs at /docs
 - Built Task #17: notification-service with SSE delivery, cost threshold trigger, approval gate trigger, notification routes
@@ -13,7 +13,7 @@
 - Fixed all 9 issues in a single pass, TypeScript clean after all fixes
 
 ## Decisions Made
-- JWT secret and AES-256 master key both persist to ~/.creare/keys.json (safeStorage-encrypted, mode 0600). This file is shared between auth-service and secrets-service via readKeysFile/writeKeysFile helpers exported from auth-service.
+- JWT secret and AES-256 master key both persist to ~/.pmos/keys.json (safeStorage-encrypted, mode 0600). This file is shared between auth-service and secrets-service via readKeysFile/writeKeysFile helpers exported from auth-service.
 - SSE endpoint accepts token via ?token= query param as fallback (EventSource cannot set headers). Standard requireAuth is NOT used on the SSE route — a dedicated resolveSseUser() handles both auth paths.
 - getJwtSecret() is now exported from auth-service and used by both auth-service internally and routes/auth.ts — single source of truth for the JWT signing key.
 - encryptSecret/decryptSecret sync stubs removed entirely — only the Async variants exist and are exported.

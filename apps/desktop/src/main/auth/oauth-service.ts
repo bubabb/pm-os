@@ -8,9 +8,9 @@ import { randomBytes, createHash } from 'crypto'
 // falls back to the Phase 1 dev-user stub, so the app still runs in development.
 //
 // Required env vars:
-//   GitHub: CREARE_GITHUB_CLIENT_ID, CREARE_GITHUB_CLIENT_SECRET
-//   Entra:  CREARE_ENTRA_CLIENT_ID, CREARE_ENTRA_CLIENT_SECRET, [CREARE_ENTRA_TENANT_ID=common]
-//   Optional: CREARE_OAUTH_REDIRECT_URI (default http://localhost:4321/auth/oauth/callback)
+//   GitHub: PMOS_GITHUB_CLIENT_ID, PMOS_GITHUB_CLIENT_SECRET
+//   Entra:  PMOS_ENTRA_CLIENT_ID, PMOS_ENTRA_CLIENT_SECRET, [PMOS_ENTRA_TENANT_ID=common]
+//   Optional: PMOS_OAUTH_REDIRECT_URI (default http://localhost:4321/auth/oauth/callback)
 //
 // The redirect URI must exactly match the one registered on the OAuth app. We do
 // not run an HTTP listener for it — the Electron BrowserWindow's navigation to the
@@ -41,11 +41,11 @@ function env(name: string): string | undefined {
 }
 
 export function getOAuthConfig(provider: OAuthProvider): OAuthConfig | null {
-  const redirectUri = env('CREARE_OAUTH_REDIRECT_URI') ?? DEFAULT_REDIRECT_URI
+  const redirectUri = env('PMOS_OAUTH_REDIRECT_URI') ?? DEFAULT_REDIRECT_URI
 
   if (provider === 'github') {
-    const clientId = env('CREARE_GITHUB_CLIENT_ID')
-    const clientSecret = env('CREARE_GITHUB_CLIENT_SECRET')
+    const clientId = env('PMOS_GITHUB_CLIENT_ID')
+    const clientSecret = env('PMOS_GITHUB_CLIENT_SECRET')
     if (!clientId || !clientSecret) return null
     return {
       clientId,
@@ -58,10 +58,10 @@ export function getOAuthConfig(provider: OAuthProvider): OAuthConfig | null {
   }
 
   // entra
-  const clientId = env('CREARE_ENTRA_CLIENT_ID')
-  const clientSecret = env('CREARE_ENTRA_CLIENT_SECRET')
+  const clientId = env('PMOS_ENTRA_CLIENT_ID')
+  const clientSecret = env('PMOS_ENTRA_CLIENT_SECRET')
   if (!clientId || !clientSecret) return null
-  const tenant = env('CREARE_ENTRA_TENANT_ID') ?? 'common'
+  const tenant = env('PMOS_ENTRA_TENANT_ID') ?? 'common'
   return {
     clientId,
     clientSecret,
@@ -102,7 +102,7 @@ function authorize(cfg: OAuthConfig, state: string, codeChallenge: string): Prom
   if (!BrowserWindow) {
     return Promise.reject(
       new Error(
-        'OAuth sign-in requires the Creare desktop app (Electron). In headless mode, authenticate connectors with a Personal Access Token instead.',
+        'OAuth sign-in requires the Pm.Os desktop app (Electron). In headless mode, authenticate connectors with a Personal Access Token instead.',
       ),
     )
   }

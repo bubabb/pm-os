@@ -1,6 +1,6 @@
 import { X, Bot, Loader2, CheckCircle2, ArrowRight } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import type { ClassifiedItem } from '@creare/integrations'
+import type { ClassifiedItem } from '@pm-os/integrations'
 
 const SOURCE_LABELS: Record<string, string> = {
   jira: 'Jira', github: 'GitHub', confluence: 'Confluence',

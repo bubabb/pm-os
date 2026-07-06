@@ -6,11 +6,11 @@ import {
   listTraces, getTrace, createTrace, updateTrace,
   listTraceEvents, addTraceEvent,
   listEventLog, listAuditLog, addAuditEntry,
-} from '@creare/observability'
+} from '@pm-os/observability'
 import type {
   Trace, TraceEvent, AuditEntry,
   ListEventsOpts, ListAuditOpts, AddAuditEntryParams,
-} from '@creare/observability'
+} from '@pm-os/observability'
 
 interface ProjectParams  { id: string }
 interface TraceParams    { id: string; traceId: string }

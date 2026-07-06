@@ -16,7 +16,7 @@
 - packages/integrations/src/connectors/onedrive.test.ts
 
 ## Open Questions
-- Package-wide `pnpm --filter @creare/integrations typecheck` currently fails on `github-projects.ts` (TS2304 resolveStatusField + two TS7006) — pre-existing in-flight edits by the parallel connector agent, zero errors in onedrive files. Re-run the gate once that agent lands.
+- Package-wide `pnpm --filter @pm-os/integrations typecheck` currently fails on `github-projects.ts` (TS2304 resolveStatusField + two TS7006) — pre-existing in-flight edits by the parallel connector agent, zero errors in onedrive files. Re-run the gate once that agent lands.
 
 ## Next Session Should Start With
 - Re-run the full integrations typecheck after the github-projects.ts work settles; consider teaching the outbox worker to honor `retryable` errors with a pre-retry version re-probe for OneDrive 412s.

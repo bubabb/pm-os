@@ -31,9 +31,9 @@ OAuth authorization-code flow.
 
 ### Configuration (env vars — never committed)
 ```
-CREARE_GITHUB_CLIENT_ID, CREARE_GITHUB_CLIENT_SECRET
-CREARE_ENTRA_CLIENT_ID,  CREARE_ENTRA_CLIENT_SECRET,  CREARE_ENTRA_TENANT_ID (default: common)
-CREARE_OAUTH_REDIRECT_URI (default: http://localhost:4321/auth/oauth/callback)
+PMOS_GITHUB_CLIENT_ID, PMOS_GITHUB_CLIENT_SECRET
+PMOS_ENTRA_CLIENT_ID,  PMOS_ENTRA_CLIENT_SECRET,  PMOS_ENTRA_TENANT_ID (default: common)
+PMOS_OAUTH_REDIRECT_URI (default: http://localhost:4321/auth/oauth/callback)
 ```
 The redirect URI **must exactly match** the one registered on each provider's OAuth app.
 No renderer or DB changes were needed — `SignIn.tsx` and the auth store already call
@@ -46,7 +46,7 @@ No renderer or DB changes were needed — `SignIn.tsx` and the auth store alread
 ### Files
 - **NEW** `apps/desktop/src/main/scheduler/sync-scheduler.ts`
   - `startSyncScheduler()` / `stopSyncScheduler()` — `setInterval` loop.
-  - Interval from `CREARE_SYNC_INTERVAL_MS` (default 15 min; `0` disables).
+  - Interval from `PMOS_SYNC_INTERVAL_MS` (default 15 min; `0` disables).
   - `runSyncCycle()` (exported for tests): selects non-archived projects, loads each
     project's credentials, **skips expired tokens** (`isTokenExpired`), builds
     `{credential, token}` pairs, calls `triggerSync`. Per-project try/catch isolates

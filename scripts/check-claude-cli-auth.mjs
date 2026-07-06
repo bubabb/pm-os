@@ -1,7 +1,7 @@
 // Dev diagnostic for the membership-backed `claude-cli` reasoning provider.
 //
 // Prints (a) the canonical health result the app uses (checkClaudeCli from
-// @creare/ai-sdk) and (b) a per-store breakdown that reveals WHERE the membership
+// @pm-os/ai-sdk) and (b) a per-store breakdown that reveals WHERE the membership
 // credential actually lives and under WHAT entry name — so you can confirm or fix
 // the `CREDENTIAL_SERVICE` constant in packages/ai-sdk/src/providers/claude-cli.ts
 // on macOS (Keychain) and Windows (Credential Manager).
@@ -114,7 +114,7 @@ try {
   console.log(`  status: ${line}`)
   console.log(`  ${JSON.stringify(health, null, 2).split('\n').join('\n  ')}`)
 } catch (e) {
-  console.log(`  ${bad('could not load @creare/ai-sdk dist')} — run: pnpm --filter @creare/ai-sdk build`)
+  console.log(`  ${bad('could not load @pm-os/ai-sdk dist')} — run: pnpm --filter @pm-os/ai-sdk build`)
   console.log(`  ${dim(e.message)}`)
 }
 console.log()

@@ -1,6 +1,6 @@
-import { getDb, externalEventCache } from '@creare/database'
+import { getDb, externalEventCache } from '@pm-os/database'
 import { and, count, eq, isNull, gte, desc } from 'drizzle-orm'
-import { getActiveSprint, listMilestones } from '@creare/boards'
+import { getActiveSprint, listMilestones } from '@pm-os/boards'
 
 export interface SprintContext {
   activeSprint: {

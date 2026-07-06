@@ -33,7 +33,7 @@
   the anthropic API provider. Revisit if observability wants cache tokens counted.
 
 ## Part 2 — make EVERYTHING default to the CLI (no API key)
-- Added `providerNeedsKey()` and `llmAvailable(provider, apiKey)` helpers to `@creare/ai-sdk`
+- Added `providerNeedsKey()` and `llmAvailable(provider, apiKey)` helpers to `@pm-os/ai-sdk`
   (single source of truth for "does this provider need a key / is the model callable").
 - New shared resolver `apps/desktop/src/main/secrets/reasoning-config.ts`:
   `resolveReasoningConfig()` + `VALID_PROVIDERS`/`DEFAULT_REASONING_PROVIDER` (now `claude-cli`)
@@ -59,7 +59,7 @@
   params; `complete()` ignores it for claude-cli.
 
 ## Part 3 — startup health-check for the membership/CLI
-- Added `checkClaudeCli()` + `ClaudeCliHealth` to `@creare/ai-sdk` (in `providers/claude-cli.ts`).
+- Added `checkClaudeCli()` + `ClaudeCliHealth` to `@pm-os/ai-sdk` (in `providers/claude-cli.ts`).
   FREE/fast probe (no model call, no token spend): runs `claude --version` for the binary, then
   reads `~/.claude/.credentials.json` `claudeAiOauth` (accessToken+refreshToken) to verify
   membership sign-in. Reports `authenticated: yes | no | unknown`. macOS Keychain case →
@@ -67,7 +67,7 @@
   accessToken with a refreshToken still counts as signed in (CLI auto-refreshes).
 - Route `GET /settings/claude-cli-health` (requireAuth) in `routes/global-settings.ts`.
 - `server.ts` runs the check once after `listen()` — NON-blocking — and logs a clear terminal
-  line: `[creare] reasoning (claude-cli): …` (warn when not ok).
+  line: `[pm-os] reasoning (claude-cli): …` (warn when not ok).
 - Renderer `ConnectionsPage.tsx`: new `MembershipStatusCard` at the top of the AI Models
   section — green "Signed in · <plan>", amber "Unverified" (macOS), or red "Not signed in / CLI
   not found" with the actionable message + a Recheck button (query key `claudeCliHealth`).
@@ -99,16 +99,16 @@
 - The macOS/Windows sections probe CANDIDATE_NAMES ('Claude Code-credentials', 'Claude Code',
   'claude-code', 'claude') and show which entry name actually holds the credential — so you can
   confirm/fix `CREDENTIAL_SERVICE` in `providers/claude-cli.ts` from one command on each OS.
-- Imports the built `@creare/ai-sdk` dist by relative path (root can't resolve the workspace
-  pkg); prints a clear "run pnpm --filter @creare/ai-sdk build" hint if dist is missing.
+- Imports the built `@pm-os/ai-sdk` dist by relative path (root can't resolve the workspace
+  pkg); prints a clear "run pnpm --filter @pm-os/ai-sdk build" hint if dist is missing.
 - Verified on Linux: shows file store FOUND (sub=max) + status ok.
 
 ## Part 6 — cwd isolation (commit 5620586)
 - Print mode auto-discovers CLAUDE.md from cwd+parents → reasoning calls from the repo absorbed
-  Creare's project context (non-deterministic by launch dir, wrong behavior, extra tokens).
-- Fix: spawn `claude` in a dedicated EMPTY temp dir (`tmpdir/creare-ai-sdk-claude-cli`) whose
+  Pm.Os's project context (non-deterministic by launch dir, wrong behavior, extra tokens).
+- Fix: spawn `claude` in a dedicated EMPTY temp dir (`tmpdir/pm-os-ai-sdk-claude-cli`) whose
   parents have no CLAUDE.md. Can't use the CLI "simple" mode (it forces API-key auth, breaks membership).
-- Proven: provider answers "NONE" from repo root (was "Creare — an agentic DevOps platform…").
+- Proven: provider answers "NONE" from repo root (was "Pm.Os — an agentic DevOps platform…").
 - Added a spawn-mocked unit test asserting the isolated cwd. Tests 74/74.
 
 ## Part 7 — testing spin (commits 3f1c4f0 fix, e7037a2 test+chore)

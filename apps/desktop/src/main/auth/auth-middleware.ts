@@ -1,8 +1,8 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
-import { getDb, users } from '@creare/database'
+import { getDb, users } from '@pm-os/database'
 import { eq } from 'drizzle-orm'
 import { verifyToken } from './auth-service'
-import type { User } from '@creare/database'
+import type { User } from '@pm-os/database'
 
 export interface AuthenticatedRequest extends FastifyRequest {
   user: User

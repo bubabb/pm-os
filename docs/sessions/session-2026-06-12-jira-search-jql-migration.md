@@ -19,7 +19,7 @@
 - `packages/integrations/src/connectors/jira.test.ts`
 
 ## Open Questions
-- `pnpm --filter @creare/integrations typecheck` currently fails ONLY in `github-projects.ts` (missing `ViewerProjectsData` et al.) — that file is mid-edit by a concurrent session; jira files are clean.
+- `pnpm --filter @pm-os/integrations typecheck` currently fails ONLY in `github-projects.ts` (missing `ViewerProjectsData` et al.) — that file is mid-edit by a concurrent session; jira files are clean.
 
 ## Next Session Should Start With
 - Re-run the full package typecheck once the github-projects.ts session lands; then full gate (`pnpm test`).

@@ -32,9 +32,9 @@
 - `packages/integrations/src/index.ts` (modified)
 
 ## Verification
-- `pnpm --filter @creare/integrations typecheck` — green.
+- `pnpm --filter @pm-os/integrations typecheck` — green.
 - `pnpm vitest run packages/integrations/src/mirror` — 40/40 (4 files, 6 new).
-- `pnpm --filter @creare/integrations lint` — clean.
+- `pnpm --filter @pm-os/integrations lint` — clean.
 
 ## Open Questions
 - The mirrors route (`apps/desktop/src/main/routes/mirrors.ts`, Domain: desktop) still constructs `GitHubConnector` directly for the picker — migrate it to `listRemoteBoards`/`listOpenConflicts`/`resolveConflict` and then drop the deprecated export.

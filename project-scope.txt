@@ -1,11 +1,11 @@
-# Creare — Project Scope
-**Product Name:** Creare  
-**Domain:** creare.dev  
+# Pm.Os — Project Scope
+**Product Name:** Pm.Os  
+**Domain:** pm-os.dev  
 **Version:** 1.2  
 **Date:** 2026-06-02  
 **Status:** Active — Master Reference Document
 
-> *Creare — Latin: "to create." The platform where AI-native software teams build, ship, and operate their work.*
+> *Pm.Os — Latin: "to create." The platform where AI-native software teams build, ship, and operate their work.*
 
 ## Change Log
 | Version | Date | Change | Impact |
@@ -20,7 +20,7 @@
 
 Build the definitive DevOps platform for the AI-agent era — combining everything Azure DevOps and GitHub Copilot do well, eliminating their most complained-about failures, and adding a layer of agentic intelligence that neither platform was designed to support.
 
-Creare is not an incremental improvement. It is a ground-up redesign of the software delivery lifecycle with AI agents as first-class participants alongside human engineers, PMs, and stakeholders.
+Pm.Os is not an incremental improvement. It is a ground-up redesign of the software delivery lifecycle with AI agents as first-class participants alongside human engineers, PMs, and stakeholders.
 
 ---
 

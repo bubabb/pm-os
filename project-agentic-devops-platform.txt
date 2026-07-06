@@ -134,7 +134,7 @@ metadata:
 - [ ] Identify target user persona (AI platform teams? indie tool builders? enterprise DevOps?)
 - [ ] Competitive differentiation vs. emerging players (Devin, SWE-agent, Factory.ai)
 
-**Product name: Creare** (Latin: "to create") — confirmed clear, no conflicts in DevOps/AI space. Domain: creare.dev (available). Locked in 2026-06-02.
+**Product name: Pm.Os** (Latin: "to create") — confirmed clear, no conflicts in DevOps/AI space. Domain: pm-os.dev (available). Locked in 2026-06-02.
 
 **Master scope document:** `/Users/bubagv/Desktop/devops_platform/project-scope.md` — this is the authoritative reference for all decisions. Read it before making any architectural, feature, or UX call.
 

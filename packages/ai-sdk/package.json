@@ -1,5 +1,5 @@
 {
-  "name": "@creare/ai-sdk",
+  "name": "@pm-os/ai-sdk",
   "version": "0.1.0",
   "private": true,
   "main": "dist/index.js",
@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
-    "@creare/shared": "workspace:*",
+    "@pm-os/shared": "workspace:*",
     "@google/generative-ai": "^0.3.0",
     "@modelcontextprotocol/sdk": "^0.6.0",
     "openai": "^4.28.0"

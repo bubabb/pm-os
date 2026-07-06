@@ -28,7 +28,7 @@ interface PullResult {
 
 // ── Chip ──────────────────────────────────────────────────────────────────────
 // Compact mirror-status row for the active board. Renders nothing for plain
-// (non-mirrored) Creare boards. Polls sync-status every 30s; pulls are manual
+// (non-mirrored) Pm.Os boards. Polls sync-status every 30s; pulls are manual
 // via the "Pull now" button (no auto-pull — see BoardsPage note).
 
 export function MirrorStatusChip({ projectId, boardId }: { projectId: string; boardId: string }) {
@@ -57,7 +57,7 @@ export function MirrorStatusChip({ projectId, boardId }: { projectId: string; bo
     onError: (e: Error) => toast.error(`Pull failed: ${e.message}`),
   })
 
-  // Plain Creare board (or status still loading / unavailable) — render nothing.
+  // Plain Pm.Os board (or status still loading / unavailable) — render nothing.
   if (!status?.linked) return null
 
   const sourceLabel = status.source === 'github' ? 'GitHub Project'

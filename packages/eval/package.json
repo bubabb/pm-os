@@ -1,5 +1,5 @@
 {
-  "name": "@creare/eval",
+  "name": "@pm-os/eval",
   "version": "0.1.0",
   "private": true,
   "main": "dist/index.js",
@@ -12,9 +12,9 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@creare/database": "workspace:*",
-    "@creare/shared": "workspace:*",
-    "@creare/ai-sdk": "workspace:*",
+    "@pm-os/database": "workspace:*",
+    "@pm-os/shared": "workspace:*",
+    "@pm-os/ai-sdk": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {

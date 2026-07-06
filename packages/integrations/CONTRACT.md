@@ -6,7 +6,7 @@ last-updated: 2026-06-03
 ---
 
 ## Schema Types Consumed
-From `@creare/database`:
+From `@pm-os/database`:
 ```typescript
 import type {
   IntegrationCredential, NewIntegrationCredential,
@@ -14,7 +14,7 @@ import type {
   ExternalEventCache,    NewExternalEventCache,
   PmDigestCache,         NewPmDigestCache,
   UserSetting,
-} from '@creare/database'
+} from '@pm-os/database'
 ```
 
 ## Schema Types Written
@@ -62,9 +62,9 @@ type IntegrationSource = 'jira' | 'github' | 'confluence' | 'notion' | 'onedrive
 ```
 
 ## Dependencies
-- `@creare/database` — reads/writes integration tables and event log
-- `@creare/shared` — `generateId()`
-- `@creare/ai-sdk` — LLM fallback in two-stage classifier, digest generation
+- `@pm-os/database` — reads/writes integration tables and event log
+- `@pm-os/shared` — `generateId()`
+- `@pm-os/ai-sdk` — LLM fallback in two-stage classifier, digest generation
 - `apps/desktop/src/main/secrets` — `getIntegrationToken()` for OAuth token access
 
 ## Consumed By

@@ -1,7 +1,7 @@
-import { complete } from '@creare/ai-sdk'
-import { getDb, sprints, events } from '@creare/database'
+import { complete } from '@pm-os/ai-sdk'
+import { getDb, sprints, events } from '@pm-os/database'
 import { and, eq, gte, desc } from 'drizzle-orm'
-import type { ModelProvider } from '@creare/ai-sdk'
+import type { ModelProvider } from '@pm-os/ai-sdk'
 
 export async function queryProject(
   projectId: string,

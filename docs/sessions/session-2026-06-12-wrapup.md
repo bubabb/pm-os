@@ -36,7 +36,7 @@ import-by-URL resolving rsemnani/projects/2).
 - Jira/Confluence/Notion/OneDrive write+mirror against REAL tenants (tests are mocked-fetch).
 - Packaged signed installer (config exists; needs a real per-OS build machine + signing).
 - Agent EXECUTION runtime still unbuilt (the app plans agent work but can't run it).
-- Security posture: master/JWT key is raw base64 in `~/.creare/keys.json` (0600) beside the
+- Security posture: master/JWT key is raw base64 in `~/.pmos/keys.json` (0600) beside the
   ciphertext DB — stable + atomic, deliberate local-first trade-off, NOT keyring-grade "encrypted at rest".
 
 ## Next Session Should Start With

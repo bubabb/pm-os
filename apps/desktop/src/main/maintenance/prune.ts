@@ -1,4 +1,4 @@
-import { getDb, events, mutationQueue, syncConflicts, notifications } from '@creare/database'
+import { getDb, events, mutationQueue, syncConflicts, notifications } from '@pm-os/database'
 import { and, inArray, isNotNull, lt } from 'drizzle-orm'
 
 // Retention pruning for the tables that otherwise grow without bound. Invoked by
@@ -53,7 +53,7 @@ export function pruneOldRecords(now: Date = new Date()): PruneCounts {
       .where(lt(events.createdAt, cutoff(EVENTS_RETENTION_DAYS)))
       .run().changes
   } catch (err) {
-    console.error('[creare] Prune failed for events:', err instanceof Error ? err.message : err)
+    console.error('[pm-os] Prune failed for events:', err instanceof Error ? err.message : err)
   }
 
   try {
@@ -67,7 +67,7 @@ export function pruneOldRecords(now: Date = new Date()): PruneCounts {
       )
       .run().changes
   } catch (err) {
-    console.error('[creare] Prune failed for mutation_queue:', err instanceof Error ? err.message : err)
+    console.error('[pm-os] Prune failed for mutation_queue:', err instanceof Error ? err.message : err)
   }
 
   try {
@@ -81,7 +81,7 @@ export function pruneOldRecords(now: Date = new Date()): PruneCounts {
       )
       .run().changes
   } catch (err) {
-    console.error('[creare] Prune failed for sync_conflicts:', err instanceof Error ? err.message : err)
+    console.error('[pm-os] Prune failed for sync_conflicts:', err instanceof Error ? err.message : err)
   }
 
   try {
@@ -95,11 +95,11 @@ export function pruneOldRecords(now: Date = new Date()): PruneCounts {
       )
       .run().changes
   } catch (err) {
-    console.error('[creare] Prune failed for notifications:', err instanceof Error ? err.message : err)
+    console.error('[pm-os] Prune failed for notifications:', err instanceof Error ? err.message : err)
   }
 
   console.log(
-    `[creare] Retention prune: events=${counts.events} mutations=${counts.mutations} ` +
+    `[pm-os] Retention prune: events=${counts.events} mutations=${counts.mutations} ` +
       `conflicts=${counts.conflicts} notifications=${counts.notifications}`,
   )
   return counts
