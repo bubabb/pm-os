@@ -5,12 +5,33 @@ This is the current-state pointer; the append-only detail log is
 `agent-state/agent-log.md`, per-domain state is `agent-state/domain-state/`,
 and cross-task handoffs are `agent-state/handoffs/`.
 
-**Updated:** 2026-06-29
+**Updated:** 2026-07-06
 
 ---
 
 ## STATUS NOW
-- **RESUME HERE (2026-06-29):** **Headless web runtime — Phase 1-4 DONE (1-3 committed `ff9eabb`; Phase 4 README uncommitted; gate GREEN).**
+- **RESUME HERE (2026-07-06):** **Renamed Creare → Pm.Os + whole-project deepreview remediation — BOTH MERGED to `main`; gate GREEN (typecheck 23/23 · lint 12/12 · unit 311/311).**
+  Repo is now **`github.com/bubabb/pm-os`**, working copy **`~/projects/pm-os`**, `main` @ `efec9ec`.
+  • **RENAME (PR #2, merge `78865b7`):** npm scope `@creare/*`→**`@pm-os/*`**; env `CREARE_*`→**`PMOS_*`**;
+    data dir `~/.creare`→**`~/.pmos`**, DB `creare.db`→**`pmos.db`**. New `ensurePmosDataDir()` in
+    `@pm-os/shared` **auto-migrates a legacy `~/.creare` install on first boot** (renames dir + DB file,
+    preserves keys.json/cli-token.json/DB — verified lossless). window global `pmos`, localStorage
+    `pmos_*`, electron appId `com.pmos.app` + executableName `pm-os`. Run headless: `pnpm pm-os` →
+    http://127.0.0.1:4321. **On THIS box `~/.creare` still exists + `~/.pmos` does not → first real
+    `pnpm pm-os`/`pnpm dev` will migrate your data.** Only cosmetic leftover: the app icon is still the
+    legacy "C" glyph (flagged `TODO(branding)` in `apps/desktop/resources/icon.svg`).
+  • **DEEPREVIEW REMEDIATION (PR #1):** 4 cross-model deepreview rounds fixed ~40 verified findings —
+    CORS admin-token-theft (exact-origin match + dev-stub gate), `PATCH /users/me` mass-assignment,
+    headless orphan-secrets guard, Jira >200-issue archival (full pagination), read-connector 4xx→error,
+    GitHub Status-field read/write split, **mirror create data-loss** (baseline via real single-item
+    re-fetch + link-before-applied; NO deferred-op deadlock), renderer **circular-import boot crash**
+    (registered-handler pattern), SSE re-auth probe, DB enum/atomicity. Two self-caught regressions
+    (CRITICAL boot crash, mirror deadlock) were reverted/redone, not shipped. Verified: gate + **live
+    headless-server runtime checks** (CORS/dev-stub/mass-assignment) + **headless-browser boot**.
+    Detail: `docs/sessions/session-2026-07-06-deepreview*.md` (rounds 1–4).
+  • **STILL sandbox-unverifiable (do on a real machine w/ real tenants):** Electron `pnpm dev` GUI,
+    packaged installer, and live two-way connector round-trips (GitHub/Jira/Notion/OneDrive).
+- **(2026-06-29):** **Headless web runtime — Phase 1-4 DONE (1-3 committed `ff9eabb`; Phase 4 README uncommitted; gate GREEN).**
   Driven by tester feedback: corporate policy bans Electron apps; they never reached the product
   (proxy killed the Electron binary download + better-sqlite3 Electron-ABI compile). Coupling audit:
   only **5 files import electron**, renderer uses **zero** Electron features → this is a packaging
