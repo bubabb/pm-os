@@ -6,11 +6,23 @@
  * Run:  tsx src/server/cli.ts <command> [args]   (see package.json "cli" script)
  * Point at a non-default port with CREARE_PORT, or a full URL with CREARE_API.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 
-const PORT = process.env['CREARE_PORT'] ?? '4321'
+// Validate CREARE_PORT: unset → 4321, but a set-but-invalid value must fail loudly
+// rather than build a nonsense URL. Ignored when CREARE_API overrides the base URL.
+function resolvePort(): string {
+  const raw = process.env['CREARE_PORT']
+  if (raw === undefined || raw === '') return '4321'
+  const port = Number(raw)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid CREARE_PORT: "${raw}" — must be an integer between 1 and 65535`)
+  }
+  return String(port)
+}
+
+const PORT = process.env['CREARE_API'] ? '' : resolvePort()
 const BASE = process.env['CREARE_API'] ?? `http://127.0.0.1:${PORT}`
 const TOKEN_FILE = join(homedir(), '.creare', 'cli-token.json')
 const JSON_OUT = process.argv.includes('--json')
@@ -26,8 +38,12 @@ function readToken(): string | null {
 }
 
 function writeToken(token: string): void {
-  mkdirSync(dirname(TOKEN_FILE), { recursive: true })
+  // The mode option only applies when the file is *created*; an existing token file
+  // keeps its old perms. Create the dir 0700 and chmod the file 0600 after writing so
+  // the cached JWT is always owner-only, even on rewrite.
+  mkdirSync(dirname(TOKEN_FILE), { recursive: true, mode: 0o700 })
   writeFileSync(TOKEN_FILE, JSON.stringify({ token }), { mode: 0o600 })
+  chmodSync(TOKEN_FILE, 0o600)
 }
 
 async function signIn(): Promise<string> {

@@ -27,7 +27,20 @@ import { evalRoutes } from './routes/eval'
 import { memoryRoutes } from './routes/memory'
 import { checkClaudeCli } from '@creare/ai-sdk'
 
-const PORT = parseInt(process.env['CREARE_PORT'] ?? '4321', 10)
+// Parse CREARE_PORT strictly: an unset value defaults to 4321, but a *set* but
+// invalid value (non-numeric, negative, non-integer, out of range) must fail loudly
+// at startup rather than silently binding a random port with a misleading URL.
+export function resolvePort(): number {
+  const raw = process.env['CREARE_PORT']
+  if (raw === undefined || raw === '') return 4321
+  const port = Number(raw)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid CREARE_PORT: "${raw}" — must be an integer between 1 and 65535`)
+  }
+  return port
+}
+
+const PORT = resolvePort()
 
 // The SSE fallback authenticates via the query string (/events/stream?token=<JWT>),
 // so the logged URL must be scrubbed too — redacting the Authorization header alone
@@ -103,12 +116,24 @@ const app = Fastify({
 export async function startServer(): Promise<void> {
   await app.register(cors, {
     origin: (origin, cb) => {
-      // Allow requests with no origin (Electron renderer) and localhost origins
-      if (!origin || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+      // Allow requests with no origin (Electron renderer / same-origin / non-browser).
+      if (!origin) {
         cb(null, true)
-      } else {
-        cb(new Error('Not allowed by CORS'), false)
+        return
       }
+      // Exact host match only — a prefix match (startsWith) would let
+      // http://localhost.evil.com through and enable cross-origin admin-token theft.
+      try {
+        const { hostname } = new URL(origin)
+        // Exact loopback hosts only (incl. the IPv6 literal, which URL parses as "[::1]").
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
+          cb(null, true)
+          return
+        }
+      } catch {
+        // Unparseable origin — reject below.
+      }
+      cb(new Error('Not allowed by CORS'), false)
     },
   })
 

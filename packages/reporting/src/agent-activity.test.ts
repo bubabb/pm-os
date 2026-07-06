@@ -16,6 +16,7 @@ afterEach(() => destroyTestDb())
 function seedTrace(opts: {
   status: 'running' | 'completed' | 'failed'
   startedAt?: string
+  completedAt?: string | null
   taskId?: string
   costCents?: number
 }) {
@@ -30,6 +31,7 @@ function seedTrace(opts: {
       status: opts.status,
       costCents: opts.costCents ?? 0,
       ...(opts.startedAt ? { startedAt: opts.startedAt } : {}),
+      ...(opts.completedAt !== undefined ? { completedAt: opts.completedAt } : {}),
     })
     .run()
   return id
@@ -38,13 +40,27 @@ function seedTrace(opts: {
 describe('reporting — agent activity', () => {
   it('partitions traces into running / completedToday / failed', async () => {
     const runningId = seedTrace({ status: 'running' })
-    const todayId = seedTrace({ status: 'completed' }) // startedAt defaults to now
-    seedTrace({ status: 'completed', startedAt: '2020-01-01T08:00:00.000Z' }) // old — excluded
+    // Started yesterday, completed today — must count via completedAt (regression
+    // coverage for the bug where the filter checked startedAt instead of completedAt).
+    const todayId = seedTrace({
+      status: 'completed',
+      startedAt: '2020-01-01T08:00:00.000Z',
+      completedAt: new Date().toISOString(),
+    })
+    // Completed today but completedAt was never stamped (a valid updateTrace pattern) —
+    // must still count via the startedAt fallback, not silently vanish.
+    const nullTodayId = seedTrace({ status: 'completed', startedAt: new Date().toISOString(), completedAt: null })
+    seedTrace({
+      status: 'completed',
+      startedAt: '2020-01-01T08:00:00.000Z',
+      completedAt: '2020-01-01T09:00:00.000Z',
+    }) // old — excluded
+    seedTrace({ status: 'completed', startedAt: '2020-01-01T08:00:00.000Z', completedAt: null }) // old, no completedAt — excluded via fallback
     const failedId = seedTrace({ status: 'failed' })
 
     const activity = await getAgentActivity(projectId)
     expect(activity.running.map((t) => t.id)).toEqual([runningId])
-    expect(activity.completedToday.map((t) => t.id)).toEqual([todayId])
+    expect(activity.completedToday.map((t) => t.id).sort()).toEqual([todayId, nullTodayId].sort())
     expect(activity.failed.map((t) => t.id)).toEqual([failedId])
   })
 

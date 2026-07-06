@@ -103,7 +103,10 @@ export class NotionConnector extends BaseConnector {
       `${NOTION_API}/databases/${databaseId}/query`,
       { method: 'POST', headers: this.headers, body: JSON.stringify(body) },
     )
-    if (!res.ok) return { entities: [], nextCursor: null }
+    if (!res.ok) {
+      const snippet = (await res.text().catch(() => '')).slice(0, 200)
+      throw new Error(`Notion database ${databaseId} query failed (HTTP ${res.status}): ${snippet}`)
+    }
 
     const data = await res.json() as NotionQueryResult
     const entities: NormalizedEntity[] = data.results.map((page) => {
@@ -265,7 +268,18 @@ export class NotionConnector extends BaseConnector {
     if (!res.ok) throw new Error(`Notion page create failed (HTTP ${res.status}) in database ${databaseId}`)
 
     const page = await res.json() as NotionPage
-    return this.mutationResult({ remoteType: 'db_page', remoteId: page.id, containerId: databaseId }, page)
+    const result = this.mutationResult({ remoteType: 'db_page', remoteId: page.id, containerId: databaseId }, page)
+    // A freshly created page has only its title set — no status/select value, so
+    // the pull snapshot computes statusRemoteId:null → state 'open', archived
+    // false (see fetchBoardSnapshot). Stamp that as the baseline.
+    result.createdBaseline = {
+      remoteId: page.id,
+      title: op.title,
+      statusRemoteId: null,
+      state: 'open',
+      archived: false,
+    }
+    return result
   }
 
   private async updateItem(op: Extract<MutationOp, { kind: 'update_item' }>): Promise<MutationResult> {

@@ -17,9 +17,17 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Body: PatchMeBody }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       const db = getDb()
+      // Whitelist writable fields explicitly — spreading raw request.body would let a
+      // client set privileged columns (role, email, id) via mass assignment.
+      const body = request.body ?? {}
+      const patch: Partial<Pick<typeof users.$inferInsert, 'name' | 'avatarUrl'>> = {}
+      // name is NOT NULL — only accept a real string (a raw `{"name":null}` body would
+      // otherwise hit the DB constraint and surface as a 500).
+      if (typeof body.name === 'string') patch.name = body.name
+      if (body.avatarUrl !== undefined) patch.avatarUrl = body.avatarUrl
       const [updated] = await db
         .update(users)
-        .set({ ...request.body, updatedAt: new Date().toISOString() })
+        .set({ ...patch, updatedAt: new Date().toISOString() })
         .where(eq(users.id, user.id))
         .returning()
       if (!updated) return reply.code(404).send({ error: 'Not found' })

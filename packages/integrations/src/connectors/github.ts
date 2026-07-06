@@ -80,6 +80,15 @@ export class GitHubConnector extends BaseConnector {
           ref: { remoteType: 'pv2_item', remoteId: itemId, containerId: op.container.remoteId },
           remoteVersion: updatedAt,
           raw: { updatedAt, draft: true },
+          // A fresh DraftIssue mirrors back exactly this (see fetchProjectSnapshot /
+          // normalizeContent): no status option, state 'draft', not archived.
+          createdBaseline: {
+            remoteId: itemId,
+            title: op.title,
+            statusRemoteId: null,
+            state: 'draft',
+            archived: false,
+          },
         }
       }
 

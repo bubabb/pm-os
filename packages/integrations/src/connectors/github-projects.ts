@@ -289,10 +289,12 @@ export class GitHubProjectsClient {
 
   // Full mirror snapshot of one ProjectV2: columns from the status
   // single-select field's options, items paginated 100/page until exhausted.
-  // The status field is resolved up front: field(name: "Status") first
-  // (case-sensitive), falling back to the FIRST ProjectV2SingleSelectField
-  // when the field was renamed/localized — its NAME then drives each item's
-  // fieldValueByName lookup so item statuses follow the same field.
+  // The status field is resolved up front: field(name: "Status") first (an
+  // exact-name GraphQL lookup — case-sensitive on GitHub's side), falling back
+  // to a single-select field elsewhere in `fields` whose name matches "status"
+  // case-INSENSITIVELY (covers renamed casing/localization, e.g. "Statut").
+  // Its NAME then drives each item's fieldValueByName lookup so item statuses
+  // follow the same field.
   async fetchProjectSnapshot(projectV2Id: string): Promise<MirrorBoardSnapshot> {
     const meta = await this.graphql<ProjectMetaData>(
       `query ProjectMeta($projectId: ID!) {
@@ -319,9 +321,13 @@ export class GitHubProjectsClient {
     if (!project || !project.fields) {
       throw new GitHubNotFoundError(`ProjectV2 ${projectV2Id} not found or not a project`)
     }
+    // Write pointer: only a CONFIDENT status field (so moves never hit an unrelated
+    // field). Column source: best-effort (falls back to first single-select) so a
+    // board without a "status"-named field still imports with columns.
     const statusField = resolveStatusField(project)
     const statusFieldRemoteId = statusField?.id ?? null
-    const statusOptions = statusField?.options ?? []
+    const columnField = resolveColumnSourceField(project)
+    const statusOptions = columnField?.options ?? []
 
     const itemNodes: ProjectItemNode[] = []
     let cursor: string | null = null
@@ -349,9 +355,10 @@ export class GitHubProjectsClient {
             }
           }
         }`,
-        // No status field at all → the name is never matched; statusRemoteId
-        // is forced null below anyway
-        { projectId: projectV2Id, cursor, statusFieldName: statusField?.name ?? 'Status' },
+        // Query item values from the column-source field so items place into the
+        // columns above; when there's no single-select at all the name never matches
+        // and statusRemoteId stays null.
+        { projectId: projectV2Id, cursor, statusFieldName: columnField?.name ?? 'Status' },
       )
 
       const node = data.node
@@ -379,8 +386,9 @@ export class GitHubProjectsClient {
       // an untitled shell
       if (!item.content) continue
       const { title, url, state } = normalizeContent(item.content)
-      // Items only carry a Status value when the project has a Status field
-      const statusRemoteId = statusFieldRemoteId ? item.fieldValueByName?.optionId ?? null : null
+      // Placement follows the column-source field (may be a best-effort single-select
+      // when no confident Status field exists); null when the board has no single-select.
+      const statusRemoteId = columnField ? item.fieldValueByName?.optionId ?? null : null
       const archived = item.isArchived
       items.push({
         remoteId: item.id,
@@ -601,9 +609,14 @@ function normalizeContent(content: ProjectItemContent): {
 }
 
 // The single-select field that drives board columns: the field literally
-// named "Status" when it exists (and is single-select), otherwise the FIRST
-// single-select field on the project — covers renamed/localized status
-// fields, which field(name: "Status") misses (it is case-sensitive).
+// named "Status" when it exists (and is single-select), otherwise a
+// single-select field elsewhere in `fields` whose name matches "status"
+// case-INSENSITIVELY — covers renamed casing/localization, which the exact
+// field(name: "Status") lookup misses. Deliberately does NOT fall back to the
+// first single-select field when no status-like name is found: a board whose
+// first single-select is something else (Priority, Size, …) would otherwise
+// get moves silently written to that unrelated field. Bailing to null instead
+// leaves statusFieldRemoteId undefined so moves are safely skipped.
 function resolveStatusField(
   project: Pick<ProjectMetaNode, 'field' | 'fields'>,
 ): { id: string; name: string; options: ProjectFieldOption[] } | null {
@@ -611,6 +624,29 @@ function resolveStatusField(
   if (named?.id && named.options) {
     return { id: named.id, name: named.name ?? 'Status', options: named.options }
   }
+  for (const candidate of project.fields?.nodes ?? []) {
+    if (
+      candidate?.__typename === 'ProjectV2SingleSelectField' &&
+      candidate.id && candidate.name && candidate.options &&
+      candidate.name.toLowerCase() === 'status'
+    ) {
+      return { id: candidate.id, name: candidate.name, options: candidate.options }
+    }
+  }
+  return null
+}
+
+// Column SOURCE field for reads/display. Prefers the confident status field; when
+// none exists, falls back to the first single-select so the board still imports with
+// usable columns instead of crashing applyMirrorSnapshot on empty columns. This drives
+// ONLY columns + per-item placement (reads). The WRITE pointer (statusFieldRemoteId,
+// from resolveStatusField) stays null unless a confident status field was found, so a
+// move is never written to an unrelated field — reads degrade, writes fail safe.
+function resolveColumnSourceField(
+  project: Pick<ProjectMetaNode, 'field' | 'fields'>,
+): { id: string; name: string; options: ProjectFieldOption[] } | null {
+  const confident = resolveStatusField(project)
+  if (confident) return confident
   for (const candidate of project.fields?.nodes ?? []) {
     if (
       candidate?.__typename === 'ProjectV2SingleSelectField' &&
