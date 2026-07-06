@@ -1,14 +1,14 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
 import { listIntegrationCredentials, storeIntegrationCredential, deleteIntegrationCredential, getIntegrationToken, withMergedConnectionMetadata } from '../secrets'
-import { getDb, integrationCredentials, events } from '@creare/database'
+import { getDb, integrationCredentials, events } from '@pm-os/database'
 import { eq } from 'drizzle-orm'
-import { generateId } from '@creare/shared'
-import { triggerSync, getSyncStatus, getActiveEvents } from '@creare/integrations'
+import { generateId } from '@pm-os/shared'
+import { triggerSync, getSyncStatus, getActiveEvents } from '@pm-os/integrations'
 import { assertProjectAccess } from '../utils/project-access'
 import { createNotification } from '../notifications/notification-service'
 import type { AuthenticatedRequest } from '../auth'
-import type { IntegrationCredential } from '@creare/database'
+import type { IntegrationCredential } from '@pm-os/database'
 
 interface ProjectParams { id: string }
 interface CredentialParams { id: string; credentialId: string }
@@ -103,7 +103,7 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
         resourceType: 'integration_credential',
         resourceId: safe.id,
         payload: JSON.stringify({ source: safe.source, label: safe.label }),
-      }).catch((err) => console.error('[creare] Event log write failed:', err))
+      }).catch((err) => console.error('[pm-os] Event log write failed:', err))
       // Fire-and-forget — a notification failure never blocks the response.
       createNotification({
         userId: user.id,
@@ -161,7 +161,7 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
             resourceType: 'integration_credential',
             resourceId: safe.id,
             payload: JSON.stringify({ source: safe.source, label: safe.label }),
-          }).catch((err) => console.error('[creare] Event log write failed:', err))
+          }).catch((err) => console.error('[pm-os] Event log write failed:', err))
         } catch (err) {
           failed.push({
             label: item.label,
@@ -225,7 +225,7 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
         resourceType: 'integration_credential',
         resourceId: request.params.credentialId,
         payload: JSON.stringify({}),
-      }).catch((err) => console.error('[creare] Event log write failed:', err))
+      }).catch((err) => console.error('[pm-os] Event log write failed:', err))
       return { ok: true }
     },
   )
@@ -258,7 +258,7 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
 
       // Fire-and-forget — sync runs in background, response returns immediately
       triggerSync(request.params.id, pairs, request.body?.source).catch((err) => {
-        console.error('[creare] Background sync failed:', err instanceof Error ? err.message : err)
+        console.error('[pm-os] Background sync failed:', err instanceof Error ? err.message : err)
       })
 
       return { ok: true, message: 'Sync started' }

@@ -35,7 +35,7 @@ export default function SignIn() {
       await signIn(provider)
       navigate('/')
     } catch {
-      setError('Sign in failed. Make sure Creare is running.')
+      setError('Sign in failed. Make sure Pm.Os is running.')
     }
   }
 
@@ -43,7 +43,7 @@ export default function SignIn() {
     <div className="flex h-screen w-screen items-center justify-center bg-background">
       <div className="w-full max-w-sm space-y-8 px-6">
         <div className="text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">Creare</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Pm.Os</h1>
           <p className="mt-2 text-sm text-muted-foreground">The agentic DevOps platform</p>
         </div>
 

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
 
-const CURRENT_PROJECT_KEY = 'creare_current_project_id'
+const CURRENT_PROJECT_KEY = 'pmos_current_project_id'
 
 interface Project {
   id: string

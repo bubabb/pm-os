@@ -1,5 +1,5 @@
-import { getDb, externalEventCache, integrationSyncState, events } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { getDb, externalEventCache, integrationSyncState, events } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { eq, and, isNull, lt } from 'drizzle-orm'
 import { GitHubConnector } from './connectors/github'
 import { JiraConnector } from './connectors/jira'
@@ -8,7 +8,7 @@ import { NotionConnector } from './connectors/notion'
 import { OneDriveConnector } from './connectors/onedrive'
 import { toExternalEventCacheRow } from './normalizer'
 import type { BaseConnector } from './connectors/base'
-import type { IntegrationCredential } from '@creare/database'
+import type { IntegrationCredential } from '@pm-os/database'
 import type { ConnectorConfig, IntegrationSource, NormalizedEntity } from './types'
 
 const MAX_ITEMS_PER_SYNC = 500

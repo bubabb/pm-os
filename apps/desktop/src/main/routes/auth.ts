@@ -1,15 +1,15 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { signIn, verifyToken, createSessionToken, getOAuthConfig, performOAuthFlow, upsertOAuthUser } from '../auth'
-import { getDb, users, events } from '@creare/database'
-import type { User } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { getDb, users, events } from '@pm-os/database'
+import type { User } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { eq } from 'drizzle-orm'
 
 interface SignInBody { provider: 'github' | 'entra' }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   // Sign-in: real OAuth browser-window flow when the provider is configured via
-  // env vars (CREARE_<PROVIDER>_CLIENT_ID/SECRET); otherwise falls back to the
+  // env vars (PMOS_<PROVIDER>_CLIENT_ID/SECRET); otherwise falls back to the
   // Phase 1 dev-user stub so development works without registered OAuth apps.
   app.post<{ Body: SignInBody }>(
     '/auth/sign-in',
@@ -35,10 +35,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         // No OAuth app configured. The dev-stub mints an ADMIN JWT with no
         // credential, so it is gated behind an explicit opt-in env var and must
         // never be reachable in a real deployment.
-        if (process.env['CREARE_DEV_AUTH'] !== '1') {
+        if (process.env['PMOS_DEV_AUTH'] !== '1') {
           return reply.code(401).send({
             error: 'auth_not_configured',
-            message: 'OAuth is not configured. Set CREARE_DEV_AUTH=1 for local dev sign-in.',
+            message: 'OAuth is not configured. Set PMOS_DEV_AUTH=1 for local dev sign-in.',
           })
         }
         user = await signIn(provider)
@@ -59,7 +59,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         resourceType: 'user',
         resourceId: user.id,
         payload: JSON.stringify({ provider, method }),
-      }).catch((err) => console.error('[creare] Event log write failed:', err))
+      }).catch((err) => console.error('[pm-os] Event log write failed:', err))
 
       return { token, user }
     },

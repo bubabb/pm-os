@@ -153,7 +153,7 @@ AMBIGUOUS (pass to Stage 2): everything else
 ```
 
 **Stage 2 — LLM classifier (for ambiguous items only):**
-- Call `complete()` from `@creare/ai-sdk` with `provider: 'anthropic'`, `model: 'claude-haiku-4-5-20251001'`
+- Call `complete()` from `@pm-os/ai-sdk` with `provider: 'anthropic'`, `model: 'claude-haiku-4-5-20251001'`
 - System prompt: "You are a PM action classifier. Given a DevOps entity, decide if it requires human judgment (approve, escalate, strategic decision) or can be handled by an AI agent (summarise, label, update). Respond with JSON only: { bucket: 'human'|'agent', urgency: 1-5, riskType: string|null, suggestedAction: string }"
 - Parse JSON response; fall back to `{ bucket: 'human', urgency: 3, riskType: null, suggestedAction: 'Review manually' }` on parse error
 

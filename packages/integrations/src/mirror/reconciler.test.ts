@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { RemoteLink, MutationQueueRow } from '@creare/database'
+import type { RemoteLink, MutationQueueRow } from '@pm-os/database'
 import type { MirrorBoardSnapshot, MirrorColumnSnapshot, MirrorItemSnapshot } from '../types'
 import { planReconcile, columnSyncHash } from './reconciler'
 

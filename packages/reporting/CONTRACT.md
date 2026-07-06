@@ -6,7 +6,7 @@ last-updated: 2026-06-02
 ---
 
 ## Schema Types Consumed
-From `@creare/database`:
+From `@pm-os/database`:
 ```typescript
 import type {
   CostRecord, NewCostRecord,
@@ -14,7 +14,7 @@ import type {
   Trace,
   Sprint,
   Milestone,
-} from '@creare/database'
+} from '@pm-os/database'
 ```
 
 ## Events Emitted to Event Log
@@ -40,11 +40,11 @@ generateChangelog(projectId: string, since: string): Promise<string>
 ```
 
 ## Dependencies
-- `@creare/database` — reads events log, traces, cost_records, sprints, milestones; writes cost_records
-- `@creare/shared` — `generateId()`
-- `@creare/ai-sdk` — NL query processing and summary generation
-- `@creare/observability` — anomaly detection data
-- `@creare/boards` — sprint velocity and milestone data
+- `@pm-os/database` — reads events log, traces, cost_records, sprints, milestones; writes cost_records
+- `@pm-os/shared` — `generateId()`
+- `@pm-os/ai-sdk` — NL query processing and summary generation
+- `@pm-os/observability` — anomaly detection data
+- `@pm-os/boards` — sprint velocity and milestone data
 
 ## Consumed By
 - `apps/desktop` — all reporting and dashboard views

@@ -6,7 +6,7 @@ last-updated: 2026-06-02
 ---
 
 ## What This Domain Does
-The Azure DevOps replacement layer for Creare. Agent-aware project planning — Kanban, Scrum, Gantt, dependency mapping, portfolio roadmaps, and capacity planning. Unlike Azure Boards, tasks here can be assigned to and executed by agents.
+The Azure DevOps replacement layer for Pm.Os. Agent-aware project planning — Kanban, Scrum, Gantt, dependency mapping, portfolio roadmaps, and capacity planning. Unlike Azure Boards, tasks here can be assigned to and executed by agents.
 
 ## Your Task Instructions
 Read `/docs/agents/tasks/` for the specific task file assigned to this session.

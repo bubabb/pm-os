@@ -45,5 +45,5 @@ TimelineTab, PMCommandCenter, store/dashboard, App, AgentsPage preserved; edits 
   "Delegate ▶" → lucide `Send` icon.
 
 ## Verification
-- `pnpm --filter @creare/desktop typecheck` — clean.
-- `pnpm --filter @creare/desktop build` — clean (renderer bundles built).
+- `pnpm --filter @pm-os/desktop typecheck` — clean.
+- `pnpm --filter @pm-os/desktop build` — clean (renderer bundles built).

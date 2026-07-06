@@ -6,7 +6,7 @@ last-updated: 2026-06-11
 ---
 
 ## Schema Types Consumed
-From `@creare/database`:
+From `@pm-os/database`:
 ```typescript
 import type {
   Board, NewBoard,
@@ -16,7 +16,7 @@ import type {
   Milestone, NewMilestone,
   MilestoneTask,
   Event, NewEvent,
-} from '@creare/database'
+} from '@pm-os/database'
 ```
 
 ## Events Emitted to Event Log
@@ -52,12 +52,12 @@ createMilestone(input: NewMilestone): Promise<Milestone>
 linkTaskToMilestone(milestoneId: string, taskId: string): Promise<void>
 
 // Mirror sync — apply a remote snapshot (plain-data instruction defined in boards
-// so @creare/integrations can depend on boards without a circular import).
+// so @pm-os/integrations can depend on boards without a circular import).
 // Writes boards, board_columns, board_items, tasks, and remote_links in ONE transaction.
 applyMirrorSnapshot(apply: MirrorApply): { boardId: string }
 ```
 
-### MirrorApply shapes (defined and exported by `@creare/boards`)
+### MirrorApply shapes (defined and exported by `@pm-os/boards`)
 ```typescript
 interface MirrorApplyColumn { remoteId: string; name: string; position: number; isTerminal: boolean; syncHash: string }
 interface MirrorApplyItem {
@@ -90,10 +90,10 @@ interface MirrorApply {
   are never placed into a nonexistent `columnId`.
 
 ## Dependencies
-- `@creare/database` — read/write boards, board_columns, board_items, sprints, milestones, milestone_tasks, events; `applyMirrorSnapshot` additionally writes **tasks** (backing task per mirrored item) and **remote_links** (identity map, localType `board` / `board_column` / `board_item`)
-- `@creare/shared` — `generateId()`
-- `@creare/agent-orchestration` — reads task status to sync board item state
+- `@pm-os/database` — read/write boards, board_columns, board_items, sprints, milestones, milestone_tasks, events; `applyMirrorSnapshot` additionally writes **tasks** (backing task per mirrored item) and **remote_links** (identity map, localType `board` / `board_column` / `board_item`)
+- `@pm-os/shared` — `generateId()`
+- `@pm-os/agent-orchestration` — reads task status to sync board item state
 
 ## Consumed By
 - `apps/desktop` — all board and planning views
-- `@creare/reporting` — sprint velocity, milestone completion data
+- `@pm-os/reporting` — sprint velocity, milestone completion data

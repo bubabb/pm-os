@@ -19,8 +19,8 @@
 // Determinism: outputs preserve input order — newItems/remoteUpdates/conflicts
 // and columnChanges follow snapshot order; remoteDeletes follow `links` order.
 
-import { stableHash } from '@creare/shared'
-import type { RemoteLink, MutationQueueRow } from '@creare/database'
+import { stableHash } from '@pm-os/shared'
+import type { RemoteLink, MutationQueueRow } from '@pm-os/database'
 import type { MirrorBoardSnapshot, MirrorColumnSnapshot, MirrorItemSnapshot } from '../types'
 
 // remote_links.remoteType discriminators for GitHub Projects v2 mirrors

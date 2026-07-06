@@ -21,7 +21,7 @@
 - `packages/integrations/src/connectors/github-projects.test.ts` (client + connector dispatch tests)
 
 ## Verification
-- `pnpm --filter @creare/integrations typecheck` — clean
+- `pnpm --filter @pm-os/integrations typecheck` — clean
 - `pnpm vitest run packages/integrations/src/connectors/github-projects.test.ts` — 41/41
 - Full package: `pnpm vitest run packages/integrations` — 12 files, 132/132
 

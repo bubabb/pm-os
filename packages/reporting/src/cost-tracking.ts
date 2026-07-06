@@ -1,7 +1,7 @@
-import { getDb, costRecords, events } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { getDb, costRecords, events } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { and, eq, gte } from 'drizzle-orm'
-import type { CostRecord, NewCostRecord } from '@creare/database'
+import type { CostRecord, NewCostRecord } from '@pm-os/database'
 
 export async function recordCost(input: Omit<NewCostRecord, 'id' | 'createdAt' | 'recordedAt'>): Promise<CostRecord> {
   const db = getDb()

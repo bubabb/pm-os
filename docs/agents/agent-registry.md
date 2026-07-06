@@ -1,11 +1,11 @@
-# Creare — Agent Registry
+# Pm.Os — Agent Registry
 ---
 status: active
 version: 1.0
 last-updated: 2026-06-02
 ---
 
-All agents working on Creare are registered here.
+All agents working on Pm.Os are registered here.
 One entry per task. Updated as tasks are created.
 
 ---
@@ -18,7 +18,7 @@ One entry per task. Updated as tasks are created.
 | #2 Scaffold | Root — all packages | ✅ Complete | 84 files: monorepo, CLAUDE.md files, CONTRACT.md, AGENT-PROTOCOL.md, GLOSSARY.md, ADRs, agent-state/ |
 | #3 Data Models | `packages/database/src/schema.ts` | ✅ Complete | 20 tables, 10 indexes, client.ts, data-models.md |
 | #16 Project Scope | Docs only | ✅ Complete | `project-scope.md` v1.1 |
-| #19 Naming | Docs only | ✅ Complete | Product name: Creare, `docs/architecture/adr/004` |
+| #19 Naming | Docs only | ✅ Complete | Product name: Pm.Os, `docs/architecture/adr/004` |
 
 **Phase 1 task instruction files (created end of Phase 0):**
 - `docs/agents/tasks/phase1-task4-auth-rbac-secrets.md`

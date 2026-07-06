@@ -1,9 +1,9 @@
-import { getDb, integrationCredentials, mutationQueue, projects } from '@creare/database'
+import { getDb, integrationCredentials, mutationQueue, projects } from '@pm-os/database'
 import { and, eq, gte, inArray } from 'drizzle-orm'
-import { drainMutationQueue, recoverStaleInFlight } from '@creare/integrations'
+import { drainMutationQueue, recoverStaleInFlight } from '@pm-os/integrations'
 import { getIntegrationToken, withMergedConnectionMetadata } from '../secrets'
 import { createNotification } from '../notifications/notification-service'
-import type { IntegrationCredential } from '@creare/database'
+import type { IntegrationCredential } from '@pm-os/database'
 
 // Background push worker — runs in the Electron main process. Drains the
 // durable mutation outbox (mutation_queue) to the remote on a fixed interval,
@@ -13,10 +13,10 @@ import type { IntegrationCredential } from '@creare/database'
 // this process.
 //
 // Token handling mirrors the sync route: the credential row is loaded here and
-// its plaintext token resolved via the secrets layer — @creare/integrations
+// its plaintext token resolved via the secrets layer — @pm-os/integrations
 // never touches ciphertext.
 //
-// Tuning: CREARE_PUSH_INTERVAL_MS (default 5s). Set to 0 to disable the
+// Tuning: PMOS_PUSH_INTERVAL_MS (default 5s). Set to 0 to disable the
 // periodic drain (kicks still work).
 
 const DEFAULT_INTERVAL_MS = 5_000
@@ -29,7 +29,7 @@ let draining = false
 let drainQueued = false
 
 function defaultIntervalMs(): number {
-  const raw = process.env['CREARE_PUSH_INTERVAL_MS']
+  const raw = process.env['PMOS_PUSH_INTERVAL_MS']
   if (raw === undefined) return DEFAULT_INTERVAL_MS
   const parsed = parseInt(raw, 10)
   return Number.isFinite(parsed) ? parsed : DEFAULT_INTERVAL_MS
@@ -70,7 +70,7 @@ async function drainOnce(): Promise<void> {
     const result = await drainMutationQueue(getCredential)
     if (result.applied + result.conflicts + result.failed > 0) {
       console.log(
-        `[creare] Push drain: ${result.applied} applied, ${result.conflicts} conflicts, ${result.failed} failed`,
+        `[pm-os] Push drain: ${result.applied} applied, ${result.conflicts} conflicts, ${result.failed} failed`,
       )
     }
     // Failure visibility: ops parked as failed/conflicted are terminal — light
@@ -78,11 +78,11 @@ async function drainOnce(): Promise<void> {
     // notification must never block or break the drain loop.
     if (result.failed > 0 || result.conflicts > 0) {
       notifyPushProblems(drainStartedAt).catch((err) =>
-        console.error('[creare] Push failure notification failed:', err instanceof Error ? err.message : err),
+        console.error('[pm-os] Push failure notification failed:', err instanceof Error ? err.message : err),
       )
     }
   } catch (err) {
-    console.error('[creare] Push drain failed:', err instanceof Error ? err.message : err)
+    console.error('[pm-os] Push drain failed:', err instanceof Error ? err.message : err)
   } finally {
     draining = false
     if (drainQueued) {
@@ -148,20 +148,20 @@ export function startPushWorker(intervalMs?: number): void {
     try {
       const recovered = await recoverStaleInFlight()
       if (recovered > 0) {
-        console.log(`[creare] Push worker: recovered ${recovered} stale in-flight op(s) → pending`)
+        console.log(`[pm-os] Push worker: recovered ${recovered} stale in-flight op(s) → pending`)
       }
     } catch (err) {
-      console.error('[creare] Push worker: stale in-flight recovery failed:', err instanceof Error ? err.message : err)
+      console.error('[pm-os] Push worker: stale in-flight recovery failed:', err instanceof Error ? err.message : err)
     }
     if (!started) return // stopped during recovery
     if (ms <= 0) {
-      console.log('[creare] Push worker periodic drain disabled (CREARE_PUSH_INTERVAL_MS=0)')
+      console.log('[pm-os] Push worker periodic drain disabled (PMOS_PUSH_INTERVAL_MS=0)')
       return
     }
     timer = setInterval(() => {
       void drainOnce()
     }, ms)
-    console.log(`[creare] Push worker started (drain every ${ms}ms)`)
+    console.log(`[pm-os] Push worker started (drain every ${ms}ms)`)
   })()
 }
 

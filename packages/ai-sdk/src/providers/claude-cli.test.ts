@@ -57,7 +57,7 @@ describe('claude-cli provider — neutral cwd isolation', () => {
     expect(call).toBeDefined()
     const [, args, opts] = call as [string, string[], { cwd?: string }]
 
-    const expectedCwd = join(tmpdir(), 'creare-ai-sdk-claude-cli')
+    const expectedCwd = join(tmpdir(), 'pm-os-ai-sdk-claude-cli')
     // Runs in the isolated dir — so no project/parent CLAUDE.md is auto-discovered.
     expect(opts.cwd).toBe(expectedCwd)
     expect(opts.cwd).not.toBe(process.cwd())

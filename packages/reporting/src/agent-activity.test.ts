@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { seedWorkspace, seedAgentWorkspace, seedTask, destroyTestDb } from '@creare/database/testing'
-import { getDb, traces } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { seedWorkspace, seedAgentWorkspace, seedTask, destroyTestDb } from '@pm-os/database/testing'
+import { getDb, traces } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { getAgentActivity } from './agent-activity'
 
 let projectId: string

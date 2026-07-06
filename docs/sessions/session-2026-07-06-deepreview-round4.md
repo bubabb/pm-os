@@ -18,7 +18,7 @@ No deferred-op chaining/deadlock reintroduced; a terminally-failed create still 
 - **Runtime (live headless server, isolated HOME, two boots)** — `scratchpad/verify.sh`, all PASS:
   - `/health` 200; web UI served.
   - **CORS rejects** spoofed `http://localhost.evil.com` (no ACAO); allows loopback.
-  - **Dev-stub gate:** mints a token WITH `CREARE_DEV_AUTH=1`; **401 WITHOUT** it.
+  - **Dev-stub gate:** mints a token WITH `PMOS_DEV_AUTH=1`; **401 WITHOUT** it.
   - **Mass-assignment:** `PATCH {email:attacker,role:viewer}` leaves email/role UNCHANGED.
   - `{name:null}` → 400; legit `{name:"Verified"}` applied; unauth → 401.
 - **Renderer boot** (headless Chromium on the real web build): no page errors, `#root` renders SignIn (circular-import crash stays fixed).

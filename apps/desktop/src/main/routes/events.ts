@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { verifyToken } from '../auth'
-import { getDb, users } from '@creare/database'
+import { getDb, users } from '@pm-os/database'
 import { eq } from 'drizzle-orm'
-import type { User } from '@creare/database'
+import type { User } from '@pm-os/database'
 
 export interface SseEvent {
   type: string

@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { seedWorkspace, seedCredential, destroyTestDb } from '@creare/database/testing'
-import { getDb, externalEventCache, pmDigestCache } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { seedWorkspace, seedCredential, destroyTestDb } from '@pm-os/database/testing'
+import { getDb, externalEventCache, pmDigestCache } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { getDashboard } from './index'
 
-// The dashboard classifies cache rows via @creare/integrations, which calls the
+// The dashboard classifies cache rows via @pm-os/integrations, which calls the
 // LLM for ambiguous items — mock the AI SDK so tests are deterministic + offline.
 const llm = vi.hoisted(() => ({
   complete: vi.fn(async () => ({
@@ -17,7 +17,7 @@ const llm = vi.hoisted(() => ({
     provider: 'anthropic' as const,
   })),
 }))
-vi.mock('@creare/ai-sdk', () => ({
+vi.mock('@pm-os/ai-sdk', () => ({
   complete: llm.complete,
   // Keep in sync with the real ai-sdk helpers: keyed providers need a non-empty key;
   // claude-cli is always callable via the membership login.

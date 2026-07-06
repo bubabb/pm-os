@@ -6,8 +6,8 @@ import type { AuthenticatedRequest } from '../auth'
 import {
   runEval, persistEvalRun, listEvalRuns,
   exactMatch, includes, regexMatch, makeModelRunner, makeLlmJudge,
-} from '@creare/eval'
-import type { EvalCase, Scorer } from '@creare/eval'
+} from '@pm-os/eval'
+import type { EvalCase, Scorer } from '@pm-os/eval'
 
 interface ProjectParams { id: string }
 interface ListRunsQuery { suite?: string }

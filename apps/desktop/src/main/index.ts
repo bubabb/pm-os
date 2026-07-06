@@ -1,16 +1,16 @@
 import { app, BrowserWindow, dialog } from 'electron'
 import { join } from 'path'
-import { runMigrations } from '@creare/database'
+import { runMigrations } from '@pm-os/database'
 import { startServer, stopServer } from './server'
 import { startSyncScheduler, stopSyncScheduler } from './scheduler/sync-scheduler'
 import { startPushWorker, stopPushWorker } from './sync/push-worker'
 
 // The Electron desktop app is a trusted local context and (Phase 1) ships without
 // real OAuth, so enable the dev-stub sign-in by default here. A bare headless server
-// stays gated: it only allows dev sign-in when the operator sets CREARE_DEV_AUTH=1
-// explicitly (the `pnpm server`/`pnpm creare` scripts do). Set before startServer so
+// stays gated: it only allows dev sign-in when the operator sets PMOS_DEV_AUTH=1
+// explicitly (the `pnpm server`/`pnpm pm-os` scripts do). Set before startServer so
 // the auth routes see it.
-process.env['CREARE_DEV_AUTH'] ??= '1'
+process.env['PMOS_DEV_AUTH'] ??= '1'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -61,7 +61,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     try {
-      runMigrations() // bring a fresh ~/.creare/creare.db up to date before serving
+      runMigrations() // bring a fresh ~/.pmos/pmos.db up to date before serving
       await startServer()
       startSyncScheduler()
       startPushWorker()
@@ -73,7 +73,7 @@ if (!app.requestSingleInstanceLock()) {
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      dialog.showErrorBox('Creare failed to start', message)
+      dialog.showErrorBox('Pm.Os failed to start', message)
       app.quit()
     }
   })

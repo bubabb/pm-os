@@ -42,13 +42,13 @@ Do not touch:
 
 ### 1. Run all Drizzle migrations
 ```bash
-pnpm --filter @creare/database run db:generate
-pnpm --filter @creare/database run db:migrate
+pnpm --filter @pm-os/database run db:generate
+pnpm --filter @pm-os/database run db:migrate
 ```
 All 20 tables must exist in the SQLite database.
 
 ### 2. Fastify server (`apps/desktop/src/main/server.ts`)
-- Starts on `localhost:4321` (configurable via env var `CREARE_PORT`)
+- Starts on `localhost:4321` (configurable via env var `PMOS_PORT`)
 - Registers `@fastify/cors` restricted to `localhost` origins only
 - Registers `@fastify/swagger` for OpenAPI spec generation at `/docs`
 - Mounts all route modules
@@ -60,7 +60,7 @@ All 20 tables must exist in the SQLite database.
 - `users.ts` — GET /users/me, PATCH /users/me
 - `secrets.ts` — GET /projects/:id/secrets, POST /projects/:id/secrets, DELETE /projects/:id/secrets/:secretId
 - All routes protected with `requireAuth` middleware
-- All routes return typed responses matching schema types from `@creare/database`
+- All routes return typed responses matching schema types from `@pm-os/database`
 
 ### 4. SSE endpoint (`apps/desktop/src/main/routes/events.ts`)
 - `GET /events/stream` — Server-Sent Events stream per authenticated user

@@ -45,7 +45,7 @@ impossible, and there was no real in-place project switcher.
 
 ## Decisions Made
 - **PAT over OAuth for GitHub connections** (and the picker generalizes to all connectors):
-  Creare is local-first with no server to hold a client secret, so OAuth would *add*
+  Pm.Os is local-first with no server to hold a client secret, so OAuth would *add*
   friction (each user registering their own app). Decision: keep paste-a-token, make it
   excellent via a live resource picker. (See conversation rationale.)
 - **No new dependencies** — Dialog/Toast/CommandPalette/DnD all built in-house with the

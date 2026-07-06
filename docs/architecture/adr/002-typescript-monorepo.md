@@ -19,4 +19,4 @@ TypeScript everywhere. Turborepo for build orchestration. pnpm workspaces for pa
 - All packages share `tsconfig.base.json` — consistent strict TypeScript everywhere
 - Turborepo caches build outputs — fast incremental builds
 - Each agent works in an isolated package — no accidental cross-domain edits
-- `@creare/shared` is the single source of truth for cross-domain types
+- `@pm-os/shared` is the single source of truth for cross-domain types

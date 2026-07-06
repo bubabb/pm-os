@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import './index.css'
 
-// Creare is dark-themed — apply once at startup (tailwind darkMode: ['class']).
+// Pm.Os is dark-themed — apply once at startup (tailwind darkMode: ['class']).
 document.documentElement.classList.add('dark')
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(

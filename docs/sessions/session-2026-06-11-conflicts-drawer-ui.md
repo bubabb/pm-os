@@ -3,7 +3,7 @@
 ## What Was Done
 - Built `ConflictsDrawer.tsx` (NEW): shared `Dialog` ("Sync conflicts"), conflicts query, per-conflict resolve cards with Keep mine / Take theirs / Dismiss, loading/error/empty states.
 - Modified `MirrorStatusChip.tsx`: openConflicts badge is now a button opening the drawer; added a failedPushes destructive badge (also opens the drawer); added `failedPushes` to the `SyncStatus` type; pendingPushes badge, "Pull now", and last-synced untouched.
-- Verified: `pnpm --filter @creare/desktop typecheck` green (tsc -b --noEmit) and eslint clean on both files.
+- Verified: `pnpm --filter @pm-os/desktop typecheck` green (tsc -b --noEmit) and eslint clean on both files.
 
 ## Decisions Made
 - Single `useMutation` with `{ conflictId, resolution }` variables instead of three mutations; per-card busy spinner derived from `resolve.isPending && resolve.variables.conflictId` (TanStack v5 discriminated union makes `variables` non-optional while pending). All resolve buttons disable while any resolve is in flight to keep busy tracking unambiguous.

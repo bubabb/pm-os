@@ -80,7 +80,7 @@ export default function AppShell() {
         {/* Logo + collapse */}
         <div className="flex h-14 items-center justify-between border-b border-border px-3">
           {!collapsed && (
-            <span className="text-base font-bold tracking-tight text-foreground">Creare</span>
+            <span className="text-base font-bold tracking-tight text-foreground">Pm.Os</span>
           )}
           <button
             onClick={() => setCollapsed((c) => !c)}

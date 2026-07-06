@@ -5,15 +5,15 @@ adaptive learning."** Built all four workstreams in dependency order. **Nothing 
 run** — Kali has no toolchain; this must be `pnpm install`-ed and `pnpm test`-ed on the Mac.
 
 ## Workstream 1 — Test foundation
-- `vitest.config.ts` (root): aliases every `@creare/*` package to its **TypeScript source**
-  (anchored regexes so `@creare/database` doesn't shadow `@creare/database/testing`), node
+- `vitest.config.ts` (root): aliases every `@pm-os/*` package to its **TypeScript source**
+  (anchored regexes so `@pm-os/database` doesn't shadow `@pm-os/database/testing`), node
   env, globals on, includes `packages/**` + `apps/**` test globs. Running against source
   decouples tests from the build.
 - `package.json` (root): `test` → `vitest run` (was a no-op `turbo run test`), plus
   `test:watch` / `test:coverage`; added `vitest` + `@vitest/coverage-v8` devDeps.
 - `tsconfig.base.json`: excludes `**/*.test.ts(x)`, `**/*.spec.ts`, `**/testing.ts` so
   test-only files (which use `import.meta.url`) never enter the CommonJS package builds.
-- `@creare/database`:
+- `@pm-os/database`:
   - `client.ts` — added `setDb()` / `resetDb()` to inject a connection.
   - `testing.ts` (NEW, build-excluded) — `createTestDb()` builds an in-memory SQLite DB and
     applies the real migrations via the drizzle migrator; `seedUser/seedProject/seedTask/seedWorkspace`
@@ -32,7 +32,7 @@ run** — Kali has no toolchain; this must be `pnpm install`-ed and `pnpm test`-
 ## Workstream 3 — AI eval harness  (`packages/eval`)
 - `types.ts`, `scorers.ts` (`exactMatch`, `includes`, `regexMatch`), `eval-runner.ts`
   (`runEval` → aggregate pass rate / avg score, error-isolating per case).
-- `model-runner.ts`: `makeModelRunner` and `makeLlmJudge` over `@creare/ai-sdk` `complete()`.
+- `model-runner.ts`: `makeModelRunner` and `makeLlmJudge` over `@pm-os/ai-sdk` `complete()`.
 - `persistence.ts`: `persistEvalRun` / `listEvalRuns` against the new `eval_runs` table.
 - Tests use stub runners/executors — no live API needed.
 
@@ -40,11 +40,11 @@ run** — Kali has no toolchain; this must be `pnpm install`-ed and `pnpm test`-
 - `recordLearning` (+ append-only event), `listLearnings`, `recallLearnings`
   (tag-overlap + keyword ranking; recent-first when no query). Backed by `learnings` table.
 
-## Schema (`@creare/database`)
+## Schema (`@pm-os/database`)
 - New tables `eval_runs` and `learnings` + types; `SCHEMA_VERSION` → `1.3.0`.
 - Migration `0002_phase4_eval_intelligence.sql` + `_journal.json` entry (idx 2). The
   migrator applies journal+SQL at runtime; **no meta snapshot was generated** — run
-  `pnpm --filter @creare/database db:generate` on the Mac if you want drizzle-kit diffs to
+  `pnpm --filter @pm-os/database db:generate` on the Mac if you want drizzle-kit diffs to
   stay coherent for future migrations.
 
 ## Verification — REQUIRED on the Mac

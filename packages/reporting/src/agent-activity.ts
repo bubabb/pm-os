@@ -1,4 +1,4 @@
-import { getDb, traces, agentWorkspaces, tasks } from '@creare/database'
+import { getDb, traces, agentWorkspaces, tasks } from '@pm-os/database'
 import { eq, desc, inArray } from 'drizzle-orm'
 
 export interface TraceStub {

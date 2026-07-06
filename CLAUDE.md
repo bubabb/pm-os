@@ -1,7 +1,7 @@
-# Creare — Root Claude Instructions
+# Pm.Os — Root Claude Instructions
 
 ## About This Project
-**Creare** is an agentic DevOps platform for AI-native software teams. Local-first Electron desktop app. Latin: "to create."
+**Pm.Os** is an agentic DevOps platform for AI-native software teams. Local-first Electron desktop app. Latin: "to create."
 
 **Master reference:** Always read `project-scope.md` before making any architectural, feature, or UX decision.  
 **Glossary:** Read `docs/GLOSSARY.md` before writing any code — all domain terms must match canonical definitions.  

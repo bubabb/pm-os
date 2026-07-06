@@ -42,14 +42,14 @@ Replaced the stub with the full synchronous domain API (matching boards / agent-
 ## Known Issues / Outstanding
 - **TypeScript not verified.** This session ran on the Linux (Kali) peer, which has no
   `node_modules` / `pnpm`, and cross-package types resolve via built `dist/*.d.ts`. A full
-  install+build is additionally blocked by a syncthing hazard: the Creare Project folder has **no
+  install+build is additionally blocked by a syncthing hazard: the Pm.Os Project folder has **no
   `.stignore`**, so a Linux `node_modules` would be advertised to the Mac and could clobber its
   macOS-native modules (better-sqlite3, esbuild).
 - **Action on the Mac before committing as complete:**
   ```
   pnpm install
-  pnpm --filter @creare/tool-registry exec tsc --noEmit
-  pnpm --filter @creare/desktop exec tsc --noEmit
+  pnpm --filter @pm-os/tool-registry exec tsc --noEmit
+  pnpm --filter @pm-os/desktop exec tsc --noEmit
   ```
 - Recommend adding a `.stignore` (node_modules/, dist/, .turbo/, .DS_Store, .git/) to the synced
   folder so the two machines don't fight over build artifacts.

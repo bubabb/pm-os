@@ -4,7 +4,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import Database from 'better-sqlite3'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { generateId } from '@creare/shared'
+import { generateId } from '@pm-os/shared'
 import * as schema from './schema'
 import { users, projects, tasks, agentWorkspaces, integrationCredentials } from './schema'
 import { setDb, getDb, resetDb } from './client'
@@ -14,7 +14,7 @@ import { setDb, getDb, resetDb } from './client'
 // getDb()) transparently runs against an isolated, disposable database.
 //
 // Usage in a vitest suite:
-//   import { createTestDb, destroyTestDb } from '@creare/database/testing'
+//   import { createTestDb, destroyTestDb } from '@pm-os/database/testing'
 //   beforeEach(() => { db = createTestDb() })
 //   afterEach(() => destroyTestDb())
 

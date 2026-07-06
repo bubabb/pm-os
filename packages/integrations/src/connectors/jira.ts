@@ -1,4 +1,4 @@
-import { stableHash } from '@creare/shared'
+import { stableHash } from '@pm-os/shared'
 import { BaseConnector, UnsupportedMutationError } from './base'
 import type {
   ConnectorCapabilities,

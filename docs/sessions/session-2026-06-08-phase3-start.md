@@ -44,7 +44,7 @@
   - Board items: `listBoardItems` (joins task title), `addBoardItem`, `moveBoardItem`, `removeBoardItem`
   - Milestones: `listMilestones`, `getMilestone`, `createMilestone`, `updateMilestone`, `addMilestoneTask`, `listMilestoneTasks`
   - Added `drizzle-orm: ^0.45.2` to `packages/boards/package.json`
-- **Updated `packages/reporting/src/sprint-reader.ts`**: replaced direct DB queries for sprints/milestones with calls to `getActiveSprint()` and `listMilestones()` from `@creare/boards` domain API. Added `@creare/boards: workspace:*` to `packages/reporting/package.json`.
+- **Updated `packages/reporting/src/sprint-reader.ts`**: replaced direct DB queries for sprints/milestones with calls to `getActiveSprint()` and `listMilestones()` from `@pm-os/boards` domain API. Added `@pm-os/boards: workspace:*` to `packages/reporting/package.json`.
 - Created `apps/desktop/src/main/routes/boards.ts`: full boards routes (boards, columns, sprints, items, milestones). COMPLETE.
 - Registered `boardsRoutes` in `server.ts`. COMPLETE.
 - **`BoardsPage.tsx` — WRITE WAS INTERRUPTED.** The file does not exist yet. This is the next thing to do.
@@ -68,8 +68,8 @@ packages/agent-orchestration/src/index.ts          ← REPLACED stub, full imple
 packages/agent-orchestration/package.json          ← Added drizzle-orm
 packages/boards/src/index.ts                       ← REPLACED stub, full implementation
 packages/boards/package.json                       ← Added drizzle-orm
-packages/reporting/src/sprint-reader.ts            ← Now uses @creare/boards API
-packages/reporting/package.json                    ← Added @creare/boards dependency
+packages/reporting/src/sprint-reader.ts            ← Now uses @pm-os/boards API
+packages/reporting/package.json                    ← Added @pm-os/boards dependency
 
 apps/desktop/src/main/routes/orchestration.ts      ← NEW
 apps/desktop/src/main/routes/boards.ts             ← NEW
@@ -87,7 +87,7 @@ apps/desktop/src/renderer/pages/boards/BoardsPage.tsx     ← DOES NOT EXIST YET
 ## Open Questions / Known Issues
 
 - `BoardsPage.tsx` write was interrupted — file does not exist. Session must start by completing this.
-- After `BoardsPage.tsx` is written, run `pnpm --filter @creare/desktop exec tsc --noEmit` to verify types.
+- After `BoardsPage.tsx` is written, run `pnpm --filter @pm-os/desktop exec tsc --noEmit` to verify types.
 - The `boards/` directory already exists: `apps/desktop/src/renderer/pages/boards/` (created via mkdir in this session).
 
 ---
@@ -96,7 +96,7 @@ apps/desktop/src/renderer/pages/boards/BoardsPage.tsx     ← DOES NOT EXIST YET
 
 1. **Write `apps/desktop/src/renderer/pages/boards/BoardsPage.tsx`** — three tabs: Boards (Kanban view), Sprints, Milestones. Follow the same pattern as `AgentsPage.tsx`. Uses TanStack Query + inline Tailwind. Calls routes at `/projects/:id/boards`, `/projects/:id/sprints`, `/projects/:id/milestones`.
 2. **Wire it into `App.tsx`**: replace `<Placeholder title="Boards" />` with `<BoardsPage />`.
-3. **Run TypeScript**: `pnpm --filter @creare/desktop exec tsc --noEmit` — should be clean.
+3. **Run TypeScript**: `pnpm --filter @pm-os/desktop exec tsc --noEmit` — should be clean.
 4. **Commit**: commit all Phase 3 work so far (Settings, Domain 1, partial Domain 4).
 5. **Continue Phase 3** in task order: Domain 3 (Observability), Domain 2 (Tool Registry), Real OAuth, Background Sync.
 

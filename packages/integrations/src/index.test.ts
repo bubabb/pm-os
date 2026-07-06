@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { seedWorkspace, seedCredential, destroyTestDb } from '@creare/database/testing'
-import { getDb, externalEventCache, integrationSyncState } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { seedWorkspace, seedCredential, destroyTestDb } from '@pm-os/database/testing'
+import { getDb, externalEventCache, integrationSyncState } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { getActiveEvents, getSyncStatus } from './index'
 
 let projectId: string

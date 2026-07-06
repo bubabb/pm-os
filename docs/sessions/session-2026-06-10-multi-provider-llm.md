@@ -1,7 +1,7 @@
 # Session Log — 2026-06-10 — Multi-provider LLM support (OpenAI + Gemini + default reasoning model)
 
 ## Context
-Creare was Anthropic-only at runtime (ai-sdk `complete()` threw for openai/gemini; every PM
+Pm.Os was Anthropic-only at runtime (ai-sdk `complete()` threw for openai/gemini; every PM
 call site hardcoded `'anthropic'` + `'claude-haiku-4-5-20251001'`). This pass makes the
 platform usable with whichever provider the user picks, end-to-end.
 

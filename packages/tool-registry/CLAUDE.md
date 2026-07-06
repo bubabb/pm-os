@@ -6,7 +6,7 @@ last-updated: 2026-06-02
 ---
 
 ## What This Domain Does
-The npm for AI tools. Every AI tool built on Creare is versioned, tested, deployed, and discoverable as a first-class artifact — not an invisible script.
+The npm for AI tools. Every AI tool built on Pm.Os is versioned, tested, deployed, and discoverable as a first-class artifact — not an invisible script.
 
 ## Your Task Instructions
 Read `/docs/agents/tasks/` for the specific task file assigned to this session.

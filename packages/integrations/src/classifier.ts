@@ -1,8 +1,8 @@
-import { complete, extractJson } from '@creare/ai-sdk'
-import type { ModelProvider } from '@creare/ai-sdk'
-import { getDb, externalEventCache } from '@creare/database'
+import { complete, extractJson } from '@pm-os/ai-sdk'
+import type { ModelProvider } from '@pm-os/ai-sdk'
+import { getDb, externalEventCache } from '@pm-os/database'
 import { eq } from 'drizzle-orm'
-import type { ExternalEventCache } from '@creare/database'
+import type { ExternalEventCache } from '@pm-os/database'
 import type { ClassifiedItem, NormalizedEntity, ActionBucket } from './types'
 
 type Classification = {

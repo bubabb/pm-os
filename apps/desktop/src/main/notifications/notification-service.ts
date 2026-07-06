@@ -1,8 +1,8 @@
-import { getDb, notifications, projects } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { getDb, notifications, projects } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { eq, isNull, and, desc, count } from 'drizzle-orm'
 import { emitEvent } from '../routes/events'
-import type { Notification, AgentWorkspace, ApprovalGate } from '@creare/database'
+import type { Notification, AgentWorkspace, ApprovalGate } from '@pm-os/database'
 
 export async function createNotification(input: {
   userId: string

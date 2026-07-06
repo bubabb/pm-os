@@ -17,7 +17,7 @@
 
 ## Decisions Made
 - `localBoardItemId` rides inside the op payload JSON (typed `CreateItemOp & { localBoardItemId: string }`) — no schema change; `mutation_queue.remoteLinkId` stays null for creates as the schema comment intends.
-- Task-title PATCH writes the `tasks` row directly in the route (with append-only `task.updated` event): no domain API exposes title updates (agent-orchestration `updateTask` excludes title; @creare/boards has no task-title API) and this task's file-ownership scope forbade extending either domain package. Flagged as a candidate to lift into a domain API later.
+- Task-title PATCH writes the `tasks` row directly in the route (with append-only `task.updated` event): no domain API exposes title updates (agent-orchestration `updateTask` excludes title; @pm-os/boards has no task-title API) and this task's file-ownership scope forbade extending either domain package. Flagged as a candidate to lift into a domain API later.
 - `enqueueItemCreate` resolves the board via a read of `board_items` (integrations reads boards tables; still only WRITES mutation_queue/remote_links).
 - Comment route returns 400 (not 404) when the item has no remote link yet — board is mirrored but the create push hasn't landed.
 
@@ -33,4 +33,4 @@
 - Close currently pushes `close_item` only — it does not also move the local item to a terminal column; remote pull will reconcile status.
 
 ## Next Session Should Start With
-- `pnpm --filter @creare/integrations build && pnpm --filter @creare/integrations typecheck && pnpm --filter @creare/desktop typecheck && pnpm vitest run packages/integrations/src/mirror/outbox.test.ts` (all green as of this session, lint also clean). Consider renderer UI wiring for the four card routes.
+- `pnpm --filter @pm-os/integrations build && pnpm --filter @pm-os/integrations typecheck && pnpm --filter @pm-os/desktop typecheck && pnpm vitest run packages/integrations/src/mirror/outbox.test.ts` (all green as of this session, lint also clean). Consider renderer UI wiring for the four card routes.

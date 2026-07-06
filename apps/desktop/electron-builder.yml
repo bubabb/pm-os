@@ -1,23 +1,26 @@
-# electron-builder configuration for Creare.
+# electron-builder configuration for Pm.Os.
 #
-# Run via `pnpm --filter @creare/desktop package` (installers) or
-# `pnpm --filter @creare/desktop package:dir` (unpacked dir under release/ —
+# Run via `pnpm --filter @pm-os/desktop package` (installers) or
+# `pnpm --filter @pm-os/desktop package:dir` (unpacked dir under release/ —
 # faster, good for smoke-testing the packaged app).
 #
 # Notes:
-# - @creare/* workspace packages are BUNDLED into out/main/index.js by
+# - @pm-os/* workspace packages are BUNDLED into out/main/index.js by
 #   electron.vite.config.ts (pnpm symlinks don't survive packaging), so the
 #   only native runtime dep that must travel in node_modules is better-sqlite3.
 # - better-sqlite3's .node binary cannot be loaded from inside an asar archive,
 #   hence asarUnpack. npmRebuild ensures it is compiled for the target
 #   Electron ABI (the dev tree may hold a Node-ABI build — see
 #   scripts/rebuild-better-sqlite3.mjs).
-# - @creare/database's runMigrations() probes process.resourcesPath/migrations
+# - @pm-os/database's runMigrations() probes process.resourcesPath/migrations
 #   at runtime; extraResources ships the SQL migrations (incl. meta/ journal)
 #   to exactly that location.
 
-appId: com.creare.app
-productName: Creare
+appId: com.pmos.app
+productName: Pm.Os
+# Dot-free executable/artifact base name (productName has a dot, which is awkward in
+# binary and installer file names).
+executableName: pm-os
 
 directories:
   output: release
@@ -53,7 +56,7 @@ mac:
       arch: universal
   category: public.app-category.developer-tools
   # Unsigned / ad-hoc — no Apple Developer certificate required. The tester opens it
-  # once via right-click → Open (or `xattr -cr /Applications/Creare.app`) to clear
+  # once via right-click → Open (or `xattr -cr /Applications/Pm.Os.app`) to clear
   # Gatekeeper quarantine. Set a real identity here to notarize for wider distribution.
   identity: null
   # No custom mac icon: resources/icon.png is 256x256 and electron-builder requires

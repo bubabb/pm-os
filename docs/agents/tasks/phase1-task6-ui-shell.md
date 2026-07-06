@@ -90,7 +90,7 @@ Install the base components needed for the shell:
 ---
 
 ## Done When
-- [ ] App renders and routes work in Electron (`pnpm --filter @creare/desktop run dev`)
+- [ ] App renders and routes work in Electron (`pnpm --filter @pm-os/desktop run dev`)
 - [ ] Sign-in page shown when unauthenticated
 - [ ] Project list loads from API after sign-in
 - [ ] Project switcher correctly persists selection

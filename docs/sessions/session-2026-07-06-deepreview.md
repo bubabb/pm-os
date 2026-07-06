@@ -1,7 +1,7 @@
 # Session Log — 2026-07-06 — Whole-project deepreview (cross-model verified)
 
 ## What Was Done
-- Ran the `deepreview` protocol (Ground → Verify → Break-it) over the **entire Creare monorepo** on `main` @ `fa66ad6` (clean tree, no working diff → review object = whole project current state).
+- Ran the `deepreview` protocol (Ground → Verify → Break-it) over the **entire Pm.Os monorepo** on `main` @ `fa66ad6` (clean tree, no working diff → review object = whole project current state).
 - **Gate re-established (GREEN):** `pnpm typecheck` → 23/23 tasks; `pnpm lint` → exit 0; `pnpm test` → 293/293 across 29 files.
 - Fanned out **6 domain reviewers** (auth/secrets, connectors, sync/mirror, server/headless/CLI, renderer, db/packages/build).
 - Handed **11 risky candidate findings to cross-model skeptics** (session = Opus 4.8; skeptics on **Fable 5** and **Sonnet 5**) to re-derive cold. **All 11 CONFIRMED.**
@@ -9,7 +9,7 @@
 ## Confirmed findings (severity-ranked, all cross-model verified)
 
 ### HIGH — security
-1. **Cross-origin admin-token theft on the headless server.** `server.ts:105-108` CORS uses `origin.startsWith('http://localhost'|'http://127.0.0.1')` (prefix match → `http://localhost.evil.com` passes). Combined with the default dev-stub sign-in (`oauth-service.ts:42-73` returns null with no OAuth env → `auth.ts:22-37` → `auth-service.ts:102-118` mints an **admin** JWT with no credential check), a malicious page can `fetch` `POST /auth/sign-in` cross-origin and read the admin token from the body. *Precondition:* victim runs headless with no OAuth env + visits attacker page; Chrome PNA *may* block, Firefox/Safari don't. **Fix:** exact-match origin hostname; gate dev-stub behind `CREARE_DEV_AUTH=1`.
+1. **Cross-origin admin-token theft on the headless server.** `server.ts:105-108` CORS uses `origin.startsWith('http://localhost'|'http://127.0.0.1')` (prefix match → `http://localhost.evil.com` passes). Combined with the default dev-stub sign-in (`oauth-service.ts:42-73` returns null with no OAuth env → `auth.ts:22-37` → `auth-service.ts:102-118` mints an **admin** JWT with no credential check), a malicious page can `fetch` `POST /auth/sign-in` cross-origin and read the admin token from the body. *Precondition:* victim runs headless with no OAuth env + visits attacker page; Chrome PNA *may* block, Firefox/Safari don't. **Fix:** exact-match origin hostname; gate dev-stub behind `PMOS_DEV_AUTH=1`.
 2. **Mass-assignment on `PATCH /users/me`.** `routes/users.ts:20-24` spreads raw `request.body` into Drizzle `.set()`; no route JSON schema, no ajv `removeAdditional` anywhere in `main/`. `role`/`email`/`id` are real writable columns. Role-escalation is currently **inert** (every user minted `admin`), but **email/id rewrite is live today** (identity spoofing via email-keyed `upsertOAuthUser`; FK corruption via id). Becomes full priv-esc once roles/multi-user ship. **Fix:** whitelist `{name, avatarUrl}` or attach a schema with `additionalProperties:false`.
 
 ### HIGH — data loss / correctness
@@ -30,10 +30,10 @@
 - SSE never re-auths on token expiry → silent infinite 30s reconnect (`sse.ts`) — MEDIUM, already a documented PROGRESS gap.
 - `CredentialError` 422 flattened to 502 on `/connections/:id/resources` (`connections.ts:85-106`) — LOW.
 - `requireRole` defined but wired to zero routes — LOW.
-- Non-numeric `CREARE_PORT` → `NaN` → random port, misleading printed URL — LOW.
+- Non-numeric `PMOS_PORT` → `NaN` → random port, misleading printed URL — LOW.
 - SPA fallback returns 200 index.html for method-mismatch GETs with `Accept: text/html` — LOW.
 - Early-SIGINT can hang if `stopServer()` rejects before listen (`headless.ts:47-51`) — LOW.
-- CLI token `0600` only on create; `~/.creare` not `0700` — INFO.
+- CLI token `0600` only on create; `~/.pmos` not `0700` — INFO.
 - Scheduler teardown can await an instantly-resolved promise, not the in-flight cycle (`sync-scheduler.ts:151-177`) — LOW/MED.
 - Pull `pendingOps` has no `ORDER BY` vs reconciler's "queue order" assumption — LOW.
 - Unreachable classifier rule for unassigned tickets (`classifier.ts:39-45` vs jira JQL) — LOW.
@@ -53,7 +53,7 @@
 - Connector retry bounded (3 attempts, honors Retry-After); GitHub GraphQL error classification; Confluence/Notion/GitHub/OneDrive pagination correct; correlator false-positive rejection.
 - DB pragmas (WAL, foreign_keys, busy_timeout, integrity_check) applied once correctly; migration path resolves in dev/headless/packaged; indexes cover hot paths; no SQL injection (all bound params); model IDs current for this environment.
 - Renderer focus-loss fix is real and complete across Dialog/DelegateConfigDrawer/CommandPalette; 422 correctly does NOT sign out; no dead renderer→route wiring; ErrorBoundary isolates crashes.
-- Every route applies `requireAuth` (intentional exceptions: health, sign-in, me, SSE); `CREARE_SERVE_WEB` opt-in keeps the Electron path byte-identical.
+- Every route applies `requireAuth` (intentional exceptions: health, sign-in, me, SSE); `PMOS_SERVE_WEB` opt-in keeps the Electron path byte-identical.
 
 ## Decisions Made
 - Review object = whole-project current `main` (no working diff), per the deepreview precedence rule.

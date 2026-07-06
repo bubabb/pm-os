@@ -5,7 +5,7 @@
 
 ## What Was Built
 
-### @creare/tool-registry — Domain 2
+### @pm-os/tool-registry — Domain 2
 Replaced the 3-line stub `packages/tool-registry/src/index.ts` with the full domain implementation:
 
 - **Tool management**
@@ -47,13 +47,13 @@ All mutations write to the append-only `events` log with `domain: 'tool-registry
 The original CONTRACT (Phase 2 planning) specified `Promise`-returning signatures. The actual codebase domains (boards, agent-orchestration) are **synchronous** (`getDb()` better-sqlite3). This domain follows the real synchronous convention and adds an explicit `actorId` parameter for create/publish/deploy/rollback (the NOT-NULL `*ById` columns). CONTRACT.md updated to match.
 
 ## Verification — OUTSTANDING
-`tsc --noEmit` was **not** run. This box (Kali) has no `node_modules`, no `pnpm`, and packages are unbuilt (cross-package types resolve via each package's `dist/*.d.ts`). A full install+build is also blocked by a syncthing hazard: the Creare Project folder currently has **no `.stignore`**, so installing Linux-native `node_modules` here would advertise them to the Mac.
+`tsc --noEmit` was **not** run. This box (Kali) has no `node_modules`, no `pnpm`, and packages are unbuilt (cross-package types resolve via each package's `dist/*.d.ts`). A full install+build is also blocked by a syncthing hazard: the Pm.Os Project folder currently has **no `.stignore`**, so installing Linux-native `node_modules` here would advertise them to the Mac.
 
 **Run on the Mac before committing as complete:**
 ```
 pnpm install        # picks up new drizzle-orm dep in tool-registry
-pnpm --filter @creare/tool-registry exec tsc --noEmit
-pnpm --filter @creare/desktop exec tsc --noEmit
+pnpm --filter @pm-os/tool-registry exec tsc --noEmit
+pnpm --filter @pm-os/desktop exec tsc --noEmit
 ```
 Manual review covered: exactOptionalPropertyTypes (fixed 2 explicit-undefined assignments in ToolsPage), noUncheckedIndexedAccess, unused imports, drizzle import surface.
 

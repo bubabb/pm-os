@@ -4,18 +4,20 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import Database from 'better-sqlite3'
 import { join } from 'path'
 import { homedir } from 'os'
-import { mkdirSync, existsSync } from 'fs'
+import { existsSync } from 'fs'
+import { ensurePmosDataDir } from '@pm-os/shared'
 import * as schema from './schema'
 
-const dbPath = join(homedir(), '.creare', 'creare.db')
+const dbPath = join(homedir(), '.pmos', 'pmos.db')
 
 // Singleton — one connection per process
 let _db: BetterSQLite3Database<typeof schema> | null = null
 
 export function getDb(): BetterSQLite3Database<typeof schema> {
   if (!_db) {
-    // Create ~/.creare/ lazily — only when the DB is first opened, not at import time
-    mkdirSync(join(homedir(), '.creare'), { recursive: true })
+    // Ensure ~/.pmos exists (migrating a legacy ~/.creare install on first run) —
+    // lazily, only when the DB is first opened, not at import time.
+    ensurePmosDataDir()
     const sqlite = new Database(dbPath)
     sqlite.pragma('journal_mode = WAL')  // better concurrent read performance
     sqlite.pragma('foreign_keys = ON')   // enforce FK constraints

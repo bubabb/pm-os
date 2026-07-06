@@ -1,16 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { seedWorkspace, seedCredential, destroyTestDb } from '@creare/database/testing'
+import { seedWorkspace, seedCredential, destroyTestDb } from '@pm-os/database/testing'
 import {
   getDb,
   integrationCredentials,
   mutationQueue,
   remoteLinks,
   syncConflicts,
-} from '@creare/database'
-import { generateId } from '@creare/shared'
+} from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { and, eq } from 'drizzle-orm'
 import { createMirror, pullMirror, getMirrorStatus } from './mirror-sync'
-import type { IntegrationCredential, RemoteLink } from '@creare/database'
+import type { IntegrationCredential, RemoteLink } from '@pm-os/database'
 import type { MirrorBoardSnapshot, MirrorColumnSnapshot, MirrorItemSnapshot } from '../types'
 
 // Stub the GitHub Projects client — pulls must never hit the network in tests.

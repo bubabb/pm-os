@@ -14,7 +14,7 @@
 //                 push; this module only enqueues and marks the row resolved.
 //
 // House rule: this module NEVER writes boards tables directly — all local item
-// writes go through @creare/boards (applyMirrorSnapshot); reads use the boards
+// writes go through @pm-os/boards (applyMirrorSnapshot); reads use the boards
 // public getters. Conflict/queue/link rows are integrations-owned.
 
 import {
@@ -24,12 +24,12 @@ import {
   remoteLinks,
   syncConflicts,
   tasks,
-} from '@creare/database'
-import { generateId } from '@creare/shared'
+} from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
-import { applyMirrorSnapshot, getBoard, getBoardItem, getColumn } from '@creare/boards'
-import type { MirrorApplyColumn } from '@creare/boards'
-import type { IntegrationCredential, RemoteLink, SyncConflict } from '@creare/database'
+import { applyMirrorSnapshot, getBoard, getBoardItem, getColumn } from '@pm-os/boards'
+import type { MirrorApplyColumn } from '@pm-os/boards'
+import type { IntegrationCredential, RemoteLink, SyncConflict } from '@pm-os/database'
 import {
   connectorWriteCapabilities,
   enqueueBoardItemMove,

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { seedWorkspace, seedCredential, destroyTestDb } from '@creare/database/testing'
+import { seedWorkspace, seedCredential, destroyTestDb } from '@pm-os/database/testing'
 import {
   getDb,
   events,
@@ -7,8 +7,8 @@ import {
   syncConflicts,
   notifications,
   remoteLinks,
-} from '@creare/database'
-import { generateId } from '@creare/shared'
+} from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { pruneOldRecords } from './prune'
 
 const DAY_MS = 24 * 60 * 60 * 1000

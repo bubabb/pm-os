@@ -1,5 +1,5 @@
 import { Send, UserPlus } from 'lucide-react'
-import type { ClassifiedItem } from '@creare/integrations'
+import type { ClassifiedItem } from '@pm-os/integrations'
 
 const RISK_COLORS: Record<number, { bg: string; text: string; dot: string }> = {
   5: { bg: 'bg-destructive/10', text: 'text-destructive',        dot: 'bg-red-500' },

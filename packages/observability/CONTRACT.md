@@ -6,14 +6,14 @@ last-updated: 2026-06-02
 ---
 
 ## Schema Types Consumed
-From `@creare/database`:
+From `@pm-os/database`:
 ```typescript
 import type {
   Event, NewEvent,
   Trace, NewTrace,
   TraceEvent, NewTraceEvent,
   AuditLog, NewAuditLog,
-} from '@creare/database'
+} from '@pm-os/database'
 ```
 
 ## Append-Only Tables — Critical Rule
@@ -41,9 +41,9 @@ getAuditLog(projectId: string, since?: string): Promise<AuditLog[]>
 ```
 
 ## Dependencies
-- `@creare/database` — reads events log; writes traces, trace_events, audit_log
-- `@creare/shared` — `generateId()`
+- `@pm-os/database` — reads events log; writes traces, trace_events, audit_log
+- `@pm-os/shared` — `generateId()`
 
 ## Consumed By
 - `apps/desktop` — trace viewer, audit log UI, observability dashboards
-- `@creare/reporting` — anomaly data, deployment risk scores
+- `@pm-os/reporting` — anomaly data, deployment risk scores

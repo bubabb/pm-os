@@ -6,7 +6,7 @@
 - **push-worker.ts (P0/P1):** `startPushWorker` boot now awaits `recoverStaleInFlight()` (in_flight→pending after a crash) before starting the interval; logs count if >0; `started` flag keeps idempotency through the async boot, `stopPushWorker` resets it. After each drain, if failed/conflicts >0, `notifyPushProblems(sinceIso)` queries mutation_queue rows that flipped to failed/conflicted during the drain, groups per project, resolves `projects.ownerId`, and fire-and-forgets `createNotification` (type 'agent_failed' for failures / 'mention' for conflicts-only, resourceType 'mutation_queue').
 
 ## Decisions Made
-- Coded to the parallel-change contract: `recoverStaleInFlight(): Promise<number>` exported from `@creare/integrations` — NOT YET LANDED in packages/integrations at session end. Verified via temporary dist .d.ts shim: my three files typecheck clean once the export exists.
+- Coded to the parallel-change contract: `recoverStaleInFlight(): Promise<number>` exported from `@pm-os/integrations` — NOT YET LANDED in packages/integrations at session end. Verified via temporary dist .d.ts shim: my three files typecheck clean once the export exists.
 - Failure detection uses updatedAt >= drain-start timestamp (drain result has no per-op detail) — terminal states only, so each parked op notifies once.
 
 ## Files Created or Modified
@@ -15,7 +15,7 @@
 - apps/desktop/src/main/sync/push-worker.ts
 
 ## Open Questions
-- `pnpm --filter @creare/desktop typecheck` runs `tsc --noEmit` on a solution tsconfig with `files: []` + references — it checks NOTHING (vacuously green). Direct `tsc --noEmit -p tsconfig.node.json` reveals 3 pre-existing errors in connections.ts / secrets-service.ts / server.ts (not touched here). The typecheck script should probably be `tsc -b --noEmit` or per-reference.
+- `pnpm --filter @pm-os/desktop typecheck` runs `tsc --noEmit` on a solution tsconfig with `files: []` + references — it checks NOTHING (vacuously green). Direct `tsc --noEmit -p tsconfig.node.json` reveals 3 pre-existing errors in connections.ts / secrets-service.ts / server.ts (not touched here). The typecheck script should probably be `tsc -b --noEmit` or per-reference.
 - Desktop typecheck will fail with `TS2305: no exported member 'recoverStaleInFlight'` until the parallel outbox change lands.
 
 ## Next Session Should Start With

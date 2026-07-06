@@ -19,7 +19,7 @@
 - **external_event_cache is append-only with soft-delete** — new fetch = new row; TTL purging uses `purgedAt`, never hard DELETE (consistent with append-only event log philosophy)
 - **user_settings requires projectId in v1** — global settings deferred to v2 to avoid NULL uniqueness issues in SQLite unique indexes
 - **integration_credentials uses same encryption as secrets** — AES-256-GCM, IV per encryption, key from Electron safeStorage. OAuth tokens are secrets.
-- **PM Command Center is Domain 5's first Phase 2 deliverable** — concrete user story, real validation of Creare's stakeholder intelligence pillar
+- **PM Command Center is Domain 5's first Phase 2 deliverable** — concrete user story, real validation of Pm.Os's stakeholder intelligence pillar
 
 ## Files Created or Modified
 - `/Users/bubagv/Desktop/devops_platform/project-scope.md` — v1.3, Domain 6 added, Phase 2 build order updated

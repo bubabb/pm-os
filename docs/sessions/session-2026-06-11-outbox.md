@@ -2,8 +2,8 @@
 
 ## What Was Done
 - Implemented `packages/integrations/src/mirror/outbox.ts` (NEW): `enqueueMutation`, `enqueueBoardItemMove`, `drainMutationQueue` per docs/architecture/bidirectional-sync.md (push §).
-- Implemented `packages/integrations/src/mirror/outbox.test.ts` (NEW): 10 tests, all network-free (GitHubConnector mocked, in-memory DB via @creare/database/testing).
-- Verified: `pnpm --filter @creare/integrations typecheck` green, `pnpm vitest run packages/integrations/src/mirror/outbox.test.ts` 10/10, package lint green, full integrations suite 59/59.
+- Implemented `packages/integrations/src/mirror/outbox.test.ts` (NEW): 10 tests, all network-free (GitHubConnector mocked, in-memory DB via @pm-os/database/testing).
+- Verified: `pnpm --filter @pm-os/integrations typecheck` green, `pnpm vitest run packages/integrations/src/mirror/outbox.test.ts` 10/10, package lint green, full integrations suite 59/59.
 
 ## Decisions Made
 - **statusFieldRemoteId storage convention:** `board_column` remote_links rows store the Status FIELD remote id in `containerRemoteId` (an option's container IS its field); `board_item` links store the ProjectV2 node id in `containerRemoteId`. mirror-sync / boards.applyMirrorSnapshot MUST write column links with `containerRemoteId = snapshot.statusFieldRemoteId`. This makes move_item ops self-contained — no metadata refetch at drain time.

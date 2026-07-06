@@ -16,7 +16,7 @@ Read in order:
 
 ## Architecture Note
 Domain 4 (Boards) is not yet built. Read sprint/milestone data directly from DB in Phase 2.
-Wire through `@creare/boards` public API in Phase 3 Integration sprint.
+Wire through `@pm-os/boards` public API in Phase 3 Integration sprint.
 
 ## Dashboard Data Flow
 ```

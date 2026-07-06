@@ -21,9 +21,9 @@
 
 ## Runtime config (env, optional in dev)
 ```
-CREARE_GITHUB_CLIENT_ID / CREARE_GITHUB_CLIENT_SECRET
-CREARE_ENTRA_CLIENT_ID / CREARE_ENTRA_CLIENT_SECRET / CREARE_ENTRA_TENANT_ID
-CREARE_OAUTH_REDIRECT_URI   (default http://localhost:4321/auth/oauth/callback)
-CREARE_SYNC_INTERVAL_MS     (default 900000; 0 disables the scheduler)
+PMOS_GITHUB_CLIENT_ID / PMOS_GITHUB_CLIENT_SECRET
+PMOS_ENTRA_CLIENT_ID / PMOS_ENTRA_CLIENT_SECRET / PMOS_ENTRA_TENANT_ID
+PMOS_OAUTH_REDIRECT_URI   (default http://localhost:4321/auth/oauth/callback)
+PMOS_SYNC_INTERVAL_MS     (default 900000; 0 disables the scheduler)
 ```
 Without OAuth env vars, sign-in transparently uses the dev-user stub.

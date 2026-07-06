@@ -1,8 +1,8 @@
 import {
   getDb, events, traces, traceEvents, auditLog, agentWorkspaces,
-} from '@creare/database'
+} from '@pm-os/database'
 import { eq, and, desc, asc, max, getTableColumns } from 'drizzle-orm'
-import { generateId } from '@creare/shared'
+import { generateId } from '@pm-os/shared'
 import type { InferSelectModel } from 'drizzle-orm'
 
 // ── Re-exported types ─────────────────────────────────────────────────────────

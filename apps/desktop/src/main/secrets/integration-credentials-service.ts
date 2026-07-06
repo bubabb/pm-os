@@ -6,12 +6,12 @@ import {
   remoteLinks,
   mutationQueue,
   syncConflicts,
-} from '@creare/database'
-import { generateId } from '@creare/shared'
+} from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { eq, and, inArray } from 'drizzle-orm'
 import { decryptSecretAsync } from './secrets-service'
 import { getConnection } from './connections-service'
-import type { IntegrationCredential } from '@creare/database'
+import type { IntegrationCredential } from '@pm-os/database'
 
 // A per-project SOURCE: binds a project to a global connection plus a resource
 // scope (e.g. { owner, repo } for GitHub, { projectKey } for Jira). The user never

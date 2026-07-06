@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { seedWorkspace, seedProject, seedUser, destroyTestDb } from '@creare/database/testing'
+import { seedWorkspace, seedProject, seedUser, destroyTestDb } from '@pm-os/database/testing'
 import { createTask, updateTask, addEdge, getReadyTasks } from './index'
 
 let userId: string

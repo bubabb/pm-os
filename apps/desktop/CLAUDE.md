@@ -1,7 +1,7 @@
-# Creare Desktop App
+# Pm.Os Desktop App
 
 ## What This Is
-The Electron shell for Creare. Three processes:
+The Electron shell for Pm.Os. Three processes:
 - **main/** — Node.js main process: Fastify API server, SQLite access, agent utility process management, IPC bridge
 - **preload/** — Secure context bridge between main and renderer
 - **renderer/** — React UI (all 5 domain views + shared shell)

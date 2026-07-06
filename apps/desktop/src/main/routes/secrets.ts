@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { getDb, projects } from '@creare/database'
+import { getDb, projects } from '@pm-os/database'
 import { eq, and } from 'drizzle-orm'
 import { requireAuth } from '../auth'
 import { createSecret, listSecrets, deleteSecret } from '../secrets'

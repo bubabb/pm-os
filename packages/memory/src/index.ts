@@ -1,11 +1,11 @@
-// Creare — Team Memory / Adaptive Learning (Phase 4)
+// Pm.Os — Team Memory / Adaptive Learning (Phase 4)
 // Durable learnings captured from agent runs, reviews, and evals, recalled to inform
 // future work. Retrieval is a lightweight tag + keyword ranking for v1 (no FTS yet).
 
-import { getDb, learnings, events } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { getDb, learnings, events } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { and, eq, desc } from 'drizzle-orm'
-import type { Learning } from '@creare/database'
+import type { Learning } from '@pm-os/database'
 
 export type LearningSource = 'agent_run' | 'review' | 'eval' | 'manual'
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { seedWorkspace, seedCredential, seedTask, destroyTestDb } from '@creare/database/testing'
+import { seedWorkspace, seedCredential, seedTask, destroyTestDb } from '@pm-os/database/testing'
 import {
   getDb,
   boards,
@@ -11,8 +11,8 @@ import {
   remoteLinks,
   syncConflicts,
   tasks,
-} from '@creare/database'
-import { generateId, stableHash } from '@creare/shared'
+} from '@pm-os/database'
+import { generateId, stableHash } from '@pm-os/shared'
 import { and, eq } from 'drizzle-orm'
 import { UnsupportedMutationError } from '../connectors/base'
 import {
@@ -26,7 +26,7 @@ import {
   recoverStaleInFlight,
 } from './outbox'
 import { planReconcile } from './reconciler'
-import type { IntegrationCredential } from '@creare/database'
+import type { IntegrationCredential } from '@pm-os/database'
 import type { MirrorItemSnapshot, MutationEnvelope, MutationOp } from '../types'
 
 // Stub the GitHub connector — the drain must never hit the network in tests.

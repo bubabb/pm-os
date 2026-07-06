@@ -1,5 +1,5 @@
-import { getDb, globalSettings } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { getDb, globalSettings } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { eq } from 'drizzle-orm'
 import { encryptSecretAsync, decryptSecretAsync } from './secrets-service'
 
@@ -36,7 +36,7 @@ export async function getGlobalSetting(key: string): Promise<string | null> {
     // and degrade to defaults instead of throwing — a single orphaned setting
     // must never 500 the whole dashboard. Re-saving the setting re-encrypts it
     // under the current key.
-    console.warn(`[creare] global setting "${key}" could not be decrypted (stale key?) — treating as unset:`, err instanceof Error ? err.message : err)
+    console.warn(`[pm-os] global setting "${key}" could not be decrypted (stale key?) — treating as unset:`, err instanceof Error ? err.message : err)
     return null
   }
 }

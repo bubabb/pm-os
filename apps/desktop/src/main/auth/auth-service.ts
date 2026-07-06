@@ -1,17 +1,17 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { getSafeStorage } from '../electron-optional'
-import { getDb } from '@creare/database'
-import { users } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { getDb } from '@pm-os/database'
+import { users } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { eq } from 'drizzle-orm'
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
-import type { User } from '@creare/database'
+import type { User } from '@pm-os/database'
 
-const JWT_ISSUER = 'creare'
-const JWT_AUDIENCE = 'creare-desktop'
-const KEYS_FILE = join(homedir(), '.creare', 'keys.json')
+const JWT_ISSUER = 'pm-os'
+const JWT_AUDIENCE = 'pm-os-desktop'
+const KEYS_FILE = join(homedir(), '.pmos', 'keys.json')
 
 let _jwtSecret: Uint8Array | null = null
 
@@ -85,16 +85,16 @@ export function getJwtSecret(): Uint8Array {
   // no raw secret and no safeStorage to unwrap it (running headless, without Electron).
   // Generating a new secret here would silently invalidate every outstanding session.
   // Refuse instead — the desktop app can migrate the blob, or the operator can opt into
-  // discarding it (and signing everyone out) with CREARE_ALLOW_KEY_REGEN=1.
+  // discarding it (and signing everyone out) with PMOS_ALLOW_KEY_REGEN=1.
   if (
     keys.jwtSecretBlob &&
     !(safeStorage?.isEncryptionAvailable()) &&
-    process.env['CREARE_ALLOW_KEY_REGEN'] !== '1'
+    process.env['PMOS_ALLOW_KEY_REGEN'] !== '1'
   ) {
     throw new Error(
-      '[creare] Legacy encrypted JWT secret cannot be unwrapped without the OS keyring ' +
+      '[pm-os] Legacy encrypted JWT secret cannot be unwrapped without the OS keyring ' +
         '(safeStorage unavailable — running headless). Run the desktop app once to migrate ' +
-        'it, or set CREARE_ALLOW_KEY_REGEN=1 to discard the old secret and all sessions.',
+        'it, or set PMOS_ALLOW_KEY_REGEN=1 to discard the old secret and all sessions.',
     )
   }
 
@@ -104,7 +104,7 @@ export function getJwtSecret(): Uint8Array {
   //    rather than silently signing users out.
   if (keys.jwtSecretRaw || keys.jwtSecretBlob) {
     console.error(
-      '[creare] WARNING: generating a new JWT secret because the existing one could not be recovered — all existing sessions are invalidated and users must sign in again',
+      '[pm-os] WARNING: generating a new JWT secret because the existing one could not be recovered — all existing sessions are invalidated and users must sign in again',
     )
   }
   const bytes = new Uint8Array(32)

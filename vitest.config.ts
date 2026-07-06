@@ -9,21 +9,21 @@ const src = (p: string) => fileURLToPath(new URL(`./packages/${p}/src/index.ts`,
 
 export default defineConfig({
   resolve: {
-    // Root package specifiers use anchored regexes so `@creare/database` does NOT
-    // swallow the more specific `@creare/database/testing` subpath alias below.
+    // Root package specifiers use anchored regexes so `@pm-os/database` does NOT
+    // swallow the more specific `@pm-os/database/testing` subpath alias below.
     alias: [
-      { find: '@creare/database/testing', replacement: fileURLToPath(new URL('./packages/database/src/testing.ts', import.meta.url)) },
-      { find: /^@creare\/database$/, replacement: src('database') },
-      { find: /^@creare\/shared$/, replacement: src('shared') },
-      { find: /^@creare\/ai-sdk$/, replacement: src('ai-sdk') },
-      { find: /^@creare\/agent-orchestration$/, replacement: src('agent-orchestration') },
-      { find: /^@creare\/tool-registry$/, replacement: src('tool-registry') },
-      { find: /^@creare\/observability$/, replacement: src('observability') },
-      { find: /^@creare\/boards$/, replacement: src('boards') },
-      { find: /^@creare\/reporting$/, replacement: src('reporting') },
-      { find: /^@creare\/integrations$/, replacement: src('integrations') },
-      { find: /^@creare\/eval$/, replacement: src('eval') },
-      { find: /^@creare\/memory$/, replacement: src('memory') },
+      { find: '@pm-os/database/testing', replacement: fileURLToPath(new URL('./packages/database/src/testing.ts', import.meta.url)) },
+      { find: /^@pm-os\/database$/, replacement: src('database') },
+      { find: /^@pm-os\/shared$/, replacement: src('shared') },
+      { find: /^@pm-os\/ai-sdk$/, replacement: src('ai-sdk') },
+      { find: /^@pm-os\/agent-orchestration$/, replacement: src('agent-orchestration') },
+      { find: /^@pm-os\/tool-registry$/, replacement: src('tool-registry') },
+      { find: /^@pm-os\/observability$/, replacement: src('observability') },
+      { find: /^@pm-os\/boards$/, replacement: src('boards') },
+      { find: /^@pm-os\/reporting$/, replacement: src('reporting') },
+      { find: /^@pm-os\/integrations$/, replacement: src('integrations') },
+      { find: /^@pm-os\/eval$/, replacement: src('eval') },
+      { find: /^@pm-os\/memory$/, replacement: src('memory') },
     ],
   },
   test: {

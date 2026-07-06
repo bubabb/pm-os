@@ -1,9 +1,9 @@
-import { getDb, pmDigestCache } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { getDb, pmDigestCache } from '@pm-os/database'
+import { generateId } from '@pm-os/shared'
 import { and, desc, eq, gt } from 'drizzle-orm'
-import { complete } from '@creare/ai-sdk'
-import type { ModelProvider } from '@creare/ai-sdk'
-import type { PmDigestCache } from '@creare/database'
+import { complete } from '@pm-os/ai-sdk'
+import type { ModelProvider } from '@pm-os/ai-sdk'
+import type { PmDigestCache } from '@pm-os/database'
 import type { ClassifiedItem } from './types'
 
 const DIGEST_TTL_MINUTES = 15

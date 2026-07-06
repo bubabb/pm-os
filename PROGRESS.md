@@ -1,4 +1,4 @@
-# Creare — PROGRESS
+# Pm.Os — PROGRESS
 
 At-a-glance resume snapshot. **Read this first** when picking the project back up.
 This is the current-state pointer; the append-only detail log is
@@ -14,20 +14,20 @@ and cross-task handoffs are `agent-state/handoffs/`.
   Driven by tester feedback: corporate policy bans Electron apps; they never reached the product
   (proxy killed the Electron binary download + better-sqlite3 Electron-ABI compile). Coupling audit:
   only **5 files import electron**, renderer uses **zero** Electron features → this is a packaging
-  change, not a rewrite. Built a **no-Electron "Creare Server"**: run the existing Fastify backend
+  change, not a rewrite. Built a **no-Electron "Pm.Os Server"**: run the existing Fastify backend
   headless (plain Node via `tsx`) and **serve the existing React SPA as a localhost web app**.
   • **NEW** `apps/desktop/src/server/headless.ts` (runMigrations+startServer+scheduler+push-worker,
     graceful shutdown, zero electron) · **NEW** `apps/desktop/vite.web.config.ts` (plain-Vite build of
     the renderer → `out/web`, no electron at build) · `server.ts` serves `out/web` via `@fastify/static`
-    + SPA fallback, **opt-in `CREARE_SERVE_WEB=1`** so Electron is byte-for-byte unchanged · renderer
+    + SPA fallback, **opt-in `PMOS_SERVE_WEB=1`** so Electron is byte-for-byte unchanged · renderer
     `API_BASE_URL` now same-origin over http, file:// fallback for Electron (**also fixes the ':4321
-    hardcode' P2**). Deps: `@fastify/static@^7` + `tsx@^4`. Scripts: `pnpm creare` = build packages →
+    hardcode' P2**). Deps: `@fastify/static@^7` + `tsx@^4`. Scripts: `pnpm pm-os` = build packages →
     build web → start (also `web:build`, `server`, `build:packages`).
-  • **One-command run (no Electron):** `pnpm install --ignore-scripts && pnpm creare` → open
+  • **One-command run (no Electron):** `pnpm install --ignore-scripts && pnpm pm-os` → open
     `http://127.0.0.1:4321`. `--ignore-scripts` dodges the electron-binary download; `preserver`
     ensures the **node** better-sqlite3 ABI.
   • **Phase 3 — thin CLI** `apps/desktop/src/server/cli.ts` (run via `tsx`; `pnpm cli <cmd>`):
-    auth via /auth/sign-in dev-stub → JWT cached at `~/.creare/cli-token.json` (0600), 401 auto-reauth.
+    auth via /auth/sign-in dev-stub → JWT cached at `~/.pmos/cli-token.json` (0600), 401 auto-reauth.
     Commands: `health`, `projects [--all]`, `boards <p>`, `connections`, `sources <p>`, `status <p>`,
     `sync <p> [source]`, `open`, `help`; `--json` raw output; friendly "server not running" on ECONNREFUSED.
     Dependency-free (global fetch). No DB/ABI touch.
@@ -37,7 +37,7 @@ and cross-task handoffs are `agent-state/handoffs/`.
     decrypt, re-add the connection once — not a code bug). Gate GREEN **typecheck ✓ · lint ✓ · unit
     293/293 ✓**. Electron path untouched.
   • **FRESH-CLONE BUG FOUND + FIXED (critical for the no-Electron promise):** a clean
-    `git clone` + `pnpm install --ignore-scripts` + `pnpm creare` **crashed** — `auth-service.ts`,
+    `git clone` + `pnpm install --ignore-scripts` + `pnpm pm-os` **crashed** — `auth-service.ts`,
     `secrets-service.ts`, `oauth-service.ts` did a top-level `import … from 'electron'`, and with
     no Electron binary installed `require('electron')` throws "Electron failed to install correctly"
     at module load (the headless server imports these via the auth/secrets routes). Dev box masked
@@ -54,21 +54,21 @@ and cross-task handoffs are `agent-state/handoffs/`.
     the renderer). Renderer `api.ts` + CLI now prefer the `message` field. Fixes the orphaned-token
     sync 500. VERIFIED live (sync → 422 + message in curl, CLI, and surfaced to the UI).
   • **Phase 4 — README** done: new "Run without Electron (headless web app + CLI)" section
-    (`pnpm install --ignore-scripts && pnpm creare` → http://127.0.0.1:4321; `pnpm cli` reference;
-    CREARE_PORT/CREARE_API), plus intro/prereq/scripts/tester-notes cross-links. Uncommitted.
+    (`pnpm install --ignore-scripts && pnpm pm-os` → http://127.0.0.1:4321; `pnpm cli` reference;
+    PMOS_PORT/PMOS_API), plus intro/prereq/scripts/tester-notes cross-links. Uncommitted.
   • **NEXT (optional):** CLI unit test (helpers not yet exported/guarded for import); OAuth-headless
     (BrowserWindow → loopback Fastify route) deferred (connectors use PATs); package a one-shot
     installer/`bin`. Session log: `docs/sessions/session-2026-06-29-headless-web-runtime.md`.
 - **(2026-06-12 EOD):** **Repo published + README + Mac packaging set up for an external tester.**
   Gate GREEN: typecheck 23/23 · unit **293/293** · lint 12/12 · desktop real `tsc -b`. `main` @ `93a717c`, 80 commits, tree clean.
-  • **GitHub remote LIVE:** private repo **`https://github.com/bubabb/creare`** (`origin`/`main`, all 80 commits pushed).
+  • **GitHub remote LIVE:** private repo **`https://github.com/bubabb/pm-os`** (`origin`/`main`, all 80 commits pushed).
     To share = invite collaborators in repo Settings. Git creds now global (`credential.helper store` → `~/.git-credentials`,
     identity bubabb/bruna.gvasconcelos54@gmail.com) — pushing is prompt-free for any future repo.
   • **README.md** at repo root (setup, `pnpm dev`, per-OS packaging, Gatekeeper notes, repo layout).
   • **Packaging for the tester (brother-in-law, on macOS):** `apps/desktop/electron-builder.yml` mac target =
     **universal dmg** (`arch: universal`) + `identity: null` (unsigned) → one `.dmg` runs on Apple Silicon AND Intel.
-    **NEXT STEP = on the Mac: `cd ~/projects/creare && pnpm install && pnpm --filter @creare/desktop package`** →
-    `apps/desktop/release/Creare-0.1.0-universal.dmg` → AirDrop to tester → he right-clicks→Open (Gatekeeper).
+    **NEXT STEP = on the Mac: `cd ~/projects/pm-os && pnpm install && pnpm --filter @pm-os/desktop package`** →
+    `apps/desktop/release/Pm.Os-0.1.0-universal.dmg` → AirDrop to tester → he right-clicks→Open (Gatekeeper).
     If the universal native-module (better-sqlite3) build fails: drop `arch: universal` to build for the local chip.
     Mac prereq: `xcode-select --install`. Electron won't build/run in the agent sandbox — Mac build is the user's to run.
   • (the connector + UI fixes below remain the substantive code state)
@@ -101,7 +101,7 @@ and cross-task handoffs are `agent-state/handoffs/`.
     filter tombstoned mirrors; create_item pending count; Tools/Observability/PMCommandCenter silent-failure → toasts/
     QueryError/Retry; **retention prune** (events 90d / applied-mutations 14d / resolved-conflicts 30d / read-notifs 30d).
   • **Packaging:** `electron-builder.yml` (AppImage/deb/dmg/nsis, asarUnpack native, migrations via extraResources) +
-    `pnpm package`/`package:dir`; electron-vite now BUNDLES `@creare/*` into the main bundle (was unpackable symlinks),
+    `pnpm package`/`package:dir`; electron-vite now BUNDLES `@pm-os/*` into the main bundle (was unpackable symlinks),
     better-sqlite3 stays external. Built bundle boots (Fastify+migrations verified).
   • **REMAINING for true 100%-shippable (honest):** (1) **run `electron-builder` on a real per-OS machine** (network+
     signing) to produce+launch a signed installer — UNVERIFIABLE in this sandbox; (2) **live-verify the whole app in a
@@ -123,7 +123,7 @@ and cross-task handoffs are `agent-state/handoffs/`.
     comment, archive); **OneDrive** (rename, move, If-Match eTag).
   • **Import dialog + status chip generalized** to GitHub/Jira/Notion → import→pull→drag-to-move is two-way for all
     three. (Confluence/OneDrive are item-level, no board mirror.)
-  • **NOT YET WIRED (remaining tail):** card-LIFECYCLE UI — create/edit/close/comment a card FROM Creare and push it
+  • **NOT YET WIRED (remaining tail):** card-LIFECYCLE UI — create/edit/close/comment a card FROM Pm.Os and push it
     (connector supports all of it; only MOVE is wired UI→push so far). Needs generic board-card-action routes +
     UI affordances on mirrored boards. Confluence/OneDrive writes have no UI surface yet. **Still NOT live-verified**
     (Electron won't launch in agent sandbox) — verify in `pnpm dev`. Pull-side conflicts persist + show, but the
@@ -157,11 +157,11 @@ and cross-task handoffs are `agent-state/handoffs/`.
   GraphQL flow needs a real GitHub Project + a classic PAT with `project`+`repo` scopes, and Electron won't launch
   in the agent sandbox; verify in `pnpm dev`.
   • **What Phase 1 delivers:** "Import from GitHub" on the Boards page → pick a connection + a **GitHub Project (v2)**
-    → it becomes a mirrored Creare Kanban (columns = Status options, cards = items backed by tasks). **Drag a card →
+    → it becomes a mirrored Pm.Os Kanban (columns = Status options, cards = items backed by tasks). **Drag a card →
     pushes the move back to GitHub** (durable outbox, FIFO per credential, LWW for moves). **"Pull now"** reconciles
     remote→local (three-way diff vs `remote_links` shadow table; conflicts counted). move_item only in P1.
   • **New:** migration `0007` (SCHEMA_VERSION **1.8.0**: `remote_links`, `mutation_queue`, `sync_conflicts`);
-    `@creare/shared.stableHash`; connector write surface (`capabilities`/`applyMutation`/`fetchRemoteVersion`/
+    `@pm-os/shared.stableHash`; connector write surface (`capabilities`/`applyMutation`/`fetchRemoteVersion`/
     `verifyWriteAccess`); `GitHubProjectsClient` (GraphQL); `mirror/{reconciler,mirror-sync,outbox}`;
     `boards.applyMirrorSnapshot` (plain `MirrorApply` contract — boards never imports integrations, no cycle);
     `routes/mirrors.ts` + `sync/push-worker.ts`; renderer `ImportRemoteBoardDialog` + `MirrorStatusChip`.
@@ -248,14 +248,14 @@ and cross-task handoffs are `agent-state/handoffs/`.
   • **Startup health-check** `checkClaudeCli()` (ai-sdk) — FREE, no token spend: `claude --version` + reads the
     credential store. Cross-platform: file `~/.claude/.credentials.json` (Linux/Win), **macOS Keychain**
     (`security find-generic-password -s "Claude Code-credentials"`), **Windows Cred Manager** (PS Win32 CredRead).
-    3-state `authenticated: yes|no|unknown`. Surfaced at startup (terminal `[creare] reasoning (claude-cli): …`),
+    3-state `authenticated: yes|no|unknown`. Surfaced at startup (terminal `[pm-os] reasoning (claude-cli): …`),
     via `GET /settings/claude-cli-health`, and a `MembershipStatusCard` banner in the UI. Verified on Kali: signed in, **max**.
   • **Dev script** `pnpm check:auth` (`scripts/check-claude-cli-auth.mjs`) — read-only; dumps store + entry name per OS
     to confirm/fix the `CREDENTIAL_SERVICE` constant. **TODO on Mac/Windows:** run it to verify the real entry name
     (the 'Claude Code-credentials' name is a best-effort guess).
   • **cwd isolation DONE** (commit `5620586`): print mode auto-discovers CLAUDE.md from cwd+parents, so reasoning
-    calls from the repo leaked Creare's project context. Now spawns `claude` in an empty temp dir
-    (`tmpdir/creare-ai-sdk-claude-cli`). Proven: provider answers "NONE" from repo root (was "Creare — an agentic
+    calls from the repo leaked Pm.Os's project context. Now spawns `claude` in an empty temp dir
+    (`tmpdir/pm-os-ai-sdk-claude-cli`). Proven: provider answers "NONE" from repo root (was "Pm.Os — an agentic
     DevOps platform…"). Spawn-mocked unit test added (tests **74/74**). (Can't use CLI "simple" mode — it forces
     API-key auth, breaking membership.)
 - **Backlog wave (2026-06-10, Fable 5): DONE.** typecheck 23/23 · unit tests **73/73** · build clean · **E2E green**.
@@ -274,7 +274,7 @@ and cross-task handoffs are `agent-state/handoffs/`.
     default-reasoning-model picker (gated on the key being set); `GET /settings/reasoning-defaults` exposes the choice.
     Agent workspaces already supported per-workspace model. **No schema change** (global_settings is generic KV).
   • **Confluence scope** = Space **ID** (metadata key `spaceKey`→`spaceId` end-to-end; UI labeled + clarified).
-  • **macOS launcher:** `install-desktop-entry.mjs` darwin branch builds `~/Applications/Creare.app` (Info.plist +
+  • **macOS launcher:** `install-desktop-entry.mjs` darwin branch builds `~/Applications/Pm.Os.app` (Info.plist +
     launcher stub + icns via sips/iconutil when present); runs via `predev` on the Mac. **UNTESTED on real macOS.**
   • Approx OpenAI/Gemini pricing constants are placeholders (commented "verify").
 - **Deepreview fixes (2026-06-10, Fable 5, 3 batches): DONE, uncommitted.** typecheck 21/21 · tests **45/45** · build clean.
@@ -312,7 +312,7 @@ and cross-task handoffs are `agent-state/handoffs/`.
     accounts. New **Settings → Sources** tab binds a global connection to the current project + its scope.
   • Migrations `0004`+`0005` are additive (CREATE TABLE + ADD COLUMN) → auto-apply safely at next launch.
 - **Connectors-UX + Gantt (2026-06-10, built on Fable 5 via subagents): DONE, uncommitted.**
-  Verified on Kali: production build compiles (1570 modules), `pnpm --filter @creare/desktop typecheck`
+  Verified on Kali: production build compiles (1570 modules), `pnpm --filter @pm-os/desktop typecheck`
   clean, `pnpm test` 44/44.
   1. **No login gate** — `ProtectedRoute` auto signs-in a local user (dev-stub); `/auth` kept as fallback.
   2. **New "Connections" hub** (sidebar, Plug icon → `/connections`, `pages/connections/ConnectionsPage.tsx`):
@@ -332,7 +332,7 @@ and cross-task handoffs are `agent-state/handoffs/`.
   Domain 2 tool-registry, the Phase 3 review-fix set, Task 6 Real OAuth (GitHub + Entra),
   Task 7 background sync scheduler — all in.
 - **Phase 4 (Eval & Intelligence): verified green on Kali, committed.**
-  Test foundation (`vitest.config.ts`, `@creare/database/testing`), new
+  Test foundation (`vitest.config.ts`, `@pm-os/database/testing`), new
   `packages/eval` + `packages/memory`, schema additions (`eval_runs`,
   `learnings`, SCHEMA_VERSION 1.3.0, migration `0002` + snapshot), 11 test suites.
 - **Verified 2026-06-09 ON KALI:** `pnpm run typecheck` 21/21 · `pnpm test` 44/44.
@@ -372,9 +372,9 @@ and cross-task handoffs are `agent-state/handoffs/`.
 ## DESKTOP LAUNCHER (day-to-day, 2026-06-10) — Linux only, Mac-safe
 - `pnpm dev` now self-installs an app-menu + Desktop icon on first run (`predev` →
   `scripts/install-desktop-entry.mjs`, idempotent, **Linux-only** — no-ops on macOS).
-- The icon runs `scripts/launch-creare.sh` → `electron-vite preview` (production build, no
+- The icon runs `scripts/launch-pm-os.sh` → `electron-vite preview` (production build, no
   dev server). It `ensure electron`'s the ABI first and builds `out/` if missing. Logs to
-  `~/.cache/creare-launch.log`. Refresh after code changes: `pnpm --filter @creare/desktop build`.
+  `~/.cache/pm-os-launch.log`. Refresh after code changes: `pnpm --filter @pm-os/desktop build`.
 - App icon lives in `apps/desktop/resources/` (NOT `build/` — `.stignore` ignores `build/`, so
   it would never sync to the Mac). `.sqlite-abi/` added to `.stignore` (per-platform binaries).
 - Mac equivalent (Dock `.app`/`.dmg` via electron-builder) is NOT built yet — future option.
@@ -390,7 +390,7 @@ Phase 3 + Phase 4 are committed and verified green on Kali. This session's chang
 
 ## FOLLOW-UPS
 - ✅ DONE 2026-06-10 — Test suites for observability / integrations / reporting (now 73 unit tests).
-- ✅ DONE 2026-06-10 — Playwright E2E runs + passes via `pnpm --filter @creare/desktop e2e` (needs a display;
+- ✅ DONE 2026-06-10 — Playwright E2E runs + passes via `pnpm --filter @pm-os/desktop e2e` (needs a display;
   works on Kali :0 and on the Mac). `**/e2e/**` excluded from vitest so the two runners don't collide.
 - ✅ DONE 2026-06-10 — Routes + UI for eval & memory (Intelligence page + /eval-runs + /learnings).
 - OPEN (deferred by decision): agent EXECUTION (Delegate still just creates a `[Agent]` task — no runtime
@@ -401,4 +401,4 @@ Phase 3 + Phase 4 are committed and verified green on Kali. This session's chang
 *Conventions: synchronous `getDb()` domain APIs; append-only `events` log on every
 mutation; UUIDs via `generateId()`; no `any`; `exactOptionalPropertyTypes`.*
 *On "done for the day", update this file's STATUS NOW / RESUME HERE and the
-auto-memory pointer ([[project-creare]]).*
+auto-memory pointer ([[project-pm-os]]).*

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { seedWorkspace, seedAgentWorkspace, destroyTestDb } from '@creare/database/testing'
-import { generateId } from '@creare/shared'
-import { createTask } from '@creare/agent-orchestration'
+import { seedWorkspace, seedAgentWorkspace, destroyTestDb } from '@pm-os/database/testing'
+import { generateId } from '@pm-os/shared'
+import { createTask } from '@pm-os/agent-orchestration'
 import {
   createTrace, getTrace, updateTrace, listTraces,
   addTraceEvent, listTraceEvents,

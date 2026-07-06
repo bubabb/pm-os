@@ -1,4 +1,4 @@
-// When the UI is served over HTTP (the headless "Creare Server" web runtime),
+// When the UI is served over HTTP (the headless "Pm.Os Server" web runtime),
 // talk to the same origin it was loaded from — so the port is whatever the
 // server used, not a hardcoded 4321. Under Electron the renderer loads from
 // file://, which has no usable origin, so fall back to the local API port.
@@ -7,7 +7,7 @@ export const API_BASE_URL =
     ? window.location.origin
     : 'http://localhost:4321'
 const BASE_URL = API_BASE_URL
-const TOKEN_KEY = 'creare_auth_token'
+const TOKEN_KEY = 'pmos_auth_token'
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)

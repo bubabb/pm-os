@@ -1,6 +1,6 @@
 /**
  * Optional Electron access for backend code that ALSO runs in the headless
- * "Creare Server" runtime.
+ * "Pm.Os Server" runtime.
  *
  * The headless server is plain Node with NO Electron binary installed
  * (`pnpm install --ignore-scripts`), so a top-level `import { x } from 'electron'`

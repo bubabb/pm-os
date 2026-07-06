@@ -32,4 +32,4 @@
 - Wire the renderer mirror-import picker to GET `/connections/:connectionId/resolve-board?ref=` and feed the resolved id into POST `/projects/:id/mirrors`.
 
 ## Verification
-- `pnpm --filter @creare/integrations build` ✓, `typecheck` ✓, `pnpm --filter @creare/desktop typecheck` ✓, `pnpm vitest run packages/integrations/src/connectors/github-projects.test.ts` 53/53 ✓, eslint (both packages) ✓.
+- `pnpm --filter @pm-os/integrations build` ✓, `typecheck` ✓, `pnpm --filter @pm-os/desktop typecheck` ✓, `pnpm vitest run packages/integrations/src/connectors/github-projects.test.ts` 53/53 ✓, eslint (both packages) ✓.

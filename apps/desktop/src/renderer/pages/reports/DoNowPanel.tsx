@@ -1,5 +1,5 @@
 import { CheckCircle } from 'lucide-react'
-import type { ClassifiedItem } from '@creare/integrations'
+import type { ClassifiedItem } from '@pm-os/integrations'
 import { Badge, BADGE_SOURCE_CLASSES, SOURCE_LABELS, type BadgeSource } from '../../components/ui/Badge'
 
 function isBadgeSource(source: string): source is BadgeSource {

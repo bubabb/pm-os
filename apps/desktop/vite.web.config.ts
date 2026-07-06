@@ -2,7 +2,7 @@ import { resolve } from 'path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// Plain-Vite build of the React renderer for the headless "Creare Server" web
+// Plain-Vite build of the React renderer for the headless "Pm.Os Server" web
 // runtime. This deliberately does NOT use electron-vite or electron — so the
 // web UI can be built and served on machines where Electron can't be installed
 // (corporate policy, proxy-blocked binary download). The renderer already uses
