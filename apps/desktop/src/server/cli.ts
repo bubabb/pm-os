@@ -179,18 +179,40 @@ interface ApiTask {
 interface ApiProject { id: string; name: string }
 interface ApiUser { id: string; name: string; email: string }
 
-// Best-effort, SAFE owner→assignee linkage. There is NO user list / search /
-// project-members endpoint (only GET /users/me), so the ONLY user we can resolve
-// a freeform `owner` string to is the authenticated user. We match `owner`
-// exactly against that user's name or email and, on a hit, ALSO set assigneeId
-// (a real users FK) — never creating a user, never guessing an id. Any other
-// owner (including `unassigned` and agent ids) leaves assigneeId untouched.
-// Broader linkage is deferred until a members/user-lookup endpoint exists.
-function resolveAssignee(owner: string, me: ApiUser | null): string | null {
-  if (!me) return null
-  const o = owner.trim()
-  if (o.length === 0 || o === 'unassigned') return null
-  return o === me.name || o === me.email ? me.id : null
+// A case-insensitive index of the team, by name AND by email, for resolving a
+// task's freeform `owner` to a real user id (assigneeId). Also carries id→name
+// for the export reverse mapping (assigneeId → owner).
+interface UserIndex {
+  byNameOrEmail: Map<string, ApiUser>
+  byId: Map<string, ApiUser>
+}
+
+function buildUserIndex(list: ApiUser[]): UserIndex {
+  const byNameOrEmail = new Map<string, ApiUser>()
+  const byId = new Map<string, ApiUser>()
+  for (const u of list) {
+    byId.set(u.id, u)
+    // First writer wins on a name/email collision — deterministic given a sorted list.
+    const name = u.name.trim().toLowerCase()
+    const email = u.email.trim().toLowerCase()
+    if (name.length > 0 && !byNameOrEmail.has(name)) byNameOrEmail.set(name, u)
+    if (email.length > 0 && !byNameOrEmail.has(email)) byNameOrEmail.set(email, u)
+  }
+  return { byNameOrEmail, byId }
+}
+
+// True for owners that should never be linked to a user.
+function isLinkableOwner(owner: string): boolean {
+  const o = owner.trim().toLowerCase()
+  return o.length > 0 && o !== 'unassigned'
+}
+
+// Resolves an owner to an existing user id (case-insensitive, trimmed match on
+// name OR email), for ANY user in the team — not just the authenticated one.
+// Returns null for unassigned/empty/no-match (assigneeId is then left untouched).
+function resolveAssignee(owner: string, index: UserIndex): string | null {
+  if (!isLinkableOwner(owner)) return null
+  return index.byNameOrEmail.get(owner.trim().toLowerCase())?.id ?? null
 }
 
 // Resolves the pmos project for a directory: honour an existing .pmos-project.json,
@@ -241,7 +263,30 @@ function resolveDue(sourceId: string, due: string, warn: (msg: string) => void):
   return { kind: 'skip' }
 }
 
-async function tasksImport(projectDir: string, nameFlag: string | undefined): Promise<void> {
+// Ensures a user exists for an owner and returns its id, adding it to the index
+// so a second task with the same owner reuses it (no duplicate). POST /users is
+// idempotent by email, so a re-run across imports also reuses the same user.
+async function provisionAssignee(owner: string, index: UserIndex): Promise<string> {
+  const existing = resolveAssignee(owner, index)
+  if (existing) return existing
+  const user = await api<ApiUser>('/users', {
+    method: 'POST',
+    body: JSON.stringify({ name: owner.trim() }),
+  })
+  // Fold the (possibly pre-existing, email-matched) user back into the index.
+  index.byId.set(user.id, user)
+  const name = user.name.trim().toLowerCase()
+  const email = user.email.trim().toLowerCase()
+  if (name.length > 0 && !index.byNameOrEmail.has(name)) index.byNameOrEmail.set(name, user)
+  if (email.length > 0 && !index.byNameOrEmail.has(email)) index.byNameOrEmail.set(email, user)
+  return user.id
+}
+
+async function tasksImport(
+  projectDir: string,
+  nameFlag: string | undefined,
+  createAssignees: boolean,
+): Promise<void> {
   const dir = resolve(projectDir)
   const { tasks: readTasks, skipped: readSkipped } = readMarkdownTasks(dir)
   for (const s of readSkipped) console.error(`  skipped ${s.file}: ${s.reason}`)
@@ -273,19 +318,27 @@ async function tasksImport(projectDir: string, nameFlag: string | undefined): Pr
     if (sid) bySource.set(sid, t)
   }
 
-  // The authenticated user — the only user we can safely resolve an owner to
-  // (no members/user-list endpoint). Best-effort: skip linkage if unavailable.
-  let me: ApiUser | null = null
-  try { me = await api<ApiUser>('/users/me') } catch { me = null }
+  // The team roster — lets us resolve ANY task's owner to a real user id, not
+  // just the authenticated one. Best-effort: skip linkage if the list is
+  // unavailable (older server without GET /users).
+  let userIndex: UserIndex = { byNameOrEmail: new Map(), byId: new Map() }
+  try { userIndex = buildUserIndex(await api<ApiUser[]>('/users')) } catch { /* linkage off */ }
 
   let created = 0
   let updated = 0
   let unchanged = 0
+  let provisioned = 0
   for (const md of mdTasks) {
     const description = buildDescription(md)
     const incomingStatus = templateStatusToPmos(md.status)
     const due = resolveDue(md.sourceId, md.due, (m) => console.error(m))
-    const assigneeId = resolveAssignee(md.owner, me) // null unless owner == the auth user
+    // Resolve owner → existing user; or, with --create-assignees, provision one.
+    let assigneeId = resolveAssignee(md.owner, userIndex)
+    if (assigneeId === null && createAssignees && isLinkableOwner(md.owner)) {
+      const before = userIndex.byId.size
+      assigneeId = await provisionAssignee(md.owner, userIndex)
+      if (userIndex.byId.size > before) provisioned++
+    }
     const match = bySource.get(md.sourceId)
 
     if (match) {
@@ -357,9 +410,10 @@ async function tasksImport(projectDir: string, nameFlag: string | undefined): Pr
   }
 
   if (JSON_OUT) {
-    console.log(JSON.stringify({ projectId, created, updated, unchanged, total: mdTasks.length }, null, 2))
+    console.log(JSON.stringify({ projectId, created, updated, unchanged, provisioned, total: mdTasks.length }, null, 2))
   } else {
-    console.log(`Imported into project ${projectId}: ${created} created, ${updated} updated, ${unchanged} unchanged (${mdTasks.length} task file(s)).`)
+    const prov = provisioned > 0 ? `, ${provisioned} user(s) provisioned` : ''
+    console.log(`Imported into project ${projectId}: ${created} created, ${updated} updated, ${unchanged} unchanged${prov} (${mdTasks.length} task file(s)).`)
   }
 }
 
@@ -375,6 +429,10 @@ async function tasksExport(projectDir: string): Promise<void> {
   const tasks = await api<ApiTask[]>(`/projects/${ref.projectId}/tasks`)
   const { index: fileIndex, symlinks } = indexTaskFilesById(dir)
   const tdir = resolve(ensureTasksDir(dir))
+
+  // Team roster for the reverse mapping (assigneeId → owner name). Best-effort.
+  let userIndex: UserIndex = { byNameOrEmail: new Map(), byId: new Map() }
+  try { userIndex = buildUserIndex(await api<ApiUser[]>('/users')) } catch { /* no reverse */ }
 
   let written = 0
   let nativeSkipped = 0
@@ -413,12 +471,17 @@ async function tasksExport(projectDir: string): Promise<void> {
         continue
       }
     }
+    // Reverse map: a real assignee (set here or in the Pm.Os UI) becomes the
+    // markdown owner; otherwise keep the description's Owner: line. Resolving to
+    // the user's canonical name keeps owner↔assignee round-trips at a fixed point.
+    const assignee = t.assigneeId ? userIndex.byId.get(t.assigneeId) : undefined
+    const owner = assignee ? assignee.name : decoded.owner
     const exportTask: ExportTask = {
       sourceId: sid,
       title: t.title,
       // Preserve claimed/blocked etc when still consistent (avoid lossy downgrade).
       status: reconcileTemplateStatus(existing, t.status),
-      owner: decoded.owner,
+      owner,
       due: toTemplateDue(t.dueDate),
       acceptance,
     }
@@ -446,12 +509,15 @@ async function tasksExport(projectDir: string): Promise<void> {
 
 async function runTasks(rest: string[]): Promise<void> {
   const sub = rest[0]
-  // Parse a --name <value> flag out of the remaining args.
+  // Parse a --name <value> flag and the boolean --create-assignees out of the args.
   let nameFlag: string | undefined
+  let createAssignees = false
   const positional: string[] = []
   for (let i = 1; i < rest.length; i++) {
     if (rest[i] === '--name') {
       nameFlag = rest[++i]
+    } else if (rest[i] === '--create-assignees') {
+      createAssignees = true
     } else {
       positional.push(rest[i]!)
     }
@@ -459,8 +525,8 @@ async function runTasks(rest: string[]): Promise<void> {
   const projectDir = positional[0]
 
   if (sub === 'import') {
-    if (!projectDir) throw new Error('usage: pm-os tasks import <projectDir> [--name <projectName>]')
-    await tasksImport(projectDir, nameFlag)
+    if (!projectDir) throw new Error('usage: pm-os tasks import <projectDir> [--name <projectName>] [--create-assignees]')
+    await tasksImport(projectDir, nameFlag, createAssignees)
     return
   }
   if (sub === 'export') {
@@ -468,7 +534,7 @@ async function runTasks(rest: string[]): Promise<void> {
     await tasksExport(projectDir)
     return
   }
-  throw new Error('usage: pm-os tasks <import|export> <projectDir> [--name <projectName>]')
+  throw new Error('usage: pm-os tasks <import|export> <projectDir> [--name <projectName>] [--create-assignees]')
 }
 
 // ---- commands --------------------------------------------------------------
@@ -485,13 +551,18 @@ Commands:
   sources <projectId>          List a project's sources + sync status
   status <projectId>           Sync status for a project's sources
   sync <projectId> [source]    Trigger a sync (optionally one source, e.g. github)
-  tasks import <dir> [--name <n>]  Import agent-state/tasks/*.md into a pm-os project
+  tasks import <dir> [--name <n>] [--create-assignees]
+                               Import agent-state/tasks/*.md into a pm-os project.
+                               Links each task's owner to a matching user (assigneeId);
+                               --create-assignees also provisions users for unknown owners.
   tasks export <dir>           Write a pm-os project's tasks back to agent-state/tasks/*.md
+                               (an assigned task's user becomes the markdown owner)
   open                         Print the web UI URL
   help                         Show this help
 
 Flags:
   --json                       Output raw JSON instead of a table
+  --create-assignees           (tasks import) create users for owners with no match
 Env:
   PMOS_PORT (default 4321)   Server port        PMOS_API   Full base URL override`
 
