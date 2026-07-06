@@ -162,6 +162,9 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: ProjectParams; Body: CreateTaskBody }>, reply) => {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
+      if (request.body.agentWorkspaceId && !workspaceInProject(request.body.agentWorkspaceId, request.params.id)) {
+        return reply.code(400).send({ error: 'agentWorkspaceId does not belong to this project' })
+      }
       return createTask(request.params.id, request.body, user.id)
     },
   )
@@ -185,6 +188,9 @@ export async function orchestrationRoutes(app: FastifyInstance): Promise<void> {
       const user = (request as AuthenticatedRequest).user
       if (!await assertProjectAccess(request.params.id, user.id)) return reply.code(404).send({ error: 'Not found' })
       if (!taskInProject(request.params.taskId, request.params.id)) return reply.code(404).send({ error: 'Task not found' })
+      if (request.body.agentWorkspaceId && !workspaceInProject(request.body.agentWorkspaceId, request.params.id)) {
+        return reply.code(400).send({ error: 'agentWorkspaceId does not belong to this project' })
+      }
       const updated = updateTask(request.params.taskId, request.body, user.id)
       if (!updated) return reply.code(404).send({ error: 'Task not found' })
       return updated

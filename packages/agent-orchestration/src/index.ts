@@ -130,7 +130,9 @@ export function getTask(id: string): Task | null {
   return t ?? null
 }
 
-export function createTask(projectId: string, params: CreateTaskParams, actorId?: string): Task {
+export type ActorType = 'user' | 'agent' | 'system'
+
+export function createTask(projectId: string, params: CreateTaskParams, actorId?: string, actorType?: ActorType): Task {
   const id = generateId()
   const now = new Date().toISOString()
   getDb().insert(tasks).values({
@@ -152,7 +154,7 @@ export function createTask(projectId: string, params: CreateTaskParams, actorId?
     updatedAt: now,
   }).run()
 
-  _logEvent(projectId, 'task.created', 'agent-orchestration', actorId ? 'user' : 'system', actorId ?? null, 'task', id, {
+  _logEvent(projectId, 'task.created', 'agent-orchestration', actorType ?? (actorId ? 'user' : 'system'), actorId ?? null, 'task', id, {
     taskId: id, projectId, type: params.type, title: params.title, priority: params.priority ?? 'medium',
   })
 
@@ -163,6 +165,7 @@ export function updateTask(
   id: string,
   update: Partial<Pick<Task, 'status' | 'assigneeId' | 'agentWorkspaceId' | 'priority' | 'description' | 'startDate' | 'dueDate' | 'result'>>,
   actorId?: string,
+  actorType?: ActorType,
 ): Task | null {
   const task = getTask(id)
   if (!task) return null
@@ -193,12 +196,13 @@ export function updateTask(
 
   // Emit an event for every change — status transitions get a typed event, other field
   // edits get a generic task.updated so no mutation is silent.
+  const at: ActorType = actorType ?? (actorId ? 'user' : 'system')
   if (update.status) {
-    _logEvent(task.projectId, `task.${update.status}`, 'agent-orchestration', actorId ? 'user' : 'system', actorId ?? null, 'task', id, { taskId: id, previousStatus: task.status })
+    _logEvent(task.projectId, `task.${update.status}`, 'agent-orchestration', at, actorId ?? null, 'task', id, { taskId: id, previousStatus: task.status })
   } else {
     const changed = Object.keys(patch).filter((k) => k !== 'updatedAt')
     if (changed.length > 0) {
-      _logEvent(task.projectId, 'task.updated', 'agent-orchestration', actorId ? 'user' : 'system', actorId ?? null, 'task', id, { taskId: id, changed })
+      _logEvent(task.projectId, 'task.updated', 'agent-orchestration', at, actorId ?? null, 'task', id, { taskId: id, changed })
     }
   }
 

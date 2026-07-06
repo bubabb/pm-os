@@ -215,7 +215,7 @@ const BUILT_IN_TOOLS: Record<string, BuiltInTool> = {
       if (description !== undefined) params.description = description
       if (priority !== undefined) params.priority = priority
       // createTask emits its own task.created event; the agent workspace is the actor.
-      const task = createTask(ctx.projectId, params, ctx.actorId)
+      const task = createTask(ctx.projectId, params, ctx.actorId, 'agent')
       return JSON.stringify({ taskId: task.id, status: task.status })
     },
   },

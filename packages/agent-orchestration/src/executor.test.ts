@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { seedWorkspace, destroyTestDb } from '@pm-os/database/testing'
-import { getDb, traces, traceEvents, events } from '@pm-os/database'
+import { getDb, traces, traceEvents, events, agentWorkspaces } from '@pm-os/database'
 import { eq, and } from 'drizzle-orm'
 
 // Mock the reasoning engine so no real model/CLI is invoked. supportsTools is true only
@@ -14,7 +14,7 @@ vi.mock('@pm-os/ai-sdk', () => ({
   providerNeedsKey: (p: string) => p !== 'claude-cli',
 }))
 
-import { createWorkspace, createTask, updateTask, startTask, cancelTask, recoverStaleAgentTasks, getTask } from './index'
+import { createWorkspace, createTask, updateTask, startTask, cancelTask, recoverStaleAgentTasks, getTask, terminateWorkspace } from './index'
 
 let projectId: string
 
@@ -99,15 +99,40 @@ describe('executor — startTask', () => {
     expect(getTask(id)!.status).toBe('completed')
   })
 
-  it('guardrail: a run that exceeds the workspace daily cost cap fails the task', async () => {
-    const ws = createWorkspace(projectId, { name: 'W', modelProvider: 'claude-cli', modelId: 'm', dailyCostLimitCents: 1 })
+  it('guardrail: a task for an over-budget workspace is left PENDING (paused), not run or failed', async () => {
+    const ws = createWorkspace(projectId, { name: 'W', modelProvider: 'claude-cli', modelId: 'm', dailyCostLimitCents: 10 })
+    // Simulate the workspace already at its daily cap today.
+    getDb().update(agentWorkspaces)
+      .set({ costUsedTodayCents: 10, tokensResetDate: new Date().toISOString().split('T')[0] })
+      .where(eq(agentWorkspaces.id, ws.id)).run()
     const id = agentTask({ workspaceId: ws.id })
-    completeMock.mockResolvedValue(resp({ content: 'x', costCents: 5 })) // 5c > 1c cap after first call
 
-    await startTask(id, { maxIterations: 5 })
+    await startTask(id)
+
+    expect(completeMock).not.toHaveBeenCalled()
+    expect(getTask(id)!.status).toBe('pending') // paused; will retry after the daily reset
+  })
+
+  it('a task pinned to a terminated workspace fails terminally without running', async () => {
+    const ws = createWorkspace(projectId, { name: 'W', modelProvider: 'claude-cli', modelId: 'm' })
+    terminateWorkspace(ws.id)
+    const id = agentTask({ workspaceId: ws.id })
+
+    await startTask(id)
+
+    expect(completeMock).not.toHaveBeenCalled()
+    expect(getTask(id)!.status).toBe('failed')
+  })
+
+  it('exhausting tool iterations without a final answer fails the task', async () => {
+    const ws = createWorkspace(projectId, { name: 'W', modelProvider: 'anthropic', modelId: 'm', permissionScope: { tools: '*' } })
+    const id = agentTask({ workspaceId: ws.id })
+    completeMock.mockResolvedValue(resp({ content: '', toolCalls: [{ id: 't', name: 'list_tasks', input: {} }] })) // never a final answer
+
+    await startTask(id, { resolveApiKey: () => 'k', maxIterations: 2 })
 
     expect(getTask(id)!.status).toBe('failed')
-    expect(traceFor(id)!.status).toBe('failed')
+    expect(completeMock).toHaveBeenCalledTimes(2) // bounded by maxIterations
   })
 
   it('claims atomically: a non-pending task is not run, a non-agent task is skipped', async () => {
@@ -142,5 +167,7 @@ describe('executor — startTask', () => {
     expect(getTask(id)!.status).toBe('pending')
     const tr = getDb().select().from(traces).where(and(eq(traces.id, 'tr1'), eq(traces.status, 'failed'))).all()
     expect(tr).toHaveLength(1)
+    const recovered = getDb().select().from(events).where(eq(events.type, 'task.recovered')).all()
+    expect(recovered).toHaveLength(1)
   })
 })
