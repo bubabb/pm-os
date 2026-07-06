@@ -535,6 +535,55 @@ describe('GitHubProjectsClient — fetchProjectSnapshot', () => {
   })
 })
 
+// ── fetchItemSnapshot (create-finalize re-fetch) ─────────────────────────────
+// Resolves project meta (same status-field resolution as fetchProjectSnapshot),
+// then fetches the single item and normalizes it via the SHARED helper, so the
+// contentHash is identical to what fetchProjectSnapshot computes for that item.
+
+describe('GitHubProjectsClient — fetchItemSnapshot', () => {
+  it('returns the item snapshot whose contentHash matches the board snapshot formula', async () => {
+    fetchMock
+      .mockResolvedValueOnce(projectMeta())
+      .mockResolvedValueOnce(
+        dataResponse({
+          node: {
+            id: 'ITEM_1', isArchived: false, updatedAt: '2026-06-10T09:00:00Z',
+            fieldValueByName: { optionId: 'opt-done' }, // platform-assigned status
+            content: { __typename: 'Issue', title: 'Fix login', url: 'https://github.com/acme/app/issues/1', state: 'OPEN' },
+          },
+        }),
+      )
+
+    const snap = await client().fetchItemSnapshot('PVT_1', 'ITEM_1')
+
+    expect(snap).toEqual({
+      remoteId: 'ITEM_1',
+      containerRemoteId: 'PVT_1',
+      title: 'Fix login',
+      url: 'https://github.com/acme/app/issues/1',
+      statusRemoteId: 'opt-done',
+      state: 'open',
+      archived: false,
+      version: '2026-06-10T09:00:00Z',
+      contentHash: stableHash({ title: 'Fix login', statusRemoteId: 'opt-done', state: 'open', archived: false }),
+    })
+    // Item status is read via the resolved column-source field's own name
+    expect(requestBody(1).variables).toEqual({ itemId: 'ITEM_1', statusFieldName: 'Status' })
+  })
+
+  it('returns null when the item node is not a ProjectV2Item (content absent)', async () => {
+    fetchMock
+      .mockResolvedValueOnce(projectMeta())
+      .mockResolvedValueOnce(dataResponse({ node: {} }))
+    await expect(client().fetchItemSnapshot('PVT_1', 'ITEM_x')).resolves.toBeNull()
+  })
+
+  it('returns null when the project itself is gone (NOT_FOUND)', async () => {
+    fetchMock.mockResolvedValueOnce(errorsResponse([{ type: 'NOT_FOUND', message: 'gone' }]))
+    await expect(client().fetchItemSnapshot('PVT_gone', 'ITEM_1')).resolves.toBeNull()
+  })
+})
+
 // ── moveItem ────────────────────────────────────────────────────────────────
 
 describe('GitHubProjectsClient — moveItem', () => {

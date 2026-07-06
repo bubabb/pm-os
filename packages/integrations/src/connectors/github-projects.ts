@@ -384,23 +384,8 @@ export class GitHubProjectsClient {
       // content is null for items this token can't read (e.g. private repo
       // issues on a project the viewer sees) — skip them rather than mirror
       // an untitled shell
-      if (!item.content) continue
-      const { title, url, state } = normalizeContent(item.content)
-      // Placement follows the column-source field (may be a best-effort single-select
-      // when no confident Status field exists); null when the board has no single-select.
-      const statusRemoteId = columnField ? item.fieldValueByName?.optionId ?? null : null
-      const archived = item.isArchived
-      items.push({
-        remoteId: item.id,
-        containerRemoteId: projectV2Id,
-        title,
-        url,
-        statusRemoteId,
-        state,
-        archived,
-        version: item.updatedAt,
-        contentHash: stableHash({ title, statusRemoteId, state, archived }),
-      })
+      const snapshot = normalizeProjectItem(item, projectV2Id, columnField !== null)
+      if (snapshot !== null) items.push(snapshot)
     }
 
     return {
@@ -412,6 +397,74 @@ export class GitHubProjectsClient {
       columns,
       items,
     }
+  }
+
+  // Single-item re-fetch: the item's CURRENT normalized snapshot, computed by
+  // the SAME helper (normalizeProjectItem) as fetchProjectSnapshot so the
+  // contentHash is identical to the next pull's. The column-source field is
+  // resolved exactly as in fetchProjectSnapshot (resolveColumnSourceField) so
+  // the item's statusRemoteId is read from the same field. Returns null when
+  // the project/item is gone or invisible to this token.
+  async fetchItemSnapshot(projectV2Id: string, itemId: string): Promise<MirrorItemSnapshot | null> {
+    let meta: ProjectMetaData
+    try {
+      meta = await this.graphql<ProjectMetaData>(
+        `query ProjectMeta($projectId: ID!) {
+          node(id: $projectId) {
+            ... on ProjectV2 {
+              id title url updatedAt
+              field(name: "Status") {
+                ... on ProjectV2SingleSelectField { id name options { id name } }
+              }
+              fields(first: 30) {
+                nodes {
+                  __typename
+                  ... on ProjectV2SingleSelectField { id name options { id name } }
+                }
+              }
+            }
+          }
+        }`,
+        { projectId: projectV2Id },
+      )
+    } catch (err) {
+      if (err instanceof GitHubNotFoundError) return null
+      throw err
+    }
+    const project = meta.node
+    if (!project || !project.fields) return null
+    const columnField = resolveColumnSourceField(project)
+
+    let data: ProjectSingleItemData
+    try {
+      data = await this.graphql<ProjectSingleItemData>(
+        `query ProjectSingleItem($itemId: ID!, $statusFieldName: String!) {
+          node(id: $itemId) {
+            ... on ProjectV2Item {
+              id isArchived updatedAt
+              fieldValueByName(name: $statusFieldName) {
+                ... on ProjectV2ItemFieldSingleSelectValue { optionId }
+              }
+              content {
+                __typename
+                ... on Issue { title url state }
+                ... on PullRequest { title url state isDraft }
+                ... on DraftIssue { title }
+              }
+            }
+          }
+        }`,
+        { itemId, statusFieldName: columnField?.name ?? 'Status' },
+      )
+    } catch (err) {
+      if (err instanceof GitHubNotFoundError) return null
+      throw err
+    }
+
+    const node = data.node
+    // A node id that is not a ProjectV2Item resolves to `{}` (no content).
+    if (!node || !node.content) return null
+    return normalizeProjectItem(node, projectV2Id, columnField !== null)
   }
 
   // Cheap single-item version probe for pre-push conflict detection.
@@ -579,6 +632,36 @@ export type ItemContentInfo =
   | { type: 'Issue' | 'PullRequest'; contentId: string; number: number; owner: string; repo: string }
 
 // ── Content normalization ───────────────────────────────────────────────────
+
+// Normalize ONE ProjectV2 item to a MirrorItemSnapshot — the single source of
+// truth for item hashing, shared by fetchProjectSnapshot (the pull) and
+// fetchItemSnapshot (the create-finalize re-fetch) so both compute an
+// identical contentHash. Returns null for items whose content is invisible to
+// this token (private-repo issues on a visible project) — mirroring an
+// untitled shell would be wrong.
+function normalizeProjectItem(
+  item: ProjectItemNode,
+  projectV2Id: string,
+  hasColumnField: boolean,
+): MirrorItemSnapshot | null {
+  if (!item.content) return null
+  const { title, url, state } = normalizeContent(item.content)
+  // Placement follows the column-source field (may be a best-effort single-select
+  // when no confident Status field exists); null when the board has no single-select.
+  const statusRemoteId = hasColumnField ? item.fieldValueByName?.optionId ?? null : null
+  const archived = item.isArchived
+  return {
+    remoteId: item.id,
+    containerRemoteId: projectV2Id,
+    title,
+    url,
+    statusRemoteId,
+    state,
+    archived,
+    version: item.updatedAt,
+    contentHash: stableHash({ title, statusRemoteId, state, archived }),
+  }
+}
 
 function normalizeContent(content: ProjectItemContent): {
   title: string
@@ -770,6 +853,12 @@ interface ProjectItemsPageData {
       nodes: Array<ProjectItemNode | null> | null
     }
   } | null
+}
+
+// Single-item fetch (fetchItemSnapshot). node is optional/partial because a
+// node id that is not a ProjectV2Item resolves the inline fragment to `{}`.
+interface ProjectSingleItemData {
+  node: ProjectItemNode | null
 }
 
 interface ItemVersionData {

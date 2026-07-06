@@ -37,6 +37,12 @@ const stub = vi.hoisted(() => ({
   failCreate: false, // when true, create_item throws a FATAL (no-retry) error
   remoteVersion: null as string | null,
   applied: [] as Array<{ opId: string; kind: string }>,
+  // create-finalize re-fetch (fetchItemSnapshot) controls:
+  snapshotError: null as Error | null,        // when set, fetchItemSnapshot throws it
+  snapshotOverride: null as MirrorItemSnapshot | null, // when set, returned verbatim
+  snapshotReturnsNull: false,                 // when true, fetchItemSnapshot returns null (item not found)
+  lastCreatedTitle: null as string | null,    // title of the most recent create, for the default snapshot
+  snapshotCalls: [] as string[],              // remoteIds fetchItemSnapshot was called with
 }))
 vi.mock('../connectors/github', () => ({
   GitHubConnector: class {
@@ -50,9 +56,11 @@ vi.mock('../connectors/github', () => ({
       }
       if (stub.applyError) throw stub.applyError
       stub.applied.push({ opId: envelope.opId, kind: envelope.op.kind })
-      const base = { ref: { remoteType: 'pv2_item', remoteId: 'ITEM_1' }, remoteVersion: 'v2', raw: {} }
-      // A create returns the pull-equivalent baseline of the new draft.
+      const base = { ref: { remoteType: 'pv2_item', remoteId: 'ITEM_1', containerId: 'PVT_board1' }, remoteVersion: 'v2', raw: {} }
+      // A create returns the pull-equivalent baseline of the new draft (kept only
+      // as a FALLBACK now — the live baseline comes from fetchItemSnapshot).
       if (envelope.op.kind === 'create_item') {
+        stub.lastCreatedTitle = envelope.op.title
         return {
           ...base,
           createdBaseline: {
@@ -69,6 +77,27 @@ vi.mock('../connectors/github', () => ({
     async fetchRemoteVersion(_ref: unknown) {
       return stub.remoteVersion
     }
+    // Single-item re-fetch the outbox create-finalize uses to stamp lastSyncedHash.
+    async fetchItemSnapshot(ref: { remoteId: string; containerId?: string }): Promise<MirrorItemSnapshot | null> {
+      stub.snapshotCalls.push(ref.remoteId)
+      if (stub.snapshotError) throw stub.snapshotError
+      if (stub.snapshotReturnsNull) return null
+      if (stub.snapshotOverride) return stub.snapshotOverride
+      // Default: mirror the just-created draft exactly as a real pull would —
+      // no status, state 'draft', not archived.
+      const title = stub.lastCreatedTitle ?? 'New card'
+      return {
+        remoteId: ref.remoteId,
+        containerRemoteId: ref.containerId ?? 'PVT_board1',
+        title,
+        url: null,
+        statusRemoteId: null,
+        state: 'draft',
+        archived: false,
+        version: 'v2',
+        contentHash: stableHash({ title, statusRemoteId: null, state: 'draft', archived: false }),
+      }
+    }
   },
 }))
 
@@ -82,6 +111,11 @@ beforeEach(() => {
   stub.failCreate = false
   stub.remoteVersion = null
   stub.applied = []
+  stub.snapshotError = null
+  stub.snapshotOverride = null
+  stub.snapshotReturnsNull = false
+  stub.lastCreatedTitle = null
+  stub.snapshotCalls = []
 })
 afterEach(() => destroyTestDb())
 
@@ -501,6 +535,82 @@ describe('outbox — create baseline hash (fixes the forever-revert)', () => {
     expect(plan.remoteUpdates).toHaveLength(0)
     expect(plan.conflicts).toHaveLength(0)
     expect(plan.newItems).toHaveLength(0)
+  })
+})
+
+describe('outbox — baseline from a real re-fetch (auto-status: no churn)', () => {
+  it('stamps lastSyncedHash from fetchItemSnapshot so a platform-assigned status yields NO remoteUpdate', async () => {
+    seedBoardLink()
+    seedRealBoardItem('board-1', 'bi-new') // backing task titled 'Test Task'
+
+    // The platform AUTO-ASSIGNS a status on create — the create response never
+    // saw it, but the re-fetch (fetchItemSnapshot) computes the item's REAL
+    // post-create state exactly as the next pull will.
+    const autoContentHash = stableHash({ title: 'Test Task', statusRemoteId: 'opt-todo', state: 'open', archived: false })
+    stub.snapshotOverride = {
+      remoteId: 'ITEM_1', containerRemoteId: 'PVT_board1',
+      title: 'Test Task', url: null, statusRemoteId: 'opt-todo',
+      state: 'open', archived: false, version: 'v2', contentHash: autoContentHash,
+    }
+
+    // Title matches the backing task → no create-time divergence noise.
+    await enqueueItemCreate('bi-new', 'Test Task')
+    const counts = await drainMutationQueue(getCred)
+    expect(counts).toMatchObject({ applied: 1 })
+
+    // The baseline came from the re-fetch (called once with the minted id), NOT
+    // the connector's guessed createdBaseline (which had statusRemoteId null).
+    expect(stub.snapshotCalls).toEqual(['ITEM_1'])
+    const link = itemLinkRows('bi-new')[0]!
+    expect(link.lastSyncedHash).toBe(autoContentHash)
+    expect(link.lastSyncedHash).not.toBe(
+      stableHash({ title: 'Test Task', statusRemoteId: null, state: 'draft', archived: false }),
+    )
+
+    // The very next pull sees the auto-status item exactly as the baseline →
+    // NO redundant remoteUpdate (the churn a guessed baseline caused is gone).
+    const snapshotItem: MirrorItemSnapshot = {
+      remoteId: link.remoteId, containerRemoteId: 'PVT_board1',
+      title: 'Test Task', url: null, statusRemoteId: 'opt-todo',
+      state: 'open', archived: false, version: 'v2', contentHash: autoContentHash,
+    }
+    const plan = planReconcile(
+      { remoteId: 'PVT_board1', title: 'B', url: null, version: 'v2', statusFieldRemoteId: 'FIELD_STATUS', columns: [], items: [snapshotItem] },
+      [link], [],
+    )
+    expect(plan.remoteUpdates).toHaveLength(0)
+    expect(plan.conflicts).toHaveLength(0)
+    expect(plan.newItems).toHaveLength(0)
+  })
+
+  it('a re-fetch FAILURE leaves the op pending; the retry re-links without a second create', async () => {
+    seedBoardLink()
+    seedRealBoardItem('board-1', 'bi-new')
+    const opId = (await enqueueItemCreate('bi-new', 'New card'))!
+
+    // The create mints + persists the remote item, but the baseline re-fetch
+    // fails transiently AFTER the create — before the link is written.
+    stub.snapshotError = new Error('HTTP 500 from https://api.github.com/graphql')
+    const first = await drainMutationQueue(getCred)
+
+    // Retrying (not applied, not failed): the create succeeded and its remoteId
+    // is persisted, so the op stays pending for a re-attempt.
+    expect(first).toEqual({ applied: 0, conflicts: 0, failed: 0 })
+    const held = queueRow(opId)
+    expect(held.status).toBe('pending')
+    expect(held.result).not.toBeNull() // minted remoteId persisted for idempotency
+    expect(stub.applied.filter((a) => a.kind === 'create_item')).toHaveLength(1) // created exactly once
+    expect(itemLinkRows('bi-new')).toHaveLength(0) // not linked yet (re-fetch threw before linking)
+
+    // Retry with the re-fetch now succeeding: SKIPS applyMutation, re-fetches, links, applies.
+    stub.snapshotError = null
+    stub.applied = []
+    const second = await drainMutationQueue(getCred)
+
+    expect(second).toEqual({ applied: 1, conflicts: 0, failed: 0 })
+    expect(queueRow(opId).status).toBe('applied')
+    expect(stub.applied.filter((a) => a.kind === 'create_item')).toHaveLength(0) // NOT re-created
+    expect(itemLinkRows('bi-new')).toHaveLength(1) // linked exactly once
   })
 })
 

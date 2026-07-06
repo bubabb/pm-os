@@ -345,6 +345,60 @@ describe('NotionConnector — fetchBoardSnapshot', () => {
   })
 })
 
+// ── fetchItemSnapshot (create-finalize re-fetch) ─────────────────────────────
+// Retrieves the database (status property + terminal groups) then the single
+// page, normalizing via the SHARED helper so the contentHash is identical to
+// what fetchBoardSnapshot computes for the same page.
+
+describe('NotionConnector — fetchItemSnapshot', () => {
+  it('returns the page snapshot whose contentHash matches the board snapshot formula', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(DATABASE))                 // GET /databases/{id}
+      .mockResolvedValueOnce(jsonResponse(page('page-1', 'Fix login', 'opt-todo'))) // GET /pages/{id}
+
+    const snap = await connector().fetchItemSnapshot({ remoteType: 'db_page', remoteId: 'page-1', containerId: DB_ID })
+
+    expect(snap).toEqual({
+      remoteId: 'page-1',
+      containerRemoteId: DB_ID,
+      title: 'Fix login',
+      url: 'https://notion.so/page-1',
+      statusRemoteId: 'opt-todo',
+      state: 'open',
+      archived: false,
+      version: '2026-06-10T09:00:00.000Z',
+      contentHash: stableHash({ title: 'Fix login', statusRemoteId: 'opt-todo', state: 'open', archived: false }),
+    })
+    expect(requestAt(0).url).toBe(`https://api.notion.com/v1/databases/${DB_ID}`)
+    expect(requestAt(1).url).toBe(`https://api.notion.com/v1/pages/page-1`)
+  })
+
+  it('reflects a terminal (Complete-group) status as closed — same as the board snapshot', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(DATABASE))
+      .mockResolvedValueOnce(jsonResponse(page('page-2', 'Shipped work', 'opt-ship')))
+
+    const snap = await connector().fetchItemSnapshot({ remoteType: 'db_page', remoteId: 'page-2', containerId: DB_ID })
+    expect(snap).toMatchObject({ statusRemoteId: 'opt-ship', state: 'closed' })
+  })
+
+  it('returns null when no database context is known (no containerId)', async () => {
+    await expect(
+      connector().fetchItemSnapshot({ remoteType: 'db_page', remoteId: 'page-1' }),
+    ).resolves.toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('returns null when the page is gone (404)', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(DATABASE))
+      .mockResolvedValueOnce(jsonResponse({ message: 'not found' }, 404))
+    await expect(
+      connector().fetchItemSnapshot({ remoteType: 'db_page', remoteId: 'page-404', containerId: DB_ID }),
+    ).resolves.toBeNull()
+  })
+})
+
 // ── capabilities ─────────────────────────────────────────────────────────────
 
 describe('NotionConnector — capabilities', () => {

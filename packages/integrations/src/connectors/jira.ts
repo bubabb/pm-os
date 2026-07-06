@@ -199,21 +199,7 @@ export class JiraConnector extends BaseConnector {
 
       const data = await res.json() as JiraMirrorSearchResult
       for (const issue of data.issues ?? []) {
-        const title = issue.fields.summary
-        const statusRemoteId = issue.fields.status?.id ?? null
-        const state: 'open' | 'closed' = issue.fields.status?.statusCategory?.key === 'done' ? 'closed' : 'open'
-        const archived = false // Jira has no per-issue archive state in this API surface
-        items.push({
-          remoteId: issue.key,
-          containerRemoteId: projectKey,
-          title,
-          url: `${baseUrl}/browse/${issue.key}`,
-          statusRemoteId,
-          state,
-          archived,
-          version: issue.fields.updated,
-          contentHash: stableHash({ title, statusRemoteId, state, archived }),
-        })
+        items.push(normalizeJiraIssue(issue, projectKey, baseUrl))
       }
 
       nextPageToken = data.nextPageToken
@@ -234,6 +220,27 @@ export class JiraConnector extends BaseConnector {
     }
 
     return items
+  }
+
+  // Single-item re-fetch for the outbox create-finalize baseline — the issue's
+  // CURRENT normalized snapshot, computed by the SAME helper (normalizeJiraIssue)
+  // as fetchIssueSnapshots so the contentHash matches the next pull's. ref.remoteId
+  // is the issue key; ref.containerId is the project key (falls back to the key's
+  // prefix). Returns null when the issue is gone (404).
+  override async fetchItemSnapshot(ref: RemoteRef): Promise<MirrorItemSnapshot | null> {
+    const baseUrl = this.config.baseUrl
+    if (!baseUrl) return null
+    const issueKey = ref.remoteId
+    const projectKey = ref.containerId ?? issueKey.split('-')[0] ?? issueKey
+    const res = await this.fetchWithRetry(
+      `${baseUrl}/rest/api/3/issue/${issueKey}?fields=summary,status,updated`,
+      { headers: this.headers },
+    )
+    if (res.status === 404) return null
+    if (!res.ok) throw new Error(`Jira issue ${issueKey} snapshot fetch failed (HTTP ${res.status})`)
+    const issue = await res.json() as { key?: string; fields?: JiraMirrorIssue['fields'] }
+    if (!issue.fields) return null
+    return normalizeJiraIssue({ key: issue.key ?? issueKey, fields: issue.fields }, projectKey, baseUrl)
   }
 
   // ── Write surface (bidirectional-sync.md §3.1 — Phase 3: Jira two-way) ────
@@ -467,6 +474,29 @@ export class JiraConnector extends BaseConnector {
 
 function categoryOrder(status: JiraStatus): number {
   return CATEGORY_ORDER[status.statusCategory?.key ?? ''] ?? 1
+}
+
+// Normalize ONE Jira issue to a MirrorItemSnapshot — the single source of truth
+// for issue hashing, shared by fetchIssueSnapshots (the pull) and
+// fetchItemSnapshot (the create-finalize re-fetch) so both compute an identical
+// contentHash. Jira has no per-issue archive state in this API surface, so
+// archived is always false; state derives from statusCategory === 'done'.
+function normalizeJiraIssue(issue: JiraMirrorIssue, projectKey: string, baseUrl: string): MirrorItemSnapshot {
+  const title = issue.fields.summary
+  const statusRemoteId = issue.fields.status?.id ?? null
+  const state: 'open' | 'closed' = issue.fields.status?.statusCategory?.key === 'done' ? 'closed' : 'open'
+  const archived = false
+  return {
+    remoteId: issue.key,
+    containerRemoteId: projectKey,
+    title,
+    url: `${baseUrl}/browse/${issue.key}`,
+    statusRemoteId,
+    state,
+    archived,
+    version: issue.fields.updated,
+    contentHash: stableHash({ title, statusRemoteId, state, archived }),
+  }
 }
 
 // Quote a config-supplied value for interpolation into JQL. Embedded double

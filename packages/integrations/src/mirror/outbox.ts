@@ -648,6 +648,51 @@ async function processOp(
 
     const now = new Date().toISOString()
 
+    // ── create_item finalize: RE-FETCH → LINK → applied (strict order) ──────
+    // The merge-base baseline comes from a real single-item RE-FETCH computed by
+    // the SAME code path as the pull (connector.fetchItemSnapshot), NOT a guess —
+    // so lastSyncedHash === the next pull's contentHash regardless of any status
+    // the platform auto-assigned on create (Notion Status, a GitHub "set status
+    // on add" workflow, Jira's initial workflow status). This removes the one
+    // redundant remoteUpdate a guessed baseline caused.
+    //
+    // Sequencing that this correctness rests on:
+    //  • The minted remoteId was already persisted (parsePersistedCreate path
+    //    above) BEFORE this re-fetch. So if fetchItemSnapshot THROWS, the op
+    //    falls to the catch and stays pending; the retry SKIPS applyMutation
+    //    (no duplicate create) and re-attempts the re-fetch. The re-fetch MUST
+    //    live here in finalize (re-run by a retry), never baked into
+    //    applyMutation's return (skipped by a retry).
+    //  • linkCreatedItem (the remote_links row + lastSyncedHash) commits BEFORE
+    //    the 'applied' write, closing the orphan-on-crash window: a crash after
+    //    linking but before 'applied' is recoverable — the link exists and the
+    //    idempotent upsert re-links without a second create or a duplicate link.
+    let createBaseline: CreatedItemBaseline | null = null
+    if (op.kind === 'create_item' && createLocalId !== undefined) {
+      // May THROW (network / rate limit) → caught below → op stays pending, the
+      // retry re-links idempotently. Null = item not found → fall back to the
+      // connector-returned createdBaseline (older/mirror-less path).
+      const snapshot = await connector.fetchItemSnapshot(result.ref)
+      const fallback = result.createdBaseline ?? null
+      const lastSyncedHash =
+        snapshot !== null ? snapshot.contentHash
+          : fallback !== null ? baselineHash(fallback)
+            : null
+      // Idempotent upsert — safe to re-run on a post-crash retry.
+      linkCreatedItem(row, op.container, result, createLocalId, now, lastSyncedHash)
+      // Divergence compares the local card to its ACTUAL post-create remote state
+      // (the re-fetch when available, else the connector baseline).
+      createBaseline = snapshot !== null
+        ? {
+            remoteId: snapshot.remoteId,
+            title: snapshot.title,
+            statusRemoteId: snapshot.statusRemoteId,
+            state: snapshot.state,
+            archived: snapshot.archived,
+          }
+        : fallback
+    }
+
     db.update(mutationQueue)
       .set({
         status: 'applied',
@@ -659,7 +704,9 @@ async function processOp(
       .where(eq(mutationQueue.id, row.id))
       .run()
 
-    // Push succeeded → the remote's new version is our new merge base.
+    // Push succeeded → the remote's new version is our new merge base. Creates
+    // enqueue with remoteLinkId null (the link is written above), so this only
+    // bumps the link for non-create ops.
     if (row.remoteLinkId !== null) {
       db.update(remoteLinks)
         .set({ remoteVersion: result.remoteVersion, lastPushedAt: now, updatedAt: now })
@@ -667,31 +714,12 @@ async function processOp(
         .run()
     }
 
-    // create_item success: the connector minted a brand-new remote object
-    // (MutationResult.ref). UPSERT the board_item's remote link with that id
-    // so future move/edit/pull resolve the item. Guarded: the op WAS applied
-    // remotely — a link-write failure must never flow into the catch below
-    // and resurrect the op (a retry would create a duplicate remote item).
-    if (op.kind === 'create_item' && createLocalId !== undefined) {
-      // Stamp lastSyncedHash from the connector-RETURNED baseline (never a
-      // hardcoded guess) so the next pull sees contentHash === lastSyncedHash
-      // and does NOT revert the freshly created card.
-      const baseline = result.createdBaseline ?? null
-      const lastSyncedHash = baseline !== null ? baselineHash(baseline) : null
-      let linked = false
-      try {
-        linkCreatedItem(row, op.container, result, createLocalId, now, lastSyncedHash)
-        linked = true
-      } catch {
-        // Link lost, push applied — the next pull re-links via the remote upsert path.
-      }
-      // Capture any edit/move/close made WHILE the create was in flight: the
-      // link now exists, so these enqueue on the NORMAL path and drain next.
-      // No deferred op that re-pends itself waiting for a link (that deadlocked
-      // a credential's queue when a create terminally failed).
-      if (linked && baseline !== null) {
-        await enqueuePostCreateDivergence(createLocalId, op, baseline)
-      }
+    // Capture any edit/move/close made WHILE the create was in flight: the link
+    // now exists, so these enqueue on the NORMAL live-link path and drain next.
+    // No deferred op that re-pends itself waiting for a link (that deadlocked a
+    // credential's queue when a create terminally failed).
+    if (op.kind === 'create_item' && createLocalId !== undefined && createBaseline !== null) {
+      await enqueuePostCreateDivergence(createLocalId, op, createBaseline)
     }
 
     emitMutationEvent('integration.mutation.applied', row.projectId, row.opId, {

@@ -4,6 +4,7 @@ import type {
   FetchResult,
   IntegrationSource,
   MirrorBoardSnapshot,
+  MirrorItemSnapshot,
   MutationEnvelope,
   MutationKind,
   MutationResult,
@@ -59,6 +60,21 @@ export abstract class BaseConnector {
   // side of the mirror. mirror-sync calls this instead of any provider client.
   async fetchBoardSnapshot(_remoteBoardId: string): Promise<MirrorBoardSnapshot> {
     throw new Error(`${this.source} does not support board mirroring`)
+  }
+
+  // Single-item re-fetch: the item's CURRENT normalized snapshot, computed by
+  // the SAME code path (normalize + hash) as fetchBoardSnapshot so its
+  // contentHash matches exactly what the next pull will compute. The outbox
+  // create-finalize step calls this to stamp remote_links.lastSyncedHash from
+  // the item's REAL post-create state — including any status the platform
+  // auto-assigned on create (Notion Status, a GitHub "set status on add"
+  // workflow, Jira's initial workflow status) — so the next pull sees
+  // contentHash === lastSyncedHash and does NOT emit a redundant remoteUpdate.
+  // Returns null when the item can't be found. Default: mirror-less connectors
+  // return null (the create-finalize path then falls back to any connector-
+  // returned createdBaseline).
+  async fetchItemSnapshot(_ref: RemoteRef): Promise<MirrorItemSnapshot | null> {
+    return null
   }
 
   // ── Write surface (docs/architecture/bidirectional-sync.md §3.1) ──

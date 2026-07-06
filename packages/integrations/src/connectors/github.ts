@@ -4,6 +4,7 @@ import type {
   ConnectorCapabilities,
   FetchResult,
   MirrorBoardSnapshot,
+  MirrorItemSnapshot,
   MutationEnvelope,
   MutationKind,
   MutationResult,
@@ -199,6 +200,15 @@ export class GitHubConnector extends BaseConnector {
   // reaches GitHub exclusively through this method, never via the client).
   override async fetchBoardSnapshot(remoteBoardId: string): Promise<MirrorBoardSnapshot> {
     return new GitHubProjectsClient(this.config.token).fetchProjectSnapshot(remoteBoardId)
+  }
+
+  // Single-item re-fetch for the outbox create-finalize baseline. ref.containerId
+  // is the ProjectV2 node id (item-link convention); without it we cannot resolve
+  // the item's board, so return null (the finalize path falls back to the
+  // connector-returned createdBaseline).
+  override async fetchItemSnapshot(ref: RemoteRef): Promise<MirrorItemSnapshot | null> {
+    if (!ref.containerId) return null
+    return new GitHubProjectsClient(this.config.token).fetchItemSnapshot(ref.containerId, ref.remoteId)
   }
 
   // All repos the token can access — owned, private, and invited/collaborator
