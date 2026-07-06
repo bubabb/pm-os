@@ -163,7 +163,7 @@ export function createTask(projectId: string, params: CreateTaskParams, actorId?
 
 export function updateTask(
   id: string,
-  update: Partial<Pick<Task, 'status' | 'assigneeId' | 'agentWorkspaceId' | 'priority' | 'description' | 'startDate' | 'dueDate' | 'result'>>,
+  update: Partial<Pick<Task, 'status' | 'title' | 'assigneeId' | 'agentWorkspaceId' | 'priority' | 'description' | 'startDate' | 'dueDate' | 'result'>>,
   actorId?: string,
   actorType?: ActorType,
 ): Task | null {
@@ -184,6 +184,7 @@ export function updateTask(
       patch['completedAt'] = now
     }
   }
+  if (update.title !== undefined)            patch['title'] = update.title
   if (update.assigneeId !== undefined)       patch['assigneeId'] = update.assigneeId
   if (update.agentWorkspaceId !== undefined) patch['agentWorkspaceId'] = update.agentWorkspaceId
   if (update.priority !== undefined)         patch['priority'] = update.priority

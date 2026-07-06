@@ -49,12 +49,13 @@ interface CreateTaskBody {
 
 interface UpdateTaskBody {
   status?: Task['status']
+  title?: string
   assigneeId?: string
   agentWorkspaceId?: string
   priority?: Task['priority']
   description?: string
   startDate?: string
-  dueDate?: string
+  dueDate?: string | null // null clears the due date
 }
 
 interface AddEdgeBody { fromTaskId: string; toTaskId: string }
