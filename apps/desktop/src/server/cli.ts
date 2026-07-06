@@ -6,7 +6,7 @@
  * Run:  tsx src/server/cli.ts <command> [args]   (see package.json "cli" script)
  * Point at a non-default port with PMOS_PORT, or a full URL with PMOS_API.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { ensurePmosDataDir } from '@pm-os/shared'
 import { basename, dirname, join, resolve, sep } from 'path'
@@ -392,7 +392,13 @@ async function tasksExport(projectDir: string): Promise<void> {
       due: toTemplateDue(t.dueDate),
       acceptance,
     }
-    writeFileSync(targetPath, renderTaskFile(existing, exportTask, extraNotes))
+    // Atomic write: render to a temp file in the SAME dir, then rename over the
+    // target. rename replaces the directory entry — it never writes THROUGH a
+    // symlink or hardlink to an external inode (closing the lstat-blind hardlink
+    // hole), and it closes the check→write TOCTOU gap.
+    const tmpPath = join(dirname(targetPath), `.${basename(targetPath)}.tmp-${process.pid}`)
+    writeFileSync(tmpPath, renderTaskFile(existing, exportTask, extraNotes))
+    renameSync(tmpPath, targetPath)
     written++
   }
 

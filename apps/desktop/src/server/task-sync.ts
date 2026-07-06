@@ -66,6 +66,11 @@ export interface MarkdownTask {
   owner: string
   due: string // 'YYYY-MM-DD' or '-'
   acceptance: string
+  // Multi-line context carried in the pmos description beyond the one-line
+  // acceptance. Round-tripped through the managed Notes block so an
+  // export→import cycle rebuilds the exact original description (no truncation,
+  // no churn). Empty for the common single-line case.
+  context: string
 }
 
 // The `.pmos-project.json` pointer bound to a project directory.
@@ -157,7 +162,7 @@ function entryValue(entries: ParsedFile['entries'], key: string): string {
 // contract fields (an `id`) or its frontmatter fence is malformed — such files
 // are skipped rather than half-imported.
 export function parseTaskFile(text: string): MarkdownTask | null {
-  const { entries, malformed } = parseFile(text)
+  const { entries, body, malformed } = parseFile(text)
   if (malformed) return null
   const sourceId = entryValue(entries, 'id').trim()
   if (sourceId.length === 0) return null
@@ -173,6 +178,9 @@ export function parseTaskFile(text: string): MarkdownTask | null {
     owner: entryValue(entries, 'owner').trim() || 'unassigned',
     due: dueRaw.length === 0 ? '-' : dueRaw,
     acceptance: entryValue(entries, 'acceptance').trim(),
+    // Read the managed context block back so the full pmos description can be
+    // rebuilt losslessly on import.
+    context: readManagedContext(body),
   }
 }
 
@@ -196,7 +204,10 @@ export function isValidDue(due: string): boolean {
   if (due === '-') return true
   if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return false
   const [y, m, d] = due.split('-').map(Number) as [number, number, number]
-  const date = new Date(Date.UTC(y, m - 1, d))
+  // `setUTCFullYear` (unlike `Date.UTC`, which maps a 0–99 year to 1900–1999)
+  // takes the literal year, so `0099-12-31` validates correctly.
+  const date = new Date(0)
+  date.setUTCFullYear(y, m - 1, d)
   return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d
 }
 
@@ -255,10 +266,16 @@ const SOURCE_LINE_RE = /^\[pmos-source:([^\]\n]+)\]\s*$/
 const OWNER_LINE_RE = /^Owner:\s*(.*)$/
 
 export function buildDescription(task: MarkdownTask): string {
-  // Fixed header block: marker, then Owner, then a blank line, then the free text.
+  // Fixed header block: marker, then Owner, then a blank line, then the free text
+  // (the one-line acceptance followed by any multi-line context, reassembled so
+  // an export→import round-trip reproduces the original pmos description).
   const parts = [`[pmos-source:${task.sourceId}]`, `Owner: ${task.owner}`]
   const acceptance = task.acceptance.trim()
-  if (acceptance.length > 0) parts.push('', acceptance)
+  const context = task.context.trim()
+  const free = context.length > 0
+    ? (acceptance.length > 0 ? `${acceptance}\n${context}` : context)
+    : acceptance
+  if (free.length > 0) parts.push('', free)
   return parts.join('\n')
 }
 
@@ -282,12 +299,11 @@ export function decodeDescription(description: string | null): DecodedDescriptio
   const sourceId = first[1]!.trim() || null
   let owner = 'unassigned'
   let i = 1
-  // After the marker, consume the contiguous header run (the Owner line).
-  for (; i < lines.length; i++) {
-    const om = OWNER_LINE_RE.exec(lines[i]!)
-    if (om) { owner = om[1]!.trim() || 'unassigned'; continue }
-    break
-  }
+  // After the marker, the header holds AT MOST ONE Owner line — consume exactly
+  // one, then stop. A second `Owner:` line (e.g. a body whose first line is
+  // `Owner: …`) is real content, not a header field, and must not be swallowed.
+  const om = i < lines.length ? OWNER_LINE_RE.exec(lines[i]!) : null
+  if (om) { owner = om[1]!.trim() || 'unassigned'; i++ }
   // Drop the single blank separator the header ends with; keep the rest exactly —
   // a mid-body "Owner: …" note is real content, not a header field.
   const body = lines.slice(i).join('\n').replace(/^\n+/, '')
@@ -395,17 +411,53 @@ const DEFAULT_BODY = '\n## Notes\n'
 
 // A managed, regenerated-each-export block that holds rich (multi-line) context
 // carried in the pmos description. It lives BELOW the human Notes so a human's
-// own notes are never clobbered, and is fully replaced on every export so a
-// re-export can't duplicate it.
-const NOTES_MARKER = '<!-- pmos:context (synced from Pm.Os — edit in Pm.Os) -->'
+// own notes are never clobbered. The region is delimited by a distinct
+// BEGIN/END pair so we replace ONLY a well-formed block — a stray marker-looking
+// line a human pastes above their notes never cuts their content.
+const NOTES_BEGIN = '<!-- pmos:context:begin (synced from Pm.Os — edit in Pm.Os) -->'
+const NOTES_END = '<!-- pmos:context:end -->'
+
+// Locates OUR managed block: the LAST well-formed BEGIN..END pair, where the
+// BEGIN is the most recent unclosed one before its END (so a stray BEGIN a human
+// pasted earlier can't make us span across their content). We always append our
+// block last, so "last well-formed pair" is always ours. A lone BEGIN with no
+// END is treated as ordinary human text — never cut.
+function findManagedBlock(lines: string[]): { start: number; end: number } | null {
+  let result: { start: number; end: number } | null = null
+  let pendingBegin = -1
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i]!.trim()
+    if (t === NOTES_BEGIN) pendingBegin = i
+    else if (t === NOTES_END && pendingBegin !== -1) {
+      result = { start: pendingBegin, end: i }
+      pendingBegin = -1
+    }
+  }
+  return result
+}
+
+// Extracts the content of the managed context block (verbatim, the lines between
+// BEGIN and END) so import can rebuild the full description. Empty when absent.
+export function readManagedContext(body: string): string {
+  const lines = body.split('\n')
+  const blk = findManagedBlock(lines)
+  if (!blk) return ''
+  return lines.slice(blk.start + 1, blk.end).join('\n')
+}
 
 function mergeNotes(existingBody: string, extraNotes: string): string {
-  const idx = existingBody.indexOf(NOTES_MARKER)
-  const base = (idx >= 0 ? existingBody.slice(0, idx) : existingBody).replace(/\s+$/, '')
+  const lines = existingBody.split('\n')
+  const blk = findManagedBlock(lines)
+  // Strip only a well-formed managed block; keep everything else (human notes,
+  // and any lone/partial marker line) intact.
+  const withoutBlock = blk
+    ? [...lines.slice(0, blk.start), ...lines.slice(blk.end + 1)].join('\n')
+    : existingBody
+  const base = withoutBlock.replace(/\s+$/, '')
   const extra = extraNotes.trim()
   const head = base.length > 0 ? base : DEFAULT_BODY.replace(/\s+$/, '')
   if (extra.length === 0) return `${head}\n`
-  return `${head}\n\n${NOTES_MARKER}\n${extra}\n`
+  return `${head}\n\n${NOTES_BEGIN}\n${extra}\n${NOTES_END}\n`
 }
 
 // Regenerates a task file's frontmatter from an ExportTask while preserving the
@@ -454,7 +506,8 @@ export function indexTaskFilesById(projectDir: string): TaskFileIndex {
   const index = new Map<string, string>()
   const symlinks: string[] = []
   if (!existsSync(dir)) return { index, symlinks }
-  for (const name of readdirSync(dir)) {
+  // Sorted for deterministic same-id resolution (matches readMarkdownTasks).
+  for (const name of readdirSync(dir).sort()) {
     if (!name.endsWith('.md') || SKIP_FILES.has(name)) continue
     const path = join(dir, name)
     if (lstatSync(path).isSymbolicLink()) { symlinks.push(name); continue }
