@@ -32,8 +32,9 @@ import {
   mutationQueue,
   remoteLinks,
   syncConflicts,
+  tasks,
 } from '@creare/database'
-import { generateId } from '@creare/shared'
+import { generateId, stableHash } from '@creare/shared'
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import { UnsupportedMutationError } from '../connectors/base'
 import { GitHubConnector } from '../connectors/github'
@@ -46,8 +47,10 @@ import type { BaseConnector } from '../connectors/base'
 import type { IntegrationCredential, MutationQueueRow, RemoteLink } from '@creare/database'
 import type {
   ConnectorConfig,
+  CreatedItemBaseline,
   IntegrationSource,
   MutationEnvelope,
+  MutationKind,
   MutationOp,
   MutationResult,
   RemoteRef,
@@ -71,6 +74,14 @@ function buildConnector(source: IntegrationSource, config: ConnectorConfig): Bas
     case 'notion':     return new NotionConnector(config)
     case 'onedrive':   return new OneDriveConnector(config)
   }
+}
+
+// The write mutation kinds a source's connector supports. capabilities getters
+// are pure (no token/network), so a stub config is safe — used by conflict
+// resolution to gate re-pushes (e.g. Jira/Confluence lack reopen_item).
+export function connectorWriteCapabilities(source: IntegrationSource): MutationKind[] {
+  const stubConfig: ConnectorConfig = { credentialId: '', projectId: '', token: '' }
+  return buildConnector(source, stubConfig).capabilities.write
 }
 
 function connectorConfig(credential: IntegrationCredential, token: string): ConnectorConfig {
@@ -383,6 +394,35 @@ export async function enqueueItemComment(boardItemId: string, body: string): Pro
   return enqueueItemOp(boardItemId, (ref) => ({ kind: 'comment', ref, body }))
 }
 
+// ── Forced (last-write-wins) variants for conflict resolution's local_wins ────
+// Identical to the plain helpers but carry force:true, so the outbox drift
+// probe OVERWRITES a drifted remote instead of parking another conflict — this
+// is how local_wins makes the local delta actually win. Never throws; null =
+// not mirrored. Callers must first check the connector supports the kind
+// (connectorWriteCapabilities) so an unsupported force-op doesn't terminally fail.
+
+/** Forced title/body re-push. */
+export async function enqueueForcedItemUpdate(
+  boardItemId: string,
+  patch: { title?: string; body?: string },
+): Promise<string | null> {
+  const cleanPatch = {
+    ...(patch.title !== undefined ? { title: patch.title } : {}),
+    ...(patch.body !== undefined ? { body: patch.body } : {}),
+  }
+  return enqueueItemOp(boardItemId, (ref) => ({ kind: 'update_item', ref, patch: cleanPatch, force: true }))
+}
+
+/** Forced close re-push. */
+export async function enqueueForcedItemClose(boardItemId: string): Promise<string | null> {
+  return enqueueItemOp(boardItemId, (ref) => ({ kind: 'close_item', ref, force: true }))
+}
+
+/** Forced reopen re-push. */
+export async function enqueueForcedItemReopen(boardItemId: string): Promise<string | null> {
+  return enqueueItemOp(boardItemId, (ref) => ({ kind: 'reopen_item', ref, force: true }))
+}
+
 // create_item payload extension: a freshly-created local board_item has NO
 // remote_links row yet (that's the point of the op), so the op JSON itself
 // carries the local board_item id. processOp reads it back on success and
@@ -565,24 +605,93 @@ async function processOp(
     const { credential, token } = await getCredential(row.credentialId)
     const connector = buildConnector(envelope.source, connectorConfig(credential, token))
 
-    // Pre-push conflict probe. move_item is last-write-wins per design: push
-    // regardless, but record overwroteRemote when the remote drifted off base.
     let overwroteRemote = false
-    const ref: RemoteRef | null = 'ref' in op ? op.ref : null
-    if (row.baseVersion !== null && ref !== null) {
-      const remoteVersion = await connector.fetchRemoteVersion(ref)
-      const drifted = remoteVersion !== null && remoteVersion !== row.baseVersion
-      if (drifted) {
-        if (op.kind === 'move_item') {
-          overwroteRemote = true
-        } else {
-          return markConflicted(row, op, remoteVersion)
+    let result: MutationResult
+
+    // Create idempotency: a prior attempt of THIS op already minted the remote
+    // item and persisted the result (below) before crashing or failing to link.
+    // Re-LINK from the persisted result — never call applyMutation again, or a
+    // second addDraftIssue/createIssue would duplicate the remote card.
+    const persistedCreate = op.kind === 'create_item' ? parsePersistedCreate(row.result) : null
+    if (persistedCreate !== null) {
+      result = persistedCreate
+    } else {
+      // Pre-push conflict probe. move_item and force-flagged ops are
+      // last-write-wins: push regardless, recording overwroteRemote when the
+      // remote drifted off base. Everything else parks a conflict on drift.
+      const ref: RemoteRef | null = 'ref' in op ? op.ref : null
+      if (row.baseVersion !== null && ref !== null) {
+        const remoteVersion = await connector.fetchRemoteVersion(ref)
+        const drifted = remoteVersion !== null && remoteVersion !== row.baseVersion
+        if (drifted) {
+          const forced = (op as { force?: boolean }).force === true
+          if (op.kind === 'move_item' || forced) {
+            overwroteRemote = true
+          } else {
+            return markConflicted(row, op, remoteVersion)
+          }
         }
+      }
+
+      result = await connector.applyMutation(envelope)
+
+      // Persist the minted create result BEFORE the 'applied' write. If this
+      // attempt now crashes or the link write fails, the retry sees the
+      // persisted result and re-links instead of re-creating (idempotency).
+      if (op.kind === 'create_item') {
+        db.update(mutationQueue)
+          .set({ result: JSON.stringify(result), updatedAt: new Date().toISOString() })
+          .where(eq(mutationQueue.id, row.id))
+          .run()
       }
     }
 
-    const result = await connector.applyMutation(envelope)
     const now = new Date().toISOString()
+
+    // ── create_item finalize: RE-FETCH → LINK → applied (strict order) ──────
+    // The merge-base baseline comes from a real single-item RE-FETCH computed by
+    // the SAME code path as the pull (connector.fetchItemSnapshot), NOT a guess —
+    // so lastSyncedHash === the next pull's contentHash regardless of any status
+    // the platform auto-assigned on create (Notion Status, a GitHub "set status
+    // on add" workflow, Jira's initial workflow status). This removes the one
+    // redundant remoteUpdate a guessed baseline caused.
+    //
+    // Sequencing that this correctness rests on:
+    //  • The minted remoteId was already persisted (parsePersistedCreate path
+    //    above) BEFORE this re-fetch. So if fetchItemSnapshot THROWS, the op
+    //    falls to the catch and stays pending; the retry SKIPS applyMutation
+    //    (no duplicate create) and re-attempts the re-fetch. The re-fetch MUST
+    //    live here in finalize (re-run by a retry), never baked into
+    //    applyMutation's return (skipped by a retry).
+    //  • linkCreatedItem (the remote_links row + lastSyncedHash) commits BEFORE
+    //    the 'applied' write, closing the orphan-on-crash window: a crash after
+    //    linking but before 'applied' is recoverable — the link exists and the
+    //    idempotent upsert re-links without a second create or a duplicate link.
+    let createBaseline: CreatedItemBaseline | null = null
+    if (op.kind === 'create_item' && createLocalId !== undefined) {
+      // May THROW (network / rate limit) → caught below → op stays pending, the
+      // retry re-links idempotently. Null = item not found → fall back to the
+      // connector-returned createdBaseline (older/mirror-less path).
+      const snapshot = await connector.fetchItemSnapshot(result.ref)
+      const fallback = result.createdBaseline ?? null
+      const lastSyncedHash =
+        snapshot !== null ? snapshot.contentHash
+          : fallback !== null ? baselineHash(fallback)
+            : null
+      // Idempotent upsert — safe to re-run on a post-crash retry.
+      linkCreatedItem(row, op.container, result, createLocalId, now, lastSyncedHash)
+      // Divergence compares the local card to its ACTUAL post-create remote state
+      // (the re-fetch when available, else the connector baseline).
+      createBaseline = snapshot !== null
+        ? {
+            remoteId: snapshot.remoteId,
+            title: snapshot.title,
+            statusRemoteId: snapshot.statusRemoteId,
+            state: snapshot.state,
+            archived: snapshot.archived,
+          }
+        : fallback
+    }
 
     db.update(mutationQueue)
       .set({
@@ -595,7 +704,9 @@ async function processOp(
       .where(eq(mutationQueue.id, row.id))
       .run()
 
-    // Push succeeded → the remote's new version is our new merge base.
+    // Push succeeded → the remote's new version is our new merge base. Creates
+    // enqueue with remoteLinkId null (the link is written above), so this only
+    // bumps the link for non-create ops.
     if (row.remoteLinkId !== null) {
       db.update(remoteLinks)
         .set({ remoteVersion: result.remoteVersion, lastPushedAt: now, updatedAt: now })
@@ -603,17 +714,12 @@ async function processOp(
         .run()
     }
 
-    // create_item success: the connector minted a brand-new remote object
-    // (MutationResult.ref). UPSERT the board_item's remote link with that id
-    // so future move/edit/pull resolve the item. Guarded: the op WAS applied
-    // remotely — a link-write failure must never flow into the catch below
-    // and resurrect the op (a retry would create a duplicate remote item).
-    if (op.kind === 'create_item' && createLocalId !== undefined) {
-      try {
-        linkCreatedItem(row, op.container, result, createLocalId, now)
-      } catch {
-        // Link lost, push applied — the next pull re-links via the remote upsert path.
-      }
+    // Capture any edit/move/close made WHILE the create was in flight: the link
+    // now exists, so these enqueue on the NORMAL live-link path and drain next.
+    // No deferred op that re-pends itself waiting for a link (that deadlocked a
+    // credential's queue when a create terminally failed).
+    if (op.kind === 'create_item' && createLocalId !== undefined && createBaseline !== null) {
+      await enqueuePostCreateDivergence(createLocalId, op, createBaseline)
     }
 
     emitMutationEvent('integration.mutation.applied', row.projectId, row.opId, {
@@ -651,6 +757,7 @@ function linkCreatedItem(
   result: MutationResult,
   boardItemId: string,
   now: string,
+  lastSyncedHash: string | null,
 ): void {
   const db = getDb()
   const existing = db
@@ -671,6 +778,9 @@ function linkCreatedItem(
         containerRemoteId,
         remoteUrl: result.remoteUrl ?? existing.remoteUrl,
         remoteVersion: result.remoteVersion,
+        // Baseline of the item we just created — the merge base for the next
+        // pull. null only when the connector returned no baseline (older path).
+        ...(lastSyncedHash !== null ? { lastSyncedHash } : {}),
         lastPushedAt: now,
         deletedAt: null,
         updatedAt: now,
@@ -691,9 +801,78 @@ function linkCreatedItem(
         containerRemoteId,
         remoteUrl: result.remoteUrl ?? null,
         remoteVersion: result.remoteVersion,
+        lastSyncedHash,
         lastPushedAt: now,
       })
       .run()
+  }
+}
+
+// Canonical baseline hash — MUST match every connector's snapshot contentHash
+// (stableHash({ title, statusRemoteId, state, archived })) so a pull after a
+// create sees no change. stableHash key-sorts, so only these values matter.
+function baselineHash(b: CreatedItemBaseline): string {
+  return stableHash({ title: b.title, statusRemoteId: b.statusRemoteId, state: b.state, archived: b.archived })
+}
+
+// Parse a create op's persisted MutationResult (written before the 'applied'
+// transition). Valid only when it carries a minted ref.remoteId. null → this
+// attempt has not created the remote item yet (normal first attempt).
+function parsePersistedCreate(text: string | null): MutationResult | null {
+  if (text === null) return null
+  try {
+    const parsed = JSON.parse(text) as Partial<MutationResult>
+    const ref = parsed.ref
+    if (ref !== undefined && typeof ref.remoteId === 'string' && ref.remoteId.length > 0) {
+      return parsed as MutationResult
+    }
+  } catch {
+    // Unparseable — treat as "not yet created".
+  }
+  return null
+}
+
+// Push any edit made to the card WHILE its create was in flight. Runs AFTER the
+// link is written, so each enqueue takes the normal live-link path and drains
+// on the next pass — there is NO deferred/self-re-pending op. Compares the
+// current local item to the baseline the create just established remotely and
+// enqueues only the deltas. Never throws (the create is already applied).
+async function enqueuePostCreateDivergence(
+  boardItemId: string,
+  op: Extract<MutationOp, { kind: 'create_item' }>,
+  baseline: CreatedItemBaseline,
+): Promise<void> {
+  try {
+    const item = getDb().select().from(boardItems).where(eq(boardItems.id, boardItemId)).get()
+    if (item === undefined) return
+    const task = getDb().select().from(tasks).where(eq(tasks.id, item.taskId)).get()
+    if (task === undefined) return
+
+    // Title / body edited since the create was enqueued → update_item.
+    const patch: { title?: string; body?: string } = {}
+    if (task.title !== baseline.title) patch.title = task.title
+    const localBody = task.description ?? undefined
+    // The create pushed op.body; a local body that now differs must re-push.
+    if ((localBody ?? '') !== (op.body ?? '')) patch.body = localBody ?? ''
+    if (patch.title !== undefined || patch.body !== undefined) {
+      await enqueueItemUpdate(boardItemId, patch)
+    }
+
+    // Moved to a column whose remote status differs from the created baseline
+    // → move_item. Skipped when the column has no remote status option (nothing
+    // to move to) or already matches the baseline.
+    const localStatusRemoteId = liveLink('board_column', item.columnId)?.remoteId ?? null
+    if (localStatusRemoteId !== null && localStatusRemoteId !== baseline.statusRemoteId) {
+      await enqueueBoardItemMove(boardItemId, item.columnId)
+    }
+
+    // Closed since the create was enqueued → close_item.
+    if (task.status === 'completed' && baseline.state !== 'closed') {
+      await enqueueItemClose(boardItemId)
+    }
+  } catch {
+    // Never throw out of processOp — the create is applied; any divergence that
+    // can't be captured here surfaces on the next pull as a normal change.
   }
 }
 

@@ -73,7 +73,10 @@ export class ConfluenceConnector extends BaseConnector {
       `${baseUrl}/wiki/api/v2/pages?${params.toString()}`,
       { headers: this.headers },
     )
-    if (!res.ok) return { entities: [], nextCursor: null }
+    if (!res.ok) {
+      const snippet = (await res.text().catch(() => '')).slice(0, 200)
+      throw new Error(`Confluence pages fetch failed (HTTP ${res.status}): ${snippet}`)
+    }
 
     const data = await res.json() as ConfluencePageList
     const entities: NormalizedEntity[] = data.results.map((page) => ({

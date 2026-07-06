@@ -26,7 +26,7 @@ import {
   integrationCredentials,
 } from '@creare/database'
 import { generateId } from '@creare/shared'
-import { and, count, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, count, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { applyMirrorSnapshot } from '@creare/boards'
 import type { MirrorApply, MirrorApplyColumn, MirrorApplyItem } from '@creare/boards'
 import type { IntegrationCredential, RemoteLink } from '@creare/database'
@@ -304,6 +304,10 @@ export async function pullMirror(
         eq(mutationQueue.credentialId, credentialId),
         inArray(mutationQueue.status, [...UNRESOLVED_OP_STATUSES]),
       ))
+      // FIFO, matching the outbox drain order: the reconciler keeps the FIRST
+      // active op per link, so it must see them oldest-first (createdAt, rowid
+      // tiebreak) to agree with which op actually drains first.
+      .orderBy(asc(mutationQueue.createdAt), asc(sql`rowid`))
 
     const snapshot = await connectorFor(credential, token).fetchBoardSnapshot(projectV2Id)
 

@@ -221,27 +221,85 @@ describe('conflicts — resolveConflict', () => {
     expect(again).toEqual({ pulled: 0, conflicts: 0 })
   })
 
-  it('local_wins: enqueues a fresh move for the CURRENT column and cancels the old op', async () => {
+  it('local_wins: re-pushes the local column AND title (forced), cancels the old op', async () => {
     const { itemLink, failedOpId, conflictId } = await setupConflict()
 
     await resolveConflict(conflictId, 'local_wins', getCredential)
 
     expect(opStatus(failedOpId)).toBe('cancelled')
 
-    // Fresh pending op re-asserting the local column (Todo → OPT_TODO).
+    // Fresh pending ops re-asserting BOTH the local column (Todo → OPT_TODO)
+    // and the local title (which differs from the remote rename) — the latter
+    // forced so the drift probe overwrites the drifted remote instead of
+    // re-conflicting. This is the silent-loss fix: local content actually wins.
     const fresh = getDb().select().from(mutationQueue)
       .where(and(eq(mutationQueue.remoteLinkId, itemLink.id), eq(mutationQueue.status, 'pending')))
       .all()
-    expect(fresh).toHaveLength(1)
-    expect(JSON.parse(fresh[0]!.payload)).toMatchObject({
+    expect(fresh).toHaveLength(2)
+    const byKind = new Map(fresh.map((r) => [r.kind, JSON.parse(r.payload) as Record<string, unknown>]))
+
+    expect(byKind.get('move_item')).toMatchObject({
       kind: 'move_item',
       toStatusRemoteId: 'OPT_TODO',
       statusFieldRemoteId: 'FIELD_STATUS',
+    })
+    // Local title 'Item IT_1' overwrites the remote 'Renamed remotely'.
+    expect(byKind.get('update_item')).toMatchObject({
+      kind: 'update_item',
+      patch: { title: 'Item IT_1' },
+      force: true,
     })
 
     const row = getDb().select().from(syncConflicts).where(eq(syncConflicts.id, conflictId)).get()!
     expect(row.resolution).toBe('local_wins')
     expect(row.resolvedAt).not.toBeNull()
+  })
+
+  it('local_wins: skips an unsupported reopen (capability-gated) with a warn instead of a failing op', async () => {
+    // Local reopened (task pending = open) while remote closed. Jira/Confluence
+    // lack reopen_item, so the reopen must be SKIPPED, not enqueued to fail.
+    const { itemLink, conflictId } = await setupConflict()
+    // Force the link's source to a connector without reopen_item.
+    getDb().update(remoteLinks).set({ source: 'jira' }).where(eq(remoteLinks.id, itemLink.id)).run()
+    // Make the stored remote snapshot 'closed' so local(open) vs remote(closed)
+    // triggers the reopen branch.
+    const conflict = getDb().select().from(syncConflicts).where(eq(syncConflicts.id, conflictId)).get()!
+    const remoteSnap = JSON.parse(conflict.remoteSnapshot) as Record<string, unknown>
+    remoteSnap['state'] = 'closed'
+    getDb().update(syncConflicts).set({ remoteSnapshot: JSON.stringify(remoteSnap) })
+      .where(eq(syncConflicts.id, conflictId)).run()
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await resolveConflict(conflictId, 'local_wins', getCredential)
+    warn.mockRestore()
+
+    // No reopen_item op was enqueued (Jira can't perform it).
+    const ops = getDb().select().from(mutationQueue)
+      .where(and(eq(mutationQueue.remoteLinkId, itemLink.id), eq(mutationQueue.status, 'pending')))
+      .all()
+    expect(ops.some((r) => r.kind === 'reopen_item')).toBe(false)
+  })
+
+  it('local_wins: re-pushes a local CLOSE for a push-side conflict (remote state unknown)', async () => {
+    // A push-side conflict's stored snapshot is { version } only, so the remote
+    // open/closed state is unknown (parseRemoteItemSnapshot → null). Previously the
+    // close/reopen re-push was guarded on remote !== null, so a locally-closed card
+    // was silently dropped here and reverted to open on the next pull. It must now
+    // re-assert the local close directly.
+    const { itemLink, conflictId } = await setupConflict()
+    const item = getBoardItem(itemLink.localId)!
+    getDb().update(tasks).set({ status: 'completed' }).where(eq(tasks.id, item.taskId)).run()
+    getDb().update(syncConflicts).set({ remoteSnapshot: JSON.stringify({ version: 'v9' }) })
+      .where(eq(syncConflicts.id, conflictId)).run()
+
+    await resolveConflict(conflictId, 'local_wins', getCredential)
+
+    const ops = getDb().select().from(mutationQueue)
+      .where(and(eq(mutationQueue.remoteLinkId, itemLink.id), eq(mutationQueue.status, 'pending')))
+      .all()
+    const close = ops.find((r) => r.kind === 'close_item')
+    expect(close).toBeDefined()
+    expect((JSON.parse(close!.payload) as { force?: boolean }).force).toBe(true)
   })
 
   it('throws clear errors for unknown and already-resolved conflicts', async () => {

@@ -77,7 +77,7 @@ export const agentWorkspaces = sqliteTable('agent_workspaces', {
   ...id(),
   projectId:           text('project_id').notNull().references(() => projects.id),
   name:                text('name').notNull(),
-  modelProvider:       text('model_provider', { enum: ['anthropic', 'openai', 'gemini', 'local'] }).notNull(),
+  modelProvider:       text('model_provider', { enum: ['anthropic', 'openai', 'gemini', 'claude-cli', 'local'] }).notNull(),
   modelId:             text('model_id').notNull(),     // e.g. "claude-sonnet-4-6"
   status:              text('status', { enum: ['idle', 'running', 'paused', 'terminated'] }).notNull().default('idle'),
   permissionScope:     text('permission_scope').notNull().default('{}'), // JSON: { tools, repos, secrets }
@@ -468,7 +468,7 @@ export const costRecords = sqliteTable('cost_records', {
   projectId:        text('project_id').notNull().references(() => projects.id),
   agentWorkspaceId: text('agent_workspace_id').notNull().references(() => agentWorkspaces.id),
   traceId:          text('trace_id').references(() => traces.id),
-  provider:         text('provider', { enum: ['anthropic', 'openai', 'gemini', 'local'] }).notNull(),
+  provider:         text('provider', { enum: ['anthropic', 'openai', 'gemini', 'claude-cli', 'local'] }).notNull(),
   modelId:          text('model_id').notNull(),
   inputTokens:      integer('input_tokens').notNull(),
   outputTokens:     integer('output_tokens').notNull(),

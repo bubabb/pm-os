@@ -103,7 +103,10 @@ export class NotionConnector extends BaseConnector {
       `${NOTION_API}/databases/${databaseId}/query`,
       { method: 'POST', headers: this.headers, body: JSON.stringify(body) },
     )
-    if (!res.ok) return { entities: [], nextCursor: null }
+    if (!res.ok) {
+      const snippet = (await res.text().catch(() => '')).slice(0, 200)
+      throw new Error(`Notion database ${databaseId} query failed (HTTP ${res.status}): ${snippet}`)
+    }
 
     const data = await res.json() as NotionQueryResult
     const entities: NormalizedEntity[] = data.results.map((page) => {
@@ -148,16 +151,15 @@ export class NotionConnector extends BaseConnector {
     const statusProp = findBoardStatusProp(db.properties ?? {})
     const statusFieldRemoteId = statusProp ? `${statusProp.type}:${statusProp.name}` : null
     const options = statusProp?.options ?? []
-    const completeOptionIds = new Set(statusProp?.completeOptionIds ?? [])
+    const terminalOptionIds = notionTerminalOptionIds(statusProp)
 
     const columns: MirrorColumnSnapshot[] = options.map((opt, index) => ({
       remoteId: opt.id,
       name: opt.name,
       position: index,
       // Terminal = a "done-ish" name, or membership in the status "Complete" group
-      isTerminal: /done|complete|closed/i.test(opt.name) || completeOptionIds.has(opt.id),
+      isTerminal: terminalOptionIds.has(opt.id),
     }))
-    const terminalOptionIds = new Set(columns.filter((c) => c.isTerminal).map((c) => c.remoteId))
 
     const items: MirrorItemSnapshot[] = []
     let cursor: string | null = null
@@ -173,24 +175,7 @@ export class NotionConnector extends BaseConnector {
 
       const data = await res.json() as NotionQueryResult
       for (const page of data.results) {
-        const title = extractNotionTitle(page.properties) || 'Untitled'
-        // Read the page's value from the SAME property the columns came from
-        const value = statusProp ? page.properties[statusProp.name] : undefined
-        const statusRemoteId = value?.status?.id ?? value?.select?.id ?? null
-        const state: 'open' | 'closed' =
-          statusRemoteId !== null && terminalOptionIds.has(statusRemoteId) ? 'closed' : 'open'
-        const archived = page.archived ?? false
-        items.push({
-          remoteId: page.id,
-          containerRemoteId: databaseId,
-          title,
-          url: page.url ?? null,
-          statusRemoteId,
-          state,
-          archived,
-          version: page.last_edited_time,
-          contentHash: stableHash({ title, statusRemoteId, state, archived }),
-        })
+        items.push(normalizeNotionPage(page, databaseId, statusProp, terminalOptionIds))
       }
       cursor = data.has_more ? (data.next_cursor ?? null) : null
     } while (cursor !== null)
@@ -204,6 +189,29 @@ export class NotionConnector extends BaseConnector {
       columns,
       items,
     }
+  }
+
+  // Single-item re-fetch for the outbox create-finalize baseline — the page's
+  // CURRENT normalized snapshot, computed by the SAME helper (normalizeNotionPage)
+  // as fetchBoardSnapshot so the contentHash matches the next pull's. Resolves the
+  // status property + terminal option ids from the containing database (ref.containerId)
+  // exactly as fetchBoardSnapshot does, so a status Notion auto-assigned on create is
+  // reflected. Returns null when the page is gone (404) or no database context is known.
+  override async fetchItemSnapshot(ref: RemoteRef): Promise<MirrorItemSnapshot | null> {
+    const databaseId = ref.containerId
+    if (!databaseId) return null
+    const db = await this.retrieveDatabase(databaseId)
+    const statusProp = findBoardStatusProp(db.properties ?? {})
+    const terminalOptionIds = notionTerminalOptionIds(statusProp)
+
+    const res = await this.fetchWithRetry(
+      `${NOTION_API}/pages/${ref.remoteId}`,
+      { headers: this.headers },
+    )
+    if (res.status === 404) return null
+    if (!res.ok) throw new Error(`Notion page ${ref.remoteId} snapshot fetch failed (HTTP ${res.status})`)
+    const page = await res.json() as NotionPage
+    return normalizeNotionPage(page, databaseId, statusProp, terminalOptionIds)
   }
 
   // ── Write surface (bidirectional-sync.md §3.2) ─────────────────────────────
@@ -265,7 +273,18 @@ export class NotionConnector extends BaseConnector {
     if (!res.ok) throw new Error(`Notion page create failed (HTTP ${res.status}) in database ${databaseId}`)
 
     const page = await res.json() as NotionPage
-    return this.mutationResult({ remoteType: 'db_page', remoteId: page.id, containerId: databaseId }, page)
+    const result = this.mutationResult({ remoteType: 'db_page', remoteId: page.id, containerId: databaseId }, page)
+    // A freshly created page has only its title set — no status/select value, so
+    // the pull snapshot computes statusRemoteId:null → state 'open', archived
+    // false (see fetchBoardSnapshot). Stamp that as the baseline.
+    result.createdBaseline = {
+      remoteId: page.id,
+      title: op.title,
+      statusRemoteId: null,
+      state: 'open',
+      archived: false,
+    }
+    return result
   }
 
   private async updateItem(op: Extract<MutationOp, { kind: 'update_item' }>): Promise<MutationResult> {
@@ -385,14 +404,59 @@ function extractNotionStatus(props: Record<string, NotionProperty>): string | nu
   return null
 }
 
-// The board-defining property: first 'status' property wins, first 'select'
-// is the fallback. completeOptionIds = options in the status "Complete" group.
-function findBoardStatusProp(props: Record<string, NotionDbProperty>): {
+// The board-defining status property, resolved from the database schema.
+type BoardStatusProp = {
   name: string
   type: 'status' | 'select'
   options: NotionSelectOption[]
   completeOptionIds: string[]
-} | null {
+}
+
+// The terminal (done-ish) option ids for a database's status property: a
+// "done/complete/closed" name, or membership in the status "Complete" group.
+// Shared by fetchBoardSnapshot (column isTerminal + item state) and
+// fetchItemSnapshot (item state) so both agree on which options are terminal.
+function notionTerminalOptionIds(statusProp: BoardStatusProp | null): Set<string> {
+  const complete = new Set(statusProp?.completeOptionIds ?? [])
+  const terminal = new Set<string>()
+  for (const opt of statusProp?.options ?? []) {
+    if (/done|complete|closed/i.test(opt.name) || complete.has(opt.id)) terminal.add(opt.id)
+  }
+  return terminal
+}
+
+// Normalize ONE Notion page to a MirrorItemSnapshot — the single source of truth
+// for page hashing, shared by fetchBoardSnapshot (the pull) and fetchItemSnapshot
+// (the create-finalize re-fetch) so both compute an identical contentHash. Reads
+// the status value from the SAME property the columns came from.
+function normalizeNotionPage(
+  page: NotionPage,
+  databaseId: string,
+  statusProp: BoardStatusProp | null,
+  terminalOptionIds: Set<string>,
+): MirrorItemSnapshot {
+  const title = extractNotionTitle(page.properties) || 'Untitled'
+  const value = statusProp ? page.properties[statusProp.name] : undefined
+  const statusRemoteId = value?.status?.id ?? value?.select?.id ?? null
+  const state: 'open' | 'closed' =
+    statusRemoteId !== null && terminalOptionIds.has(statusRemoteId) ? 'closed' : 'open'
+  const archived = page.archived ?? false
+  return {
+    remoteId: page.id,
+    containerRemoteId: databaseId,
+    title,
+    url: page.url ?? null,
+    statusRemoteId,
+    state,
+    archived,
+    version: page.last_edited_time,
+    contentHash: stableHash({ title, statusRemoteId, state, archived }),
+  }
+}
+
+// The board-defining property: first 'status' property wins, first 'select'
+// is the fallback. completeOptionIds = options in the status "Complete" group.
+function findBoardStatusProp(props: Record<string, NotionDbProperty>): BoardStatusProp | null {
   let selectFallback: ReturnType<typeof findBoardStatusProp> = null
   for (const [name, prop] of Object.entries(props)) {
     if (prop.type === 'status' && prop.status) {

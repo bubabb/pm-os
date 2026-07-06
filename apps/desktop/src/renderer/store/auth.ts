@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api, getToken, setToken, clearToken } from '../lib/api'
+import { api, getToken, setToken, clearToken, setUnauthorizedHandler } from '../lib/api'
 import { connectSse, disconnectSse } from '../lib/sse'
 
 interface User {
@@ -54,3 +54,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 }))
+
+// Wire the api layer's 401 / SSE-failure recovery to the real sign-out. Registered
+// here (rather than api.ts importing this store) to avoid an import cycle — see the
+// note on setUnauthorizedHandler in lib/api.ts.
+setUnauthorizedHandler(() => {
+  void useAuthStore.getState().signOut()
+})

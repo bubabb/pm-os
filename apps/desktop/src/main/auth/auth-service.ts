@@ -81,6 +81,23 @@ export function getJwtSecret(): Uint8Array {
     }
   }
 
+  // Headless data-loss guard: a legacy safeStorage-wrapped secret exists but there is
+  // no raw secret and no safeStorage to unwrap it (running headless, without Electron).
+  // Generating a new secret here would silently invalidate every outstanding session.
+  // Refuse instead — the desktop app can migrate the blob, or the operator can opt into
+  // discarding it (and signing everyone out) with CREARE_ALLOW_KEY_REGEN=1.
+  if (
+    keys.jwtSecretBlob &&
+    !(safeStorage?.isEncryptionAvailable()) &&
+    process.env['CREARE_ALLOW_KEY_REGEN'] !== '1'
+  ) {
+    throw new Error(
+      '[creare] Legacy encrypted JWT secret cannot be unwrapped without the OS keyring ' +
+        '(safeStorage unavailable — running headless). Run the desktop app once to migrate ' +
+        'it, or set CREARE_ALLOW_KEY_REGEN=1 to discard the old secret and all sessions.',
+    )
+  }
+
   // 3. No recoverable secret — generate ONCE and persist raw (stable forever after).
   //    If a secret existed before (raw or legacy blob) but couldn't be recovered, this
   //    is a rotation: every outstanding session token becomes invalid. Say so loudly

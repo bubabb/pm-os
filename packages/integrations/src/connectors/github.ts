@@ -4,6 +4,7 @@ import type {
   ConnectorCapabilities,
   FetchResult,
   MirrorBoardSnapshot,
+  MirrorItemSnapshot,
   MutationEnvelope,
   MutationKind,
   MutationResult,
@@ -80,6 +81,15 @@ export class GitHubConnector extends BaseConnector {
           ref: { remoteType: 'pv2_item', remoteId: itemId, containerId: op.container.remoteId },
           remoteVersion: updatedAt,
           raw: { updatedAt, draft: true },
+          // A fresh DraftIssue mirrors back exactly this (see fetchProjectSnapshot /
+          // normalizeContent): no status option, state 'draft', not archived.
+          createdBaseline: {
+            remoteId: itemId,
+            title: op.title,
+            statusRemoteId: null,
+            state: 'draft',
+            archived: false,
+          },
         }
       }
 
@@ -190,6 +200,15 @@ export class GitHubConnector extends BaseConnector {
   // reaches GitHub exclusively through this method, never via the client).
   override async fetchBoardSnapshot(remoteBoardId: string): Promise<MirrorBoardSnapshot> {
     return new GitHubProjectsClient(this.config.token).fetchProjectSnapshot(remoteBoardId)
+  }
+
+  // Single-item re-fetch for the outbox create-finalize baseline. ref.containerId
+  // is the ProjectV2 node id (item-link convention); without it we cannot resolve
+  // the item's board, so return null (the finalize path falls back to the
+  // connector-returned createdBaseline).
+  override async fetchItemSnapshot(ref: RemoteRef): Promise<MirrorItemSnapshot | null> {
+    if (!ref.containerId) return null
+    return new GitHubProjectsClient(this.config.token).fetchItemSnapshot(ref.containerId, ref.remoteId)
   }
 
   // All repos the token can access — owned, private, and invited/collaborator

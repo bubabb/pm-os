@@ -36,12 +36,16 @@ function applyRules(entity: NormalizedEntity): Classification | null {
   }
 
   // Always agent — clearly delegatable
+  // Dropped the `entity.assignee === null` condition this rule used to also
+  // require: Jira's fetchEntities JQL is `assignee = currentUser()`, so every
+  // 'ticket' entity that reaches the classifier already has an assignee (the
+  // current user) — that condition could never be true and made this branch
+  // unreachable. The unlabeled-ticket signal is still meaningful on its own.
   if (
     entity.entityType === 'ticket' &&
-    Array.isArray(raw['labels']) && (raw['labels'] as string[]).length === 0 &&
-    entity.assignee === null
+    Array.isArray(raw['labels']) && (raw['labels'] as string[]).length === 0
   ) {
-    return { bucket: 'agent', urgency: 2, riskType: null, suggestedAction: 'Triage: add labels and assignee' }
+    return { bucket: 'agent', urgency: 2, riskType: null, suggestedAction: 'Triage: add labels' }
   }
   if (entity.entityType === 'file' && entity.source === 'onedrive') {
     return { bucket: 'agent', urgency: 2, riskType: null, suggestedAction: 'Summarise meeting notes and extract action items' }

@@ -77,6 +77,23 @@ function loadOrCreateMasterKeyBytes(): Uint8Array {
     }
   }
 
+  // Headless data-loss guard: a legacy safeStorage-wrapped key exists but there is
+  // no raw key and no safeStorage to unwrap it (running headless, without Electron).
+  // Generating a new key here would silently orphan every previously-encrypted secret.
+  // Refuse instead — the desktop app can migrate the blob to a raw key, or the operator
+  // can opt into discarding it with CREARE_ALLOW_KEY_REGEN=1.
+  if (
+    keys.masterKeyBlob &&
+    !(safeStorage?.isEncryptionAvailable()) &&
+    process.env['CREARE_ALLOW_KEY_REGEN'] !== '1'
+  ) {
+    throw new Error(
+      '[creare] Legacy encrypted master key cannot be unwrapped without the OS keyring ' +
+        '(safeStorage unavailable — running headless). Run the desktop app once to migrate ' +
+        'it, or set CREARE_ALLOW_KEY_REGEN=1 to discard the old key and all encrypted secrets.',
+    )
+  }
+
   // 3. No recoverable key — generate ONCE and persist raw (stable forever after).
   //    If ciphertext already exists in the DB, generating a new key orphans it — that
   //    must be loud, never silent (we still generate so the app boots; the alternative

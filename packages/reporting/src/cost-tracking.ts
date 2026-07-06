@@ -5,23 +5,29 @@ import type { CostRecord, NewCostRecord } from '@creare/database'
 
 export async function recordCost(input: Omit<NewCostRecord, 'id' | 'createdAt' | 'recordedAt'>): Promise<CostRecord> {
   const db = getDb()
-  const [record] = await db
-    .insert(costRecords)
-    .values({ id: generateId(), ...input })
-    .returning()
-  // Append-only event log — every state change is an event (CLAUDE.md rule 2).
-  db.insert(events).values({
-    id: generateId(),
-    type: 'cost.recorded',
-    domain: 'reporting',
-    projectId: input.projectId,
-    actorType: 'system',
-    actorId: null,
-    resourceType: 'cost_record',
-    resourceId: record!.id,
-    payload: JSON.stringify({ agentWorkspaceId: input.agentWorkspaceId, costCents: input.costCents }),
-  }).run()
-  return record!
+  // Both inserts commit together in one transaction — the better-sqlite3 driver only
+  // supports synchronous transaction callbacks, so use .get()/.run() here rather than await.
+  const record = db.transaction((tx) => {
+    const row = tx
+      .insert(costRecords)
+      .values({ id: generateId(), ...input })
+      .returning()
+      .get()
+    // Append-only event log — every state change is an event (CLAUDE.md rule 2).
+    tx.insert(events).values({
+      id: generateId(),
+      type: 'cost.recorded',
+      domain: 'reporting',
+      projectId: input.projectId,
+      actorType: 'system',
+      actorId: null,
+      resourceType: 'cost_record',
+      resourceId: row.id,
+      payload: JSON.stringify({ agentWorkspaceId: input.agentWorkspaceId, costCents: input.costCents }),
+    }).run()
+    return row
+  })
+  return record
 }
 
 export async function getProjectSpend(

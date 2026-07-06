@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { requireAuth } from '../auth'
 import { listConnections, storeConnection, updateConnection, deleteConnection, getConnection, getConnectionToken } from '../secrets'
+import { CredentialError } from '../secrets/secrets-service'
 import { listConnectorResources } from '@creare/integrations'
 import type { ConnectorConfig } from '@creare/integrations'
 import type { Connection } from '@creare/database'
@@ -99,6 +100,11 @@ export async function connectionsRoutes(app: FastifyInstance): Promise<void> {
         }
         return await listConnectorResources(connection.source, config)
       } catch (err) {
+        // An unreadable credential (orphaned ciphertext) is a 422 the UI handles
+        // specially — don't flatten it into a generic 502.
+        if (err instanceof CredentialError) {
+          return reply.code(err.statusCode).send({ error: err.code, message: err.message })
+        }
         // Upstream API failure (bad token, network, rate limit) — the UI falls
         // back to manual entry.
         const message = err instanceof Error ? err.message : String(err)

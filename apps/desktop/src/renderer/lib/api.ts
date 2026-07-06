@@ -28,6 +28,29 @@ class ApiError extends Error {
   }
 }
 
+// Shared recovery path for "this session is no longer valid" — used by the 401
+// handler below and by the SSE client when repeated reconnects keep failing.
+// The auth store registers a richer handler via setUnauthorizedHandler (sign out of
+// the store so `user` goes null and SSE disconnects); until then we fall back to just
+// clearing the token. This is a REGISTERED callback rather than a direct
+// `import { useAuthStore }` on purpose: importing the store here creates a module
+// cycle (store/auth imports this module and reads getToken() at top level), which
+// crashes the whole app at boot with a temporal-dead-zone ReferenceError.
+let unauthorizedHandler: (() => void) | null = null
+
+export function setUnauthorizedHandler(fn: () => void): void {
+  unauthorizedHandler = fn
+}
+
+export function handleUnauthorized(): void {
+  if (unauthorizedHandler) {
+    unauthorizedHandler()
+  } else {
+    clearToken()
+  }
+  window.location.hash = '/auth'
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken()
   const headers: Record<string, string> = {
@@ -39,8 +62,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, { ...init, headers })
 
   if (response.status === 401) {
-    clearToken()
-    window.location.hash = '/auth'
+    handleUnauthorized()
     throw new ApiError(401, 'Unauthorized')
   }
 

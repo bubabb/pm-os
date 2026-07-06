@@ -65,13 +65,18 @@ export interface RemoteRef {
   containerId?: string      // ProjectV2 node id / 'owner/repo' / projectKey / databaseId / driveId
 }
 
+// `force` (update/close/reopen): last-write-wins override. When set, the outbox
+// pre-push drift probe overwrites the remote even if it moved off base, instead
+// of parking a conflict — used by conflict resolution's local_wins to make the
+// LOCAL delta actually win (not just the column move). Absent on the normal
+// enqueue path, so routine edits still conflict-guard.
 export type MutationOp =
   | { kind: 'move_item';    ref: RemoteRef; toStatusRemoteId: string; statusFieldRemoteId?: string }
   | { kind: 'create_item';  container: RemoteRef; title: string; body?: string; itemType?: string; fields?: Record<string, string> }
-  | { kind: 'update_item';  ref: RemoteRef; patch: { title?: string; body?: string; assignee?: string | null; labels?: string[]; fields?: Record<string, string> } }
+  | { kind: 'update_item';  ref: RemoteRef; patch: { title?: string; body?: string; assignee?: string | null; labels?: string[]; fields?: Record<string, string> }; force?: true }
   | { kind: 'comment';      ref: RemoteRef; body: string }
-  | { kind: 'close_item';   ref: RemoteRef; reason?: string }
-  | { kind: 'reopen_item';  ref: RemoteRef }
+  | { kind: 'close_item';   ref: RemoteRef; reason?: string; force?: true }
+  | { kind: 'reopen_item';  ref: RemoteRef; force?: true }
   | { kind: 'archive_item'; ref: RemoteRef }
 
 export interface MutationEnvelope {
@@ -83,11 +88,30 @@ export interface MutationEnvelope {
   op: MutationOp
 }
 
+// Normalized baseline of an item a create_item just minted remotely, computed
+// the SAME way each connector's pull snapshot computes an item (title +
+// statusRemoteId + state + archived — the fields that feed MirrorItemSnapshot.
+// contentHash = stableHash({ title, statusRemoteId, state, archived })). The
+// outbox stamps remote_links.lastSyncedHash from these RETURNED values so the
+// very next pull sees contentHash === lastSyncedHash and does NOT revert the
+// freshly created card. Never a hardcoded guess — GitHub drafts pull back
+// state:'draft'/statusRemoteId:null, Jira pulls back a real status id, etc.
+export interface CreatedItemBaseline {
+  remoteId: string
+  title: string
+  statusRemoteId: string | null
+  state: 'open' | 'closed' | 'draft'
+  archived: boolean
+}
+
 export interface MutationResult {
   ref: RemoteRef
   remoteVersion: string | null
   remoteUrl?: string
   raw: Record<string, unknown>
+  // Present only on a successful create_item — the pull-equivalent baseline of
+  // the item just created (see CreatedItemBaseline).
+  createdBaseline?: CreatedItemBaseline
 }
 
 export interface ConnectorCapabilities { write: MutationKind[] }

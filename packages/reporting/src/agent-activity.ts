@@ -71,8 +71,12 @@ export async function getAgentActivity(projectId: string): Promise<AgentActivity
   })
 
   const running = rows.filter((r) => r.status === 'running').map(toStub)
+  // Prefer completedAt (fixes the cross-midnight undercount: started yesterday,
+  // completed today). Fall back to startedAt when completedAt is unset — some callers
+  // mark a trace completed without stamping completedAt (see observability updateTrace),
+  // and those must still count rather than silently vanish.
   const completedToday = rows
-    .filter((r) => r.status === 'completed' && r.startedAt >= todayStart.toISOString())
+    .filter((r) => r.status === 'completed' && (r.completedAt ?? r.startedAt) >= todayStart.toISOString())
     .map(toStub)
   const failed = rows.filter((r) => r.status === 'failed').map(toStub)
 

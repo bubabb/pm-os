@@ -11,11 +11,13 @@
  * Run with:  tsx src/server/headless.ts   (see package.json "server" script)
  */
 import { runMigrations } from '@creare/database'
-import { startServer, stopServer } from '../main/server'
+import { startServer, stopServer, resolvePort } from '../main/server'
 import { startSyncScheduler, stopSyncScheduler } from '../main/scheduler/sync-scheduler'
 import { startPushWorker, stopPushWorker } from '../main/sync/push-worker'
 
-const PORT = parseInt(process.env['CREARE_PORT'] ?? '4321', 10)
+// Validates CREARE_PORT (throws on a bad value) — shares server.ts's parser so the
+// printed URL always matches the port the server actually binds.
+const PORT = resolvePort()
 
 // Tear backend services down exactly once, regardless of which signal fires.
 let servicesStopped = false
@@ -44,9 +46,11 @@ async function main(): Promise<void> {
 }
 
 // Graceful shutdown on Ctrl+C / kill. Each handler stops services, then exits.
+// Use .finally so an early signal (before listen, or a rejected teardown) still
+// exits the process instead of hanging on an unsettled promise.
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
-    void stopServices().then(() => process.exit(0))
+    void stopServices().finally(() => process.exit(0))
   })
 }
 

@@ -289,10 +289,12 @@ export class GitHubProjectsClient {
 
   // Full mirror snapshot of one ProjectV2: columns from the status
   // single-select field's options, items paginated 100/page until exhausted.
-  // The status field is resolved up front: field(name: "Status") first
-  // (case-sensitive), falling back to the FIRST ProjectV2SingleSelectField
-  // when the field was renamed/localized — its NAME then drives each item's
-  // fieldValueByName lookup so item statuses follow the same field.
+  // The status field is resolved up front: field(name: "Status") first (an
+  // exact-name GraphQL lookup — case-sensitive on GitHub's side), falling back
+  // to a single-select field elsewhere in `fields` whose name matches "status"
+  // case-INSENSITIVELY (covers renamed casing/localization, e.g. "Statut").
+  // Its NAME then drives each item's fieldValueByName lookup so item statuses
+  // follow the same field.
   async fetchProjectSnapshot(projectV2Id: string): Promise<MirrorBoardSnapshot> {
     const meta = await this.graphql<ProjectMetaData>(
       `query ProjectMeta($projectId: ID!) {
@@ -319,9 +321,13 @@ export class GitHubProjectsClient {
     if (!project || !project.fields) {
       throw new GitHubNotFoundError(`ProjectV2 ${projectV2Id} not found or not a project`)
     }
+    // Write pointer: only a CONFIDENT status field (so moves never hit an unrelated
+    // field). Column source: best-effort (falls back to first single-select) so a
+    // board without a "status"-named field still imports with columns.
     const statusField = resolveStatusField(project)
     const statusFieldRemoteId = statusField?.id ?? null
-    const statusOptions = statusField?.options ?? []
+    const columnField = resolveColumnSourceField(project)
+    const statusOptions = columnField?.options ?? []
 
     const itemNodes: ProjectItemNode[] = []
     let cursor: string | null = null
@@ -349,9 +355,10 @@ export class GitHubProjectsClient {
             }
           }
         }`,
-        // No status field at all → the name is never matched; statusRemoteId
-        // is forced null below anyway
-        { projectId: projectV2Id, cursor, statusFieldName: statusField?.name ?? 'Status' },
+        // Query item values from the column-source field so items place into the
+        // columns above; when there's no single-select at all the name never matches
+        // and statusRemoteId stays null.
+        { projectId: projectV2Id, cursor, statusFieldName: columnField?.name ?? 'Status' },
       )
 
       const node = data.node
@@ -377,22 +384,8 @@ export class GitHubProjectsClient {
       // content is null for items this token can't read (e.g. private repo
       // issues on a project the viewer sees) — skip them rather than mirror
       // an untitled shell
-      if (!item.content) continue
-      const { title, url, state } = normalizeContent(item.content)
-      // Items only carry a Status value when the project has a Status field
-      const statusRemoteId = statusFieldRemoteId ? item.fieldValueByName?.optionId ?? null : null
-      const archived = item.isArchived
-      items.push({
-        remoteId: item.id,
-        containerRemoteId: projectV2Id,
-        title,
-        url,
-        statusRemoteId,
-        state,
-        archived,
-        version: item.updatedAt,
-        contentHash: stableHash({ title, statusRemoteId, state, archived }),
-      })
+      const snapshot = normalizeProjectItem(item, projectV2Id, columnField !== null)
+      if (snapshot !== null) items.push(snapshot)
     }
 
     return {
@@ -404,6 +397,74 @@ export class GitHubProjectsClient {
       columns,
       items,
     }
+  }
+
+  // Single-item re-fetch: the item's CURRENT normalized snapshot, computed by
+  // the SAME helper (normalizeProjectItem) as fetchProjectSnapshot so the
+  // contentHash is identical to the next pull's. The column-source field is
+  // resolved exactly as in fetchProjectSnapshot (resolveColumnSourceField) so
+  // the item's statusRemoteId is read from the same field. Returns null when
+  // the project/item is gone or invisible to this token.
+  async fetchItemSnapshot(projectV2Id: string, itemId: string): Promise<MirrorItemSnapshot | null> {
+    let meta: ProjectMetaData
+    try {
+      meta = await this.graphql<ProjectMetaData>(
+        `query ProjectMeta($projectId: ID!) {
+          node(id: $projectId) {
+            ... on ProjectV2 {
+              id title url updatedAt
+              field(name: "Status") {
+                ... on ProjectV2SingleSelectField { id name options { id name } }
+              }
+              fields(first: 30) {
+                nodes {
+                  __typename
+                  ... on ProjectV2SingleSelectField { id name options { id name } }
+                }
+              }
+            }
+          }
+        }`,
+        { projectId: projectV2Id },
+      )
+    } catch (err) {
+      if (err instanceof GitHubNotFoundError) return null
+      throw err
+    }
+    const project = meta.node
+    if (!project || !project.fields) return null
+    const columnField = resolveColumnSourceField(project)
+
+    let data: ProjectSingleItemData
+    try {
+      data = await this.graphql<ProjectSingleItemData>(
+        `query ProjectSingleItem($itemId: ID!, $statusFieldName: String!) {
+          node(id: $itemId) {
+            ... on ProjectV2Item {
+              id isArchived updatedAt
+              fieldValueByName(name: $statusFieldName) {
+                ... on ProjectV2ItemFieldSingleSelectValue { optionId }
+              }
+              content {
+                __typename
+                ... on Issue { title url state }
+                ... on PullRequest { title url state isDraft }
+                ... on DraftIssue { title }
+              }
+            }
+          }
+        }`,
+        { itemId, statusFieldName: columnField?.name ?? 'Status' },
+      )
+    } catch (err) {
+      if (err instanceof GitHubNotFoundError) return null
+      throw err
+    }
+
+    const node = data.node
+    // A node id that is not a ProjectV2Item resolves to `{}` (no content).
+    if (!node || !node.content) return null
+    return normalizeProjectItem(node, projectV2Id, columnField !== null)
   }
 
   // Cheap single-item version probe for pre-push conflict detection.
@@ -572,6 +633,36 @@ export type ItemContentInfo =
 
 // ── Content normalization ───────────────────────────────────────────────────
 
+// Normalize ONE ProjectV2 item to a MirrorItemSnapshot — the single source of
+// truth for item hashing, shared by fetchProjectSnapshot (the pull) and
+// fetchItemSnapshot (the create-finalize re-fetch) so both compute an
+// identical contentHash. Returns null for items whose content is invisible to
+// this token (private-repo issues on a visible project) — mirroring an
+// untitled shell would be wrong.
+function normalizeProjectItem(
+  item: ProjectItemNode,
+  projectV2Id: string,
+  hasColumnField: boolean,
+): MirrorItemSnapshot | null {
+  if (!item.content) return null
+  const { title, url, state } = normalizeContent(item.content)
+  // Placement follows the column-source field (may be a best-effort single-select
+  // when no confident Status field exists); null when the board has no single-select.
+  const statusRemoteId = hasColumnField ? item.fieldValueByName?.optionId ?? null : null
+  const archived = item.isArchived
+  return {
+    remoteId: item.id,
+    containerRemoteId: projectV2Id,
+    title,
+    url,
+    statusRemoteId,
+    state,
+    archived,
+    version: item.updatedAt,
+    contentHash: stableHash({ title, statusRemoteId, state, archived }),
+  }
+}
+
 function normalizeContent(content: ProjectItemContent): {
   title: string
   url: string | null
@@ -601,9 +692,14 @@ function normalizeContent(content: ProjectItemContent): {
 }
 
 // The single-select field that drives board columns: the field literally
-// named "Status" when it exists (and is single-select), otherwise the FIRST
-// single-select field on the project — covers renamed/localized status
-// fields, which field(name: "Status") misses (it is case-sensitive).
+// named "Status" when it exists (and is single-select), otherwise a
+// single-select field elsewhere in `fields` whose name matches "status"
+// case-INSENSITIVELY — covers renamed casing/localization, which the exact
+// field(name: "Status") lookup misses. Deliberately does NOT fall back to the
+// first single-select field when no status-like name is found: a board whose
+// first single-select is something else (Priority, Size, …) would otherwise
+// get moves silently written to that unrelated field. Bailing to null instead
+// leaves statusFieldRemoteId undefined so moves are safely skipped.
 function resolveStatusField(
   project: Pick<ProjectMetaNode, 'field' | 'fields'>,
 ): { id: string; name: string; options: ProjectFieldOption[] } | null {
@@ -611,6 +707,29 @@ function resolveStatusField(
   if (named?.id && named.options) {
     return { id: named.id, name: named.name ?? 'Status', options: named.options }
   }
+  for (const candidate of project.fields?.nodes ?? []) {
+    if (
+      candidate?.__typename === 'ProjectV2SingleSelectField' &&
+      candidate.id && candidate.name && candidate.options &&
+      candidate.name.toLowerCase() === 'status'
+    ) {
+      return { id: candidate.id, name: candidate.name, options: candidate.options }
+    }
+  }
+  return null
+}
+
+// Column SOURCE field for reads/display. Prefers the confident status field; when
+// none exists, falls back to the first single-select so the board still imports with
+// usable columns instead of crashing applyMirrorSnapshot on empty columns. This drives
+// ONLY columns + per-item placement (reads). The WRITE pointer (statusFieldRemoteId,
+// from resolveStatusField) stays null unless a confident status field was found, so a
+// move is never written to an unrelated field — reads degrade, writes fail safe.
+function resolveColumnSourceField(
+  project: Pick<ProjectMetaNode, 'field' | 'fields'>,
+): { id: string; name: string; options: ProjectFieldOption[] } | null {
+  const confident = resolveStatusField(project)
+  if (confident) return confident
   for (const candidate of project.fields?.nodes ?? []) {
     if (
       candidate?.__typename === 'ProjectV2SingleSelectField' &&
@@ -734,6 +853,12 @@ interface ProjectItemsPageData {
       nodes: Array<ProjectItemNode | null> | null
     }
   } | null
+}
+
+// Single-item fetch (fetchItemSnapshot). node is optional/partial because a
+// node id that is not a ProjectV2Item resolves the inline fragment to `{}`.
+interface ProjectSingleItemData {
+  node: ProjectItemNode | null
 }
 
 interface ItemVersionData {

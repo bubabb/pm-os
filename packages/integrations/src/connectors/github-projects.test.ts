@@ -434,7 +434,37 @@ describe('GitHubProjectsClient — fetchProjectSnapshot', () => {
     expect(snapshot.columns.map((c) => c.isTerminal)).toEqual([false, true])
   })
 
-  it('falls back to the FIRST single-select field when no field is named "Status" (renamed/localized)', async () => {
+  it('matches a status field name case-insensitively instead of blindly picking the first single-select', async () => {
+    fetchMock
+      .mockResolvedValueOnce(projectMeta(null, [
+        { __typename: 'ProjectV2Field' }, // e.g. Title — not single-select, skipped
+        // Listed FIRST — must NOT win just because it comes first in `fields`
+        { __typename: 'ProjectV2SingleSelectField', id: 'FIELD_PRIO', name: 'Priority', options: [{ id: 'p1', name: 'High' }] },
+        // Differently-cased "Status" — field(name: "Status") misses this (case-sensitive
+        // on GitHub's side), but our own scan must match it case-insensitively
+        {
+          __typename: 'ProjectV2SingleSelectField', id: 'FIELD_STATUS_UPPER', name: 'STATUS',
+          options: [{ id: 'opt-pend', name: 'Pending' }, { id: 'opt-done', name: 'Done' }],
+        },
+      ]))
+      .mockResolvedValueOnce(itemsPage([
+        {
+          id: 'ITEM_1', isArchived: false, updatedAt: '2026-06-10T09:00:00Z',
+          fieldValueByName: { optionId: 'opt-done' },
+          content: { __typename: 'Issue', title: 'Shipped', url: null, state: 'OPEN' },
+        },
+      ], { hasNextPage: false, endCursor: null }))
+
+    const snapshot = await client().fetchProjectSnapshot('PVT_1')
+
+    expect(snapshot.statusFieldRemoteId).toBe('FIELD_STATUS_UPPER')
+    expect(snapshot.columns.map((c) => c.remoteId)).toEqual(['opt-pend', 'opt-done'])
+    // Items are looked up by the matched field's own name, not the literal "Status"
+    expect(requestBody(1).variables).toEqual({ projectId: 'PVT_1', cursor: null, statusFieldName: 'STATUS' })
+    expect(snapshot.items[0]).toMatchObject({ statusRemoteId: 'opt-done' })
+  })
+
+  it('keeps the write pointer null for an ambiguous board (no wrong-field writes) but still imports columns from a best-effort single-select', async () => {
     fetchMock
       .mockResolvedValueOnce(projectMeta(null, [
         { __typename: 'ProjectV2Field' }, // e.g. Title — not single-select, skipped
@@ -442,27 +472,29 @@ describe('GitHubProjectsClient — fetchProjectSnapshot', () => {
           __typename: 'ProjectV2SingleSelectField', id: 'FIELD_ESTADO', name: 'Estado',
           options: [{ id: 'opt-pend', name: 'Pendente' }, { id: 'opt-feito', name: 'Feito' }],
         },
-        // A LATER single-select must not win over the first one
+        // The would-be (buggy) "first single-select wins" fallback — must NOT be picked
         { __typename: 'ProjectV2SingleSelectField', id: 'FIELD_PRIO', name: 'Priority', options: [{ id: 'p1', name: 'High' }] },
       ]))
       .mockResolvedValueOnce(itemsPage([
         {
           id: 'ITEM_1', isArchived: false, updatedAt: '2026-06-10T09:00:00Z',
           fieldValueByName: { optionId: 'opt-feito' },
-          content: { __typename: 'Issue', title: 'Traduzido', url: null, state: 'OPEN' },
+          content: { __typename: 'Issue', title: 'Ambiguous board item', url: null, state: 'OPEN' },
         },
       ], { hasNextPage: false, endCursor: null }))
 
     const snapshot = await client().fetchProjectSnapshot('PVT_1')
 
-    expect(snapshot.statusFieldRemoteId).toBe('FIELD_ESTADO')
+    // No confident "status"-named field → the WRITE pointer is null, so moves never
+    // hit an unrelated field. But columns still populate from the first single-select
+    // (Estado, not Priority) so the board imports instead of crashing on empty columns.
+    expect(snapshot.statusFieldRemoteId).toBeNull()
     expect(snapshot.columns.map((c) => c.remoteId)).toEqual(['opt-pend', 'opt-feito'])
-    // Items are looked up by the FALLBACK field's name, not "Status"
     expect(requestBody(1).variables).toEqual({ projectId: 'PVT_1', cursor: null, statusFieldName: 'Estado' })
     expect(snapshot.items[0]).toMatchObject({ statusRemoteId: 'opt-feito' })
   })
 
-  it('also falls back when a field named "Status" exists but is not single-select', async () => {
+  it('also bails when a field named "Status" exists but is not single-select, and no other field matches', async () => {
     fetchMock
       // field(name: "Status") on a non-single-select field resolves to `{}`
       .mockResolvedValueOnce(projectMeta({}, [
@@ -471,7 +503,10 @@ describe('GitHubProjectsClient — fetchProjectSnapshot', () => {
       .mockResolvedValueOnce(itemsPage([], { hasNextPage: false, endCursor: null }))
 
     const snapshot = await client().fetchProjectSnapshot('PVT_1')
-    expect(snapshot.statusFieldRemoteId).toBe('FIELD_STAGE')
+    // Named "Status" isn't single-select and no other field is status-named → write
+    // pointer null; columns fall back to the first single-select (Stage) for import.
+    expect(snapshot.statusFieldRemoteId).toBeNull()
+    expect(snapshot.columns.map((c) => c.remoteId)).toEqual(['s1'])
     expect(requestBody(1).variables).toMatchObject({ statusFieldName: 'Stage' })
   })
 
@@ -497,6 +532,55 @@ describe('GitHubProjectsClient — fetchProjectSnapshot', () => {
   it('throws GitHubNotFoundError when the node is not a ProjectV2', async () => {
     fetchMock.mockResolvedValueOnce(dataResponse({ node: {} }))
     await expect(client().fetchProjectSnapshot('not-a-project')).rejects.toBeInstanceOf(GitHubNotFoundError)
+  })
+})
+
+// ── fetchItemSnapshot (create-finalize re-fetch) ─────────────────────────────
+// Resolves project meta (same status-field resolution as fetchProjectSnapshot),
+// then fetches the single item and normalizes it via the SHARED helper, so the
+// contentHash is identical to what fetchProjectSnapshot computes for that item.
+
+describe('GitHubProjectsClient — fetchItemSnapshot', () => {
+  it('returns the item snapshot whose contentHash matches the board snapshot formula', async () => {
+    fetchMock
+      .mockResolvedValueOnce(projectMeta())
+      .mockResolvedValueOnce(
+        dataResponse({
+          node: {
+            id: 'ITEM_1', isArchived: false, updatedAt: '2026-06-10T09:00:00Z',
+            fieldValueByName: { optionId: 'opt-done' }, // platform-assigned status
+            content: { __typename: 'Issue', title: 'Fix login', url: 'https://github.com/acme/app/issues/1', state: 'OPEN' },
+          },
+        }),
+      )
+
+    const snap = await client().fetchItemSnapshot('PVT_1', 'ITEM_1')
+
+    expect(snap).toEqual({
+      remoteId: 'ITEM_1',
+      containerRemoteId: 'PVT_1',
+      title: 'Fix login',
+      url: 'https://github.com/acme/app/issues/1',
+      statusRemoteId: 'opt-done',
+      state: 'open',
+      archived: false,
+      version: '2026-06-10T09:00:00Z',
+      contentHash: stableHash({ title: 'Fix login', statusRemoteId: 'opt-done', state: 'open', archived: false }),
+    })
+    // Item status is read via the resolved column-source field's own name
+    expect(requestBody(1).variables).toEqual({ itemId: 'ITEM_1', statusFieldName: 'Status' })
+  })
+
+  it('returns null when the item node is not a ProjectV2Item (content absent)', async () => {
+    fetchMock
+      .mockResolvedValueOnce(projectMeta())
+      .mockResolvedValueOnce(dataResponse({ node: {} }))
+    await expect(client().fetchItemSnapshot('PVT_1', 'ITEM_x')).resolves.toBeNull()
+  })
+
+  it('returns null when the project itself is gone (NOT_FOUND)', async () => {
+    fetchMock.mockResolvedValueOnce(errorsResponse([{ type: 'NOT_FOUND', message: 'gone' }]))
+    await expect(client().fetchItemSnapshot('PVT_gone', 'ITEM_1')).resolves.toBeNull()
   })
 })
 
@@ -747,6 +831,15 @@ describe('GitHubConnector — applyMutation dispatch', () => {
       ref: { remoteType: 'pv2_item', remoteId: 'ITEM_NEW', containerId: 'PVT_1' },
       remoteVersion: '2026-06-11T13:00:00Z',
       raw: { updatedAt: '2026-06-11T13:00:00Z', draft: true },
+      // Pull-equivalent baseline of the just-created draft — feeds lastSyncedHash
+      // so the next pull does not revert the card.
+      createdBaseline: {
+        remoteId: 'ITEM_NEW',
+        title: 'New card',
+        statusRemoteId: null,
+        state: 'draft',
+        archived: false,
+      },
     })
     expect(requestBody(0).query).toContain('addProjectV2DraftIssue')
     expect(requestBody(0).variables).toEqual({ projectId: 'PVT_1', title: 'New card', body: 'Card body' })

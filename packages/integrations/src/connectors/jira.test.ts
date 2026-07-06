@@ -274,6 +274,49 @@ describe('JiraConnector — fetchBoardSnapshot', () => {
   })
 })
 
+// ── fetchItemSnapshot (create-finalize re-fetch) ─────────────────────────────
+
+describe('JiraConnector — fetchItemSnapshot', () => {
+  it('returns the issue snapshot whose contentHash matches what the board snapshot computes', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        key: 'CRE-7',
+        fields: {
+          summary: 'Freshly created',
+          updated: '2026-06-12T09:00:00.000+0000',
+          // Jira auto-assigned an initial workflow status on create
+          status: { id: '1', statusCategory: { key: 'new' } },
+        },
+      }),
+    )
+
+    const snap = await connector().fetchItemSnapshot({ remoteType: 'ticket', remoteId: 'CRE-7', containerId: 'CRE' })
+
+    expect(snap).toEqual({
+      remoteId: 'CRE-7',
+      containerRemoteId: 'CRE',
+      title: 'Freshly created',
+      url: `${BASE}/browse/CRE-7`,
+      statusRemoteId: '1',
+      state: 'open',
+      archived: false,
+      version: '2026-06-12T09:00:00.000+0000',
+      // IDENTICAL formula to fetchBoardSnapshot's per-issue contentHash
+      contentHash: stableHash({ title: 'Freshly created', statusRemoteId: '1', state: 'open', archived: false }),
+    })
+
+    // Reads only the fields the snapshot needs
+    expect(requestAt(0).url).toBe(`${BASE}/rest/api/3/issue/CRE-7?fields=summary,status,updated`)
+  })
+
+  it('returns null when the issue is gone (404)', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ errorMessages: ['gone'] }, 404))
+    await expect(
+      connector().fetchItemSnapshot({ remoteType: 'ticket', remoteId: 'CRE-404', containerId: 'CRE' }),
+    ).resolves.toBeNull()
+  })
+})
+
 // ── capabilities ─────────────────────────────────────────────────────────────
 
 describe('JiraConnector — capabilities', () => {

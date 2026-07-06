@@ -32,6 +32,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           return reply.code(401).send({ error: message })
         }
       } else {
+        // No OAuth app configured. The dev-stub mints an ADMIN JWT with no
+        // credential, so it is gated behind an explicit opt-in env var and must
+        // never be reachable in a real deployment.
+        if (process.env['CREARE_DEV_AUTH'] !== '1') {
+          return reply.code(401).send({
+            error: 'auth_not_configured',
+            message: 'OAuth is not configured. Set CREARE_DEV_AUTH=1 for local dev sign-in.',
+          })
+        }
         user = await signIn(provider)
         method = 'dev-stub'
       }

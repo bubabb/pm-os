@@ -100,7 +100,10 @@ export class OneDriveConnector extends BaseConnector {
     // Graph encodes all paging state ($skipToken etc.) into it.
     const url = cursor ?? this.initialFetchUrl()
     const res = await this.fetchWithRetry(url, { headers: this.headers })
-    if (!res.ok) return { entities: [], nextCursor: null }
+    if (!res.ok) {
+      const snippet = (await res.text().catch(() => '')).slice(0, 200)
+      throw new Error(`OneDrive fetch failed (HTTP ${res.status}): ${snippet}`)
+    }
 
     const data = await res.json() as GraphDriveItemPage
     const entities: NormalizedEntity[] = (data.value ?? []).map((item) => ({

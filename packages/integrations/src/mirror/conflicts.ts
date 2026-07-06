@@ -30,9 +30,15 @@ import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
 import { applyMirrorSnapshot, getBoard, getBoardItem, getColumn } from '@creare/boards'
 import type { MirrorApplyColumn } from '@creare/boards'
 import type { IntegrationCredential, RemoteLink, SyncConflict } from '@creare/database'
-import { enqueueBoardItemMove } from './outbox'
+import {
+  connectorWriteCapabilities,
+  enqueueBoardItemMove,
+  enqueueForcedItemClose,
+  enqueueForcedItemReopen,
+  enqueueForcedItemUpdate,
+} from './outbox'
 import { columnSyncHash, PV2_STATUS_OPTION_REMOTE_TYPE } from './reconciler'
-import type { MirrorItemSnapshot } from '../types'
+import type { IntegrationSource, MirrorItemSnapshot } from '../types'
 
 export type ConflictResolution = 'local_wins' | 'remote_wins' | 'dismiss'
 
@@ -253,7 +259,12 @@ export async function resolveConflict(
     // to push it (pending included), so the outbox can't re-assert it later.
     cancelledOps = cancelOps(link.id, ['pending', 'failed', 'conflicted'])
   } else {
-    // local_wins: re-assert the CURRENT local column as a fresh outbox op.
+    // local_wins: re-assert the FULL local delta (column + title/body +
+    // open-state) so LOCAL actually wins — not just the column move (which was
+    // the old silent-loss bug). Content/state ops carry force:true so the drift
+    // probe overwrites the drifted remote instead of re-conflicting. Ops the
+    // connector can't perform (e.g. Jira/Confluence reopen_item) are SKIPPED
+    // with a warn rather than enqueued to terminally fail.
     if (link.localType !== 'board_item') {
       throw new Error(`resolveConflict: local_wins only supports board_item links (conflict ${conflictId} targets a ${link.localType})`)
     }
@@ -261,13 +272,63 @@ export async function resolveConflict(
     if (boardItem === null) {
       throw new Error(`resolveConflict: board item ${link.localId} for conflict ${conflictId} no longer exists — resolve as remote_wins or dismiss instead`)
     }
+
+    // Column move — already last-write-wins in the drift probe (no force flag).
     enqueuedOpId = await enqueueBoardItemMove(boardItem.id, boardItem.columnId)
     if (enqueuedOpId === null) {
       throw new Error(`resolveConflict: could not enqueue the local_wins push for board item ${boardItem.id} — conflict left open`)
     }
-    // Cancel AFTER the fresh op is in (it is 'pending'; only the old parked
-    // failed/conflicted ops are swept, so it cannot cancel itself).
-    cancelledOps = cancelOps(link.id, ['failed', 'conflicted'], enqueuedOpId)
+    // Shield every op we enqueue from the cancel sweep below (the move itself
+    // may be a parked 'failed' row when the target column is unmapped).
+    const shield = new Set<string>([enqueuedOpId])
+
+    const caps = connectorWriteCapabilities(link.source as IntegrationSource)
+    const remote = parseRemoteItemSnapshot(conflict.remoteSnapshot)
+    const task = getDb().select().from(tasks).where(eq(tasks.id, boardItem.taskId)).get()
+
+    // Title / body → forced update_item. Push when local title differs from the
+    // remote snapshot (or remote is unknown — a push-side conflict carries none).
+    if (task !== undefined) {
+      if (caps.includes('update_item')) {
+        if (remote === null || task.title !== remote.title) {
+          const patch: { title?: string; body?: string } = { title: task.title }
+          if (task.description !== null) patch.body = task.description
+          const upId = await enqueueForcedItemUpdate(boardItem.id, patch)
+          if (upId !== null) shield.add(upId)
+        }
+      } else {
+        console.warn(`resolveConflict: ${link.source} does not support update_item — local title/body NOT re-pushed for conflict ${conflictId}`)
+      }
+    }
+
+    // Open/closed → forced close_item / reopen_item to re-assert the LOCAL state.
+    // With a known remote (pull-side conflict) act only on a real difference; with an
+    // UNKNOWN remote (a push-side conflict carries only { version }, so remote===null)
+    // re-assert the local state directly — otherwise a local close/reopen is silently
+    // dropped here and then reverted on the next pull.
+    if (task !== undefined) {
+      const localClosed = task.status === 'completed'
+      const remoteClosed = remote?.state === 'closed'
+      if (localClosed && (remote === null || !remoteClosed)) {
+        if (caps.includes('close_item')) {
+          const cid = await enqueueForcedItemClose(boardItem.id)
+          if (cid !== null) shield.add(cid)
+        } else {
+          console.warn(`resolveConflict: ${link.source} does not support close_item — local close NOT re-pushed for conflict ${conflictId}`)
+        }
+      } else if (!localClosed && (remote === null || remoteClosed)) {
+        if (caps.includes('reopen_item')) {
+          const rid = await enqueueForcedItemReopen(boardItem.id)
+          if (rid !== null) shield.add(rid)
+        } else {
+          console.warn(`resolveConflict: ${link.source} does not support reopen_item — local reopen NOT re-pushed for conflict ${conflictId}`)
+        }
+      }
+    }
+
+    // Cancel AFTER the fresh ops are in — they are shielded so they can't cancel
+    // themselves; only the OLD parked failed/conflicted ops are swept.
+    cancelledOps = cancelOps(link.id, ['failed', 'conflicted'], shield)
   }
 
   const resolutionLabel = resolution === 'dismiss' ? 'dismissed' : resolution
@@ -299,15 +360,15 @@ export async function resolveConflict(
 
 // Cancel this link's mutation_queue rows in the given statuses so they stop
 // counting as local divergence (UNRESOLVED_OP_STATUSES). Returns the count.
-// `exceptOpId` shields a just-enqueued op from its own sweep.
-function cancelOps(remoteLinkId: string, statuses: string[], exceptOpId?: string): number {
+// `exceptOpIds` shields just-enqueued ops from their own sweep.
+function cancelOps(remoteLinkId: string, statuses: string[], exceptOpIds: Set<string> = new Set()): number {
   const db = getDb()
   const rows = db
     .select({ id: mutationQueue.id, opId: mutationQueue.opId })
     .from(mutationQueue)
     .where(and(eq(mutationQueue.remoteLinkId, remoteLinkId), inArray(mutationQueue.status, statuses)))
     .all()
-  const ids = rows.filter((r) => r.opId !== exceptOpId).map((r) => r.id)
+  const ids = rows.filter((r) => !exceptOpIds.has(r.opId)).map((r) => r.id)
   if (ids.length === 0) return 0
   db.update(mutationQueue)
     .set({ status: 'cancelled', updatedAt: new Date().toISOString() })

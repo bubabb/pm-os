@@ -5,6 +5,13 @@ import { startServer, stopServer } from './server'
 import { startSyncScheduler, stopSyncScheduler } from './scheduler/sync-scheduler'
 import { startPushWorker, stopPushWorker } from './sync/push-worker'
 
+// The Electron desktop app is a trusted local context and (Phase 1) ships without
+// real OAuth, so enable the dev-stub sign-in by default here. A bare headless server
+// stays gated: it only allows dev sign-in when the operator sets CREARE_DEV_AUTH=1
+// explicitly (the `pnpm server`/`pnpm creare` scripts do). Set before startServer so
+// the auth routes see it.
+process.env['CREARE_DEV_AUTH'] ??= '1'
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1440,

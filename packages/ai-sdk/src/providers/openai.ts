@@ -12,7 +12,11 @@ function calcCostCents(model: string, inputTokens: number, outputTokens: number)
   const pricing = PRICING[model] ?? PRICING['gpt-4o']!
   const inputCents  = (inputTokens  / 1_000_000) * pricing.inputCentsPerMtok
   const outputCents = (outputTokens / 1_000_000) * pricing.outputCentsPerMtok
-  return Math.ceil(inputCents + outputCents)
+  // Rounded (not ceil'd) to the nearest cent — cost_cents is an integer column, so
+  // sub-cent precision is inherently lost here. Rounding halves the systematic
+  // over-reporting bias that Math.ceil introduced; true sub-cent accuracy would
+  // require a schema change to a micro-cents unit.
+  return Math.round(inputCents + outputCents)
 }
 
 export async function completeOpenAI(
