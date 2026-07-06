@@ -25,16 +25,21 @@ const publicUserColumns = {
 // `<...>@pmos.local` always satisfies this.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-// Synthesizes a deterministic email local-part for an owner with no supplied
-// email, so the SAME name always maps to the SAME email (idempotent reuse). Names
-// with alphanumerics get a readable `<slug>`; names without any (CJK, punctuation,
-// etc.) get `user-<hash>` of the normalized name so DISTINCT names never merge
-// onto one shared `user@pmos.local`.
+// Synthesizes a deterministic, INJECTIVE email local-part for an owner with no
+// supplied email. The SAME name always maps to the SAME email (idempotent reuse);
+// any two DISTINCT trimmed-lowercased names map to DISTINCT emails so they never
+// merge onto one shared row. Readability is kept — a readable `<slug>` prefix when
+// the name has alphanumerics — but a short stable hash of the FULL normalized name
+// is always appended so names that reduce to the same slug (`"Bruna V."` vs
+// `"Bruna-V"` vs `"Bruna  V"` all slugify to `bruna-v`) stay distinct. Names with
+// no alphanumerics (CJK, punctuation, etc.) fall back to `user-<hash>`. The result
+// stays well under the 320-char email limit (slug ≤ NAME_MAX_LENGTH + 9 + domain).
 function synthEmailLocal(name: string): string {
   const normalized = name.trim().toLowerCase()
+  const hash = createHash('sha1').update(normalized).digest('hex')
   const slug = normalized.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-  if (slug.length > 0) return slug
-  return `user-${createHash('sha1').update(normalized).digest('hex').slice(0, 10)}`
+  if (slug.length > 0) return `${slug}-${hash.slice(0, 8)}`
+  return `user-${hash.slice(0, 10)}`
 }
 
 const createUserSchema = {
@@ -103,16 +108,19 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
       }
       const email = provided.length > 0 ? provided : `${synthEmailLocal(name)}@pmos.local`
 
-      // email is UNIQUE — reuse an existing row so provisioning is idempotent.
-      // Projected columns only (match GET /users — never leak avatarUrl/timestamps).
-      const [existing] = await db.select(publicUserColumns).from(users).where(eq(users.email, email)).limit(1)
-      if (existing) return existing
-
-      const [created] = await db
+      // Atomic idempotent provision. email is UNIQUE, so INSERT ... ON CONFLICT
+      // (email) DO NOTHING either creates the row or no-ops when it already exists;
+      // the follow-up SELECT then returns that one row either way. This collapses
+      // the old check-then-insert TOCTOU into a single atomic write + deterministic
+      // read, so concurrent duplicate POSTs can never create two rows regardless of
+      // driver or interleaving. Projected columns only (match GET /users — never
+      // leak avatarUrl/timestamps).
+      await db
         .insert(users)
         .values({ id: generateId(), name, email, role: 'engineer' })
-        .returning(publicUserColumns)
-      return created
+        .onConflictDoNothing({ target: users.email })
+      const [user] = await db.select(publicUserColumns).from(users).where(eq(users.email, email)).limit(1)
+      return user
     },
   )
 
