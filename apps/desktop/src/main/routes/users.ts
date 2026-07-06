@@ -1,8 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
+import { createHash } from 'crypto'
 import { getDb, users } from '@pm-os/database'
 import { generateId } from '@pm-os/shared'
 import { eq } from 'drizzle-orm'
-import { requireAuth } from '../auth'
+import { requireAuth, requireRole } from '../auth'
 import type { AuthenticatedRequest } from '../auth'
 
 interface PatchMeBody { name?: string; avatarUrl?: string | null }
@@ -11,12 +12,29 @@ interface CreateUserBody { name: string; email?: string }
 const EMAIL_MAX_LENGTH = 320
 const NAME_MAX_LENGTH = 120
 
-// Turns a freeform owner/display name into a deterministic local-part so the same
-// owner always synthesizes the same email (→ idempotent provisioning). Falls back
-// to 'user' when the name has no usable characters.
-function slugifyEmailLocal(name: string): string {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-  return slug.length > 0 ? slug : 'user'
+// Public projection of a user — the ONLY columns any /users route returns.
+// Deliberately omits avatarUrl/createdAt/updatedAt so GET and POST leak nothing extra.
+const publicUserColumns = {
+  id: users.id,
+  name: users.name,
+  email: users.email,
+  role: users.role,
+} as const
+
+// Deliberately permissive; just rejects the obviously-malformed. The synthesized
+// `<...>@pmos.local` always satisfies this.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// Synthesizes a deterministic email local-part for an owner with no supplied
+// email, so the SAME name always maps to the SAME email (idempotent reuse). Names
+// with alphanumerics get a readable `<slug>`; names without any (CJK, punctuation,
+// etc.) get `user-<hash>` of the normalized name so DISTINCT names never merge
+// onto one shared `user@pmos.local`.
+function synthEmailLocal(name: string): string {
+  const normalized = name.trim().toLowerCase()
+  const slug = normalized.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  if (slug.length > 0) return slug
+  return `user-${createHash('sha1').update(normalized).digest('hex').slice(0, 10)}`
 }
 
 const createUserSchema = {
@@ -33,8 +51,9 @@ const createUserSchema = {
 } as const
 
 // Framework-level guard (defense-in-depth atop the explicit whitelist below):
-// additionalProperties:false rejects unknown keys (role/email/id → 400) and the
-// types reject a null/!string name before it can reach the DB.
+// Fastify's ajv runs with removeAdditional:true, so additionalProperties:false
+// STRIPS unknown keys (role/id) silently before the handler — they never reach
+// the DB — and the types reject a null/!string name.
 const patchMeSchema = {
   body: {
     type: 'object',
@@ -56,34 +75,43 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
 
   // List the team. Pm.Os is a local, single-tenant tool, so any authenticated
   // user may see the member roster — this is what lets the CLI resolve a task's
-  // freeform `owner` to a real user (assigneeId).
+  // freeform `owner` to a real user (assigneeId). Ordered by createdAt so the
+  // CLI's "first writer wins" name-match is a real, stable contract (not
+  // SQLite's unspecified scan order).
   app.get('/users', { preHandler: requireAuth }, async () => {
-    return getDb()
-      .select({ id: users.id, name: users.name, email: users.email, role: users.role })
-      .from(users)
+    return getDb().select(publicUserColumns).from(users).orderBy(users.createdAt)
   })
 
-  // Provision a user by name (+ optional email). Idempotent: if the email (given
-  // or synthesized as <slug>@pmos.local) already exists, the existing user is
-  // returned rather than creating a duplicate. Used by `tasks import
-  // --create-assignees` to materialize owners that don't match an existing user.
+  // Provision a user by name (+ optional email). Admin-gated — creating users is
+  // an administrative action (the dev-stub/OAuth flows both mint admins, so the
+  // CLI keeps working). Idempotent: if the email (given or synthesized as
+  // <slug>@pmos.local) already exists, the existing user is returned rather than
+  // creating a duplicate. Used by `tasks import --create-assignees`.
   app.post<{ Body: CreateUserBody }>(
     '/users',
-    { preHandler: requireAuth, schema: createUserSchema },
-    async (request: FastifyRequest<{ Body: CreateUserBody }>) => {
+    { preHandler: [requireAuth, requireRole('admin')], schema: createUserSchema },
+    async (request: FastifyRequest<{ Body: CreateUserBody }>, reply) => {
       const db = getDb()
+      // minLength:1 runs on the UNTRIMMED string, so a whitespace-only name slips
+      // through the schema — reject it here rather than persist a blank name.
       const name = request.body.name.trim()
-      const email = (request.body.email?.trim() ?? '').toLowerCase()
-        || `${slugifyEmailLocal(name)}@pmos.local`
+      if (name.length === 0) return reply.code(400).send({ error: 'name must not be blank' })
+
+      const provided = request.body.email?.trim().toLowerCase() ?? ''
+      if (provided.length > 0 && !EMAIL_RE.test(provided)) {
+        return reply.code(400).send({ error: 'email is not a valid address' })
+      }
+      const email = provided.length > 0 ? provided : `${synthEmailLocal(name)}@pmos.local`
 
       // email is UNIQUE — reuse an existing row so provisioning is idempotent.
-      const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1)
+      // Projected columns only (match GET /users — never leak avatarUrl/timestamps).
+      const [existing] = await db.select(publicUserColumns).from(users).where(eq(users.email, email)).limit(1)
       if (existing) return existing
 
       const [created] = await db
         .insert(users)
         .values({ id: generateId(), name, email, role: 'engineer' })
-        .returning()
+        .returning(publicUserColumns)
       return created
     },
   )
