@@ -5,6 +5,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "DIR=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; [ -x \"$DIR/.claude/hooks/grounding.sh\" ] && \"$DIR/.claude/hooks/grounding.sh\" || true",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "DIR=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; p=$(jq -r '.prompt // empty'); printf '%s' \"$p\" | grep -qiw 'deepreview' && jq -n --rawfile ctx \"$DIR/.claude/review-methodology.md\" '{hookSpecificOutput:{hookEventName:\"UserPromptSubmit\",additionalContext:$ctx}}' 2>/dev/null || true",
             "timeout": 5
           },
