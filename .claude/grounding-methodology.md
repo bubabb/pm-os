@@ -28,6 +28,25 @@ real output — before asserting a cause. Reading the source and inferring is pr
 wrong answers are produced. If the artefact cannot be reached, that is a COULD NOT VERIFY, not a
 licence to guess.
 
+## 3b. CHECK PROVIDER STATUS BEFORE DIAGNOSING INFRASTRUCTURE
+
+A deploy, build, API or webhook failure has an EXTERNAL cause more often than a repo one. Check the
+provider's status page FIRST — before reading configuration, credentials or code:
+
+    curl -s https://www.githubstatus.com/api/v2/status.json | jq -r .status.description
+    curl -s https://status.render.com/api/v2/status.json    | jq -r .status.description
+    # and the detail: .../api/v2/incidents/unresolved.json
+
+Most vendors run Statuspage and expose `/api/v2/status.json`. One command settles whether the fault
+is yours at all. Then CORRELATE: does the first failure fall inside the incident window, and did the
+last success fall outside it?
+
+Earned the hard way. A deploy failing with `could not read Username` produced FIVE wrong causal
+theories from repo artefacts — missing app install, a repo transfer, credential binding, wrong
+account identity, a vendor bug — while the provider's own status page said verbatim that a GitHub
+outage was causing deploy authentication failures. The owner found it; the session did not. "Diagnose
+from run data" includes the STATE OF SERVICES YOU DEPEND ON, not just your own artefacts.
+
 ## 4. NEVER VALIDATE ON DATA YOU AUTHORED
 
 A fixture written to contain the answer tests the test, not the fix. Validate against real stored
