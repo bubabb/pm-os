@@ -37,7 +37,7 @@ out=""
 # pushed the total past the cap and the preferences — the one section that must never be missed —
 # were what got cut. Priority order under pressure: preferences > memory DB > PROGRESS > OPEN.
 PROGRESS_BUDGET=2000
-OPEN_BUDGET=1600
+OPEN_BUDGET=2600
 GLOBAL_BUDGET=500
 
 # Trim stdin to a budget on a line boundary; append a pointer when anything was dropped.

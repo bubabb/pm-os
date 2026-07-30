@@ -12,6 +12,17 @@ current state in `PROGRESS.md`. Format: `- [opened] what is open → the exact n
   that block at every session start. The hook is fixed (it now reads from the top of the file), but
   the stale section is still in the file → delete or relabel it.
 
+## Open — memory layer (added 2026-07-30)
+- [2026-07-30] **pm-os is off the template-sync path.** No `Makefile`, `.template-manifest`,
+  `.githooks` or `docs/sop`, so `make sync-template` cannot reach it and the memory scripts were
+  hand-copied → when `~/projects/_template` fixes them, re-copy `scripts/memory-*` and
+  `.claude/hooks/session-resume.sh` by hand, or adopt the template plumbing properly.
+- [2026-07-30] **Memory loads only when Claude starts in this directory** — `cd ~/projects/pm-os &&
+  claude`. Launching from `$HOME` silently gets the global store → no action, just do not assume
+  project memory is loaded when it is not announced.
+- [2026-07-30] **`agent/main/postgres-memory` unmerged** (2 commits, pushed, no app code touched)
+  → merge to `main` when the template's memory evals exist.
+
 ## Nothing else open
 
 No. As of 2026-07-06 the rename (Creare → Pm.Os) and the whole-project deepreview remediation are

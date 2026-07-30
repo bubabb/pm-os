@@ -5,11 +5,19 @@ This is the current-state pointer; the append-only detail log is
 `agent-state/agent-log.md`, per-domain state is `agent-state/domain-state/`,
 and cross-task handoffs are `agent-state/handoffs/`.
 
-**Updated:** 2026-07-06
+**Updated:** 2026-07-30
 
 ---
 
 ## STATUS NOW
+- **[2026-07-30] Memory layer added — no application code changed.** pm-os now has its own Postgres
+  memory database (`memory_pm_os`, isolated per project) indexing 6 handoffs · 42 session logs ·
+  10 agent-log entries. Use `npm run memory:recall` / `memory:check` / `memory:sync`.
+  **It loads only when Claude is launched from this directory** (`cd ~/projects/pm-os && claude`);
+  from `$HOME` you get the global store instead, and session start now says so. This repo is off
+  the `make sync-template` path, so memory-script fixes in `~/projects/_template` must be re-copied
+  by hand. Branch `agent/main/postgres-memory`, pushed, **unmerged**. Log:
+  `docs/sessions/session-2026-07-30-postgres-memory.md`.
 - **RESUME HERE (2026-07-06) — ELECTRON REMOVED, headless-only.** Deleted `electron`/`electron-builder`/
   `electron-vite`/`electron-updater` + `main/index.ts`, `preload/`, `electron.vite.config.ts`,
   `electron-builder.yml`, `e2e/`, the desktop-launcher scripts, and `electron-optional.ts`. Gutted the
