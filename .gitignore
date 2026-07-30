@@ -55,3 +55,7 @@ coverage/
 # Playwright
 playwright-report/
 test-results/
+
+# ── Agent memory ───────────────────────────────────────────
+# Local event spool: verbatim requests/diagnoses awaiting flush. Transient, never committed.
+.memory-spool.jsonl

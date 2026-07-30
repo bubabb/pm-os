@@ -20,6 +20,30 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "DIR=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; [ -x \"$DIR/.claude/hooks/session-resume.sh\" ] && \"$DIR/.claude/hooks/session-resume.sh\" || true",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "DIR=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; [ -x \"$DIR/scripts/memory-sync.py\" ] && command -v python3 >/dev/null 2>&1 && timeout 25 python3 \"$DIR/scripts/memory-sync.py\" >/dev/null 2>&1 || true",
+            "timeout": 30
+          }
+        ]
+      }
     ]
-  }
+  },
+  "autoMemoryDirectory": "~/Claude Memory/pm-os/memory"
 }

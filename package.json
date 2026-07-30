@@ -17,7 +17,12 @@
     "typecheck": "turbo run typecheck",
     "rebuild:sqlite:node": "node scripts/rebuild-better-sqlite3.mjs node",
     "check:auth": "node scripts/check-claude-cli-auth.mjs",
-    "clean": "turbo run clean && rm -rf node_modules"
+    "clean": "turbo run clean && rm -rf node_modules",
+    "memory:sync": "python3 scripts/memory-sync.py",
+    "memory:check": "python3 scripts/memory-sync.py --check",
+    "memory:recall": "python3 scripts/memory-recall.py",
+    "memory:provision": "bash scripts/memory-provision.sh --project",
+    "memory:status": "bash scripts/memory-provision.sh --status"
   },
   "devDependencies": {
     "turbo": "^2.0.0",
