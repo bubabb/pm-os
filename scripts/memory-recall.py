@@ -41,10 +41,10 @@ def identity() -> tuple[str, str] | None:
 
 def dsn(slug: str) -> str | None:
     env = Path(os.environ.get("MEMORY_ADMIN_ENV", Path.home() / ".config/agent-memory/admin.env"))
-    secret = env.parent / "projects" / f"{slug}.env"
-    if not secret.is_file():
+    cred_path = env.parent / "projects" / f"{slug}.env"
+    if not cred_path.is_file():
         return None
-    for line in secret.read_text().splitlines():
+    for line in cred_path.read_text().splitlines():
         if line.startswith("MEMORY_DSN="):
             return line.split("=", 1)[1].strip()
     return None
@@ -186,6 +186,24 @@ def main() -> int:
                 emit()
 
     block = "\n".join(out).rstrip()
+
+    # BUDGET — this block shares a hard ceiling with the resume state, and it GROWS while the rest
+    # does not. PROGRESS/OPEN are already trimmed to fixed budgets, but the sections above scale
+    # with accumulated data: 4 sections x LIMIT rows x ~120 chars is ~3KB once a project has real
+    # unresolved runs and findings. Measured 2026-07-30: scout's hook emitted 8,719 of an 8,800
+    # cap with this block at ~220 chars — i.e. 81 chars of headroom. Unbudgeted, this block would
+    # push the hook past the ~9KB the harness delivers and start silently costing the resume state
+    # its room. Capping it HERE keeps the pressure on the newest, least-critical content and says
+    # what it dropped. `make memory-recall` always prints the full block.
+    cap = int(os.environ.get("MEMORY_RECALL_CAP", "1800"))
+    if not as_json and os.environ.get("MEMORY_RECALL_FULL"):
+        cap = 0                                   # `make memory-recall` shows everything
+    if cap and len(block) > cap:
+        kept = block[:cap].rsplit("\n", 1)[0]
+        dropped = block.count("\n") - kept.count("\n")
+        block = (f"{kept}\n\n[…memory block truncated at {cap} chars — {dropped} more line(s) not "
+                 f"shown, so this is NOT the full picture. Run `make memory-recall` for all of it.]")
+
     print(json.dumps({"context": block}) if as_json else block)
     return 0
 

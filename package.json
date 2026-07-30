@@ -20,7 +20,7 @@
     "clean": "turbo run clean && rm -rf node_modules",
     "memory:sync": "python3 scripts/memory-sync.py",
     "memory:check": "python3 scripts/memory-sync.py --check",
-    "memory:recall": "python3 scripts/memory-recall.py",
+    "memory:recall": "MEMORY_RECALL_FULL=1 python3 scripts/memory-recall.py",
     "memory:provision": "bash scripts/memory-provision.sh --project",
     "memory:status": "bash scripts/memory-provision.sh --status"
   },

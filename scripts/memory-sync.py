@@ -59,13 +59,13 @@ def project_identity() -> tuple[str, str]:
 
 def dsn(slug: str) -> str:
     env = Path(os.environ.get("MEMORY_ADMIN_ENV", Path.home() / ".config/agent-memory/admin.env"))
-    secret = env.parent / "projects" / f"{slug}.env"
-    if not secret.is_file():
-        die(f"no credentials at {secret} — run scripts/memory-provision.sh --project")
-    for line in secret.read_text().splitlines():
+    cred_path = env.parent / "projects" / f"{slug}.env"
+    if not cred_path.is_file():
+        die(f"no credentials at {cred_path} — run scripts/memory-provision.sh --project")
+    for line in cred_path.read_text().splitlines():
         if line.startswith("MEMORY_DSN="):
             return line.split("=", 1)[1].strip()
-    die(f"no MEMORY_DSN in {secret}")
+    die(f"no MEMORY_DSN in {cred_path}")
     return ""
 
 

@@ -27,7 +27,8 @@ note() { echo "  $*" >&2; }
 [ -r "$ADMIN_ENV" ] || die "no credentials at $ADMIN_ENV"
 # shellcheck disable=SC1090
 set -a; . "$ADMIN_ENV"; set +a
-: "${MEMORY_PROJECT_REF:?missing MEMORY_PROJECT_REF}" "${MEMORY_DB_PASSWORD:?missing MEMORY_DB_PASSWORD}"
+[ -n "${MEMORY_PROJECT_REF:-}" ] || die "admin.env has no MEMORY_PROJECT_REF"
+[ -n "${MEMORY_DB_PASSWORD:-}" ] || die "admin.env has no MEMORY_DB_PASSWORD"
 POOLER="${MEMORY_POOLER_HOST:?missing MEMORY_POOLER_HOST}"
 ADMIN_PORT="${MEMORY_ADMIN_PORT:-5432}"
 POOL_PORT="${MEMORY_POOL_PORT:-6543}"
@@ -89,12 +90,12 @@ ensure_global() {
 provision_project() {
   local idfile="$ROOT/.project-id"
   [ -r "$idfile" ] || die "no .project-id in $ROOT — run scripts/project-id.sh --ensure first"
-  local pid slug db role pw secret
+  local pid slug db role pw cred_path
   pid="$(sed -n 's/^project_id=//p' "$idfile" | head -1)"
   slug="$(sed -n 's/^slug=//p' "$idfile" | head -1)"
   [ -n "$pid" ] && [ -n "$slug" ] || die "malformed .project-id"
   db="$(dbname_for "$slug")"; role="$(rolename_for "$slug")"
-  secret="$SECRET_DIR/$slug.env"
+  cred_path="$SECRET_DIR/$slug.env"
   note "project $slug ($pid) -> database $db, role $role"
 
   ensure_global
@@ -108,14 +109,14 @@ provision_project() {
   mkdir -p "$SECRET_DIR"; chmod 700 "$SECRET_DIR"
   if role_exists "$role"; then
     note "role $role exists"
-    [ -r "$secret" ] || note "WARNING: role exists but $secret is missing — the password is unrecoverable; use --deprovision then re-provision to reset it"
+    [ -r "$cred_path" ] || note "WARNING: role exists but $cred_path is missing — the password is unrecoverable; use --deprovision then re-provision to reset it"
   else
     pw="$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
     note "creating role $role"
     psq postgres -qc "CREATE ROLE \"$role\" LOGIN PASSWORD '$pw';" >/dev/null
     umask 077; printf '# %s memory database credentials. Generated %s. Do NOT commit.\nMEMORY_DSN=postgresql://%s.%s:%s@%s:%s/%s\nMEMORY_ROLE=%s\nMEMORY_DB=%s\nPROJECT_ID=%s\n' \
-      "$slug" "$(date -u +%F)" "$role" "$MEMORY_PROJECT_REF" "$pw" "$POOLER" "$POOL_PORT" "$db" "$role" "$db" "$pid" > "$secret"
-    chmod 600 "$secret"; note "credentials -> $secret"
+      "$slug" "$(date -u +%F)" "$role" "$MEMORY_PROJECT_REF" "$pw" "$POOLER" "$POOL_PORT" "$db" "$role" "$db" "$pid" > "$cred_path"
+    chmod 600 "$cred_path"; note "credentials -> $cred_path"
   fi
 
   # The admin role on Supabase is NOT a superuser (rolsuper=f, measured 2026-07-30), so it cannot

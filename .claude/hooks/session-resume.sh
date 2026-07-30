@@ -36,9 +36,9 @@ out=""
 # ~2KB preview (measured). With the standing-preference files now carried in full, the old budgets
 # pushed the total past the cap and the preferences — the one section that must never be missed —
 # were what got cut. Priority order under pressure: preferences > memory DB > PROGRESS > OPEN.
-PROGRESS_BUDGET=2500
-OPEN_BUDGET=2000
-GLOBAL_BUDGET=800
+PROGRESS_BUDGET=2000
+OPEN_BUDGET=1600
+GLOBAL_BUDGET=500
 
 # Trim stdin to a budget on a line boundary; append a pointer when anything was dropped.
 # $1 = budget, $2 = where to look for the rest.
@@ -163,7 +163,7 @@ fi
 # exits 0 in every failure path and prints a LOUD banner rather than silence, because a store that
 # is unreachable must not read as a store that is empty.
 if [ -x "$DIR/scripts/memory-recall.py" ] && command -v python3 >/dev/null 2>&1; then
-  mdb=$(MEMORY_RECALL_TIMEOUT=4 timeout 7 python3 "$DIR/scripts/memory-recall.py" 2>/dev/null)
+  mdb=$(MEMORY_RECALL_TIMEOUT=4 MEMORY_RECALL_CAP=${MEMORY_RECALL_CAP:-1200} timeout 7 python3 "$DIR/scripts/memory-recall.py" 2>/dev/null)
   if [ -n "$mdb" ]; then out="${out}${out:+$'\n\n'}${mdb}"
   else
     out="${out}${out:+$'\n\n'}## Memory
@@ -219,7 +219,8 @@ fi
 MEM_DIR="$HOME/Claude Memory/-home-sudosu/memory"
 if [ -d "$MEM_DIR" ]; then
   full=$(find "$MEM_DIR" -maxdepth 1 \( -name 'feedback_*.md' -o -name 'user_*.md' \) -print0 2>/dev/null \
-         | sort -z | while IFS= read -r -d '' f; do printf '\n──── %s ────\n' "$(basename "$f")"; cat "$f"; done)
+         | sort -z | while IFS= read -r -d '' f; do printf '\n──── %s ────\n' "$(basename "$f")"; \
+              awk 'NR==1&&/^---[[:space:]]*$/{fm=1;next} fm&&/^---[[:space:]]*$/{fm=0;next} !fm' "$f"; done)
   idx=$(find "$MEM_DIR" -maxdepth 1 -name '*.md' ! -name 'MEMORY.md' \
              ! -name 'feedback_*.md' ! -name 'user_*.md' -print0 2>/dev/null \
         | sort -z | while IFS= read -r -d '' f; do
@@ -248,7 +249,7 @@ fi
 # So the cap is enforced HERE, once, over the whole payload, and it ANNOUNCES what it dropped.
 # A loud truncation is recoverable; a silent one is how a session confidently proceeds on a
 # quarter of its state.
-HOOK_CAP=${HOOK_CAP:-8800}
+HOOK_CAP=${HOOK_CAP:-8400}
 if [ "${#out}" -gt "$HOOK_CAP" ]; then
   kept=$(printf '%s' "$out" | head -c "$HOOK_CAP" | sed '$d')
   out="${kept}
