@@ -249,7 +249,12 @@ fi
 # So the cap is enforced HERE, once, over the whole payload, and it ANNOUNCES what it dropped.
 # A loud truncation is recoverable; a silent one is how a session confidently proceeds on a
 # quarter of its state.
-HOOK_CAP=${HOOK_CAP:-8400}
+# 8800, not 8400: the session records written on 2026-07-30 (OPEN.md items, PROGRESS notes, the
+# global day file) took the payload to 8,671-8,726 natural. 8,800 is still BELOW the 9,081 that was
+# measured arriving whole, so this is inside verified-safe territory rather than a guess — but the
+# margin to the unknown true ceiling is now ~280 chars. THE BUDGET IS FULL. Anything added from here
+# displaces something else; prune a ledger rather than raising this again.
+HOOK_CAP=${HOOK_CAP:-8800}
 if [ "${#out}" -gt "$HOOK_CAP" ]; then
   kept=$(printf '%s' "$out" | head -c "$HOOK_CAP" | sed '$d')
   out="${kept}
